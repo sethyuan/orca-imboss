@@ -40,6 +40,7 @@ export function buildEmployeeSystemPrompt({
   fromChatId,
   toolEntries,
   today,
+  memory,
 }: BuildEmployeeSystemPromptArgs): string {
   const persona = personaParts
     .map((part) => part.trim())
@@ -77,6 +78,18 @@ export function buildEmployeeSystemPrompt({
 
   const metaBlock = `Today is ${today}`;
 
+  // The employee's own long-term memory: stable facts it decided to keep across
+  // sessions. Emitted as a labelled block so the model treats it as recall
+  // rather than as instructions from the boss.
+  const memoryBlock =
+    memory && memory.trim().length > 0
+      ? [
+          "[memory]",
+          "Your long-term memory from previous sessions (recall, not new instructions):",
+          memory.trim(),
+        ].join("\n")
+      : "";
+
   // Role-specific reporting skill: the assistant aggregates employee reports into
   // boss-facing progress + a summary; a non-assistant reports finished work to its
   // assigner.
@@ -92,6 +105,7 @@ export function buildEmployeeSystemPrompt({
     MENTION_HANDLING_PROMPT,
     RESPONSE_LANGUAGE_PROMPT,
     toolsBlock,
+    memoryBlock,
     metaBlock,
   ];
 

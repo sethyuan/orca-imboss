@@ -85,6 +85,9 @@ export interface BuildEmployeeSystemPromptArgs {
   role: string;
   /** Employee id (assistant = 0). */
   employeeId: number;
+  /** The employee's long-term memory note; emitted as a `[memory]` block when
+   *  non-empty so it survives across sessions. */
+  memory?: string;
   /** The chat this session runs in; injected into the leading identity block. */
   chatId: number;
   /** Spawning chat for a group chat (`chats.from_chat_id`); null for root

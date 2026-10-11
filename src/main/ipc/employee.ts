@@ -4,6 +4,7 @@ import { disposeForEmployee } from "../agent/session-queue";
 import { deleteAvatarFiles, saveAvatar } from "../avatars";
 import * as cron from "../cron";
 import * as dbEmployees from "../db/employees";
+import { getEmployeeMemory, setEmployeeMemory } from "../employee-memory";
 import { listByEmployee, unlinkSessionFile } from "../db/sessions";
 import { sendToRenderer } from "../notifications";
 import { assertInteger, assertString, parsePageQuery } from "./helpers";
@@ -15,6 +16,14 @@ function notifyEmployeesChanged(ids: number[]): void {
 
 export function registerEmployeeHandlers(): void {
   ipcMain.handle("employees:list", () => dbEmployees.listEmployees());
+
+  // Long-term memory: a per-employee note injected into the session prompt.
+  ipcMain.handle("employees:getMemory", (_e, id: number) =>
+    getEmployeeMemory(assertInteger(id, "id")),
+  );
+  ipcMain.handle("employees:setMemory", (_e, id: number, text: string) =>
+    setEmployeeMemory(assertInteger(id, "id"), assertString(text, "text")),
+  );
 
   ipcMain.handle("employees:listPage", (_event, page: unknown) =>
     dbEmployees.listEmployeesPage(parsePageQuery(page)),

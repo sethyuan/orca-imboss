@@ -92,3 +92,81 @@
   font-size: var(--imb-text-sm);
   margin: var(--imb-space-2) 0;
 }
+
+/* Quick entries under the employee card: memory / usage / scheduled tasks. */
+.imb-entry-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--imb-border-soft);
+  border-radius: var(--imb-radius-lg);
+  overflow: hidden;
+  margin-bottom: var(--imb-space-4);
+}
+
+.imb-entry-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--imb-border-soft);
+  color: var(--imb-text-2);
+  font-size: var(--imb-text-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--imb-motion-fast) var(--imb-ease-standard);
+}
+
+.imb-entry-row:last-child {
+  border-bottom: none;
+}
+
+.imb-entry-row:hover {
+  background: color-mix(in oklch, var(--imb-accent) 6%, transparent);
+}
+
+.imb-entry-row:focus-visible {
+  outline: none;
+  box-shadow: var(--imb-focus-ring);
+}
+
+.imb-entry-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--imb-muted);
+}
+
+.imb-entry-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.imb-entry-label {
+  flex: 1;
+  min-width: 0;
+  color: var(--imb-fg);
+  font-weight: 550;
+}
+
+.imb-entry-value {
+  flex: none;
+  max-width: 55%;
+  font-size: var(--imb-text-xs);
+  color: var(--imb-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.imb-entry-chevron {
+  flex: none;
+  color: var(--imb-muted);
+  transform: rotate(-90deg);
+}
+
+.imb-memory-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-2);
+}

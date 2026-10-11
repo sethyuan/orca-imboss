@@ -40,6 +40,7 @@ import {
 } from "./builtin-skills";
 import { createTeamToolDefinitions } from "./builtin-tools";
 import { buildEmployeeSystemPrompt } from "./employee-prompt";
+import { getEmployeeMemory } from "../employee-memory";
 import { toMcpServerEntries } from "./mcp";
 import { getModelRuntime, resolveModel } from "./model-runtime";
 import { loadPiSdk, type PiSdk } from "./pi-sdk";
@@ -412,6 +413,7 @@ export class AgentSession {
         fromChatId: spec.fromChatId,
         toolEntries,
         today,
+        memory: getEmployeeMemory(spec.employeeId),
       });
 
     // Anchor `<project_context>` to the app's `~/.imboss/agent` dir only,
