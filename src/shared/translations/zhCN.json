@@ -303,5 +303,9 @@
   "Working directory": "工作目录",
   "XHigh": "很高",
   "You're up to date.": "已是最新版本。",
-  "Zoom": "缩放"
+  "Zoom": "缩放",
+  "${count} characters": "${count} 字",
+  "Empty": "空",
+  "Memory": "记忆",
+  "What ${name} remembers across sessions.": "${name} 跨会话记住的东西。"
 }

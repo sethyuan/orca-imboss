@@ -144,6 +144,11 @@ const api = {
      *  `imb_set_employees`), so the renderer cache can re-fetch. */
     onChanged: (cb: (payload: { ids: number[] }) => void) =>
       on<{ ids: number[] }>("employees:changed", cb),
+    /** Long-term memory: a per-employee note injected into the session prompt. */
+    getMemory: (id: number) =>
+      ipcRenderer.invoke("employees:getMemory", id) as Promise<string>,
+    setMemory: (id: number, text: string) =>
+      ipcRenderer.invoke("employees:setMemory", id, text) as Promise<string>,
   },
 
   cron: {

@@ -217,6 +217,16 @@ export function IconChevronDown(props: IconProps): React.JSX.Element {
   );
 }
 
+/** "Open" affordance: an arrow leaving its box (used by the progress card). */
+export function IconOpen(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)} strokeWidth={1.8}>
+      <path d="M7 17 17 7" />
+      <path d="M9 7h8v8" />
+    </svg>
+  );
+}
+
 export function IconX(props: IconProps): React.JSX.Element {
   return (
     <svg {...base(props)} strokeWidth={1.8}>
@@ -263,3 +273,4 @@ export function IconMemory(props: IconProps): React.JSX.Element {
       <path d="M9 13h5.5" />
     </svg>
   );
+}
