@@ -71,7 +71,7 @@ export function registerMessageHandlers(): void {
     "messages:revealAttachment",
     async (_event, messageId: unknown, index: unknown) => {
       const attachment = resolveAttachment(messageId, index);
-      const path = attachments[safeIndex].path;
+      const path = attachment.path;
       if (!path) throw new Error("Attachment location is unavailable.");
       if (!isAbsolute(path)) {
         throw new Error("Attachment location is invalid.");
@@ -99,7 +99,7 @@ export function registerMessageHandlers(): void {
 function resolveAttachment(
   messageId: unknown,
   index: unknown,
-): { name: string; type: string; path?: string } {
+): { name: string; type: string; path?: string; kind?: "file" | "folder" } {
   const safeId = assertInteger(messageId, "message id");
   const safeIndex = assertInteger(index, "attachment index");
   if (safeIndex < 0) {

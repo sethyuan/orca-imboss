@@ -9,10 +9,8 @@ import { getModelRuntime, resolveModel } from "./model-runtime";
  *
  * When the first user message of a chat is processed (`chat:send`) and the
  * chat has no title yet, a one-shot completion proposes a short title from
- * that message. The call is fire-and-forget: it never blocks or fails the
- * send itself. On any failure the chat simply stays untitled — the
- * `title === ""` guard makes the *next* message retry generation, so no
- * explicit retry bookkeeping is needed.
+ * that message. If generation fails or returns empty, falls back to a snippet
+ * of the user message so chats never linger untitled.
  *
  * A per-chat in-flight set prevents duplicate runs when the user sends a
  * burst of messages before the first generation resolves.
@@ -50,24 +48,36 @@ export function maybeGenerateChatTitle(
   });
 }
 
+/** First non-empty line of the message, condensed and capped, as a fallback title. */
+function deriveFallbackTitle(message: string): string | null {
+  const line = message
+    .split("\n")
+    .map((part) => part.trim())
+    .find((part) => part.length > 0);
+  if (!line) return null;
+  const cleaned = line.replace(/\s+/g, " ").trim();
+  if (cleaned.length === 0) return null;
+  return cleaned.length > 40 ? `${cleaned.slice(0, 40)}…` : cleaned;
+}
+
 async function generate(chatId: number, message: string): Promise<void> {
+  let title: string | null = null;
   try {
-    const title = await requestTitle(chatId, message);
-    if (title === null) return;
-    // The chat may have been renamed (or deleted) while the call was in
-    // flight — never clobber a title that appeared meanwhile.
-    const current = getChat(chatId);
-    if (!current || current.title.trim().length > 0) return;
-    updateChatTitle(chatId, title);
-    sendToRenderer("chats:changed", { chatId });
+    title = await requestTitle(chatId, message);
   } catch (err) {
-    // Stay untitled; the next message retries. The send itself already
-    // succeeded, so this is logged and swallowed.
     console.error(
       "[title-gen] failed to generate chat title:",
       err instanceof Error ? err.message : err,
     );
   }
+
+  const finalTitle = title ?? deriveFallbackTitle(message);
+  if (finalTitle === null) return;
+
+  const current = getChat(chatId);
+  if (!current || current.title.trim().length > 0) return;
+  updateChatTitle(chatId, finalTitle);
+  sendToRenderer("chats:changed", { chatId });
 }
 
 /**
@@ -82,8 +92,6 @@ async function requestTitle(
   const modelRuntime = await getModelRuntime();
   const model = resolveModel(modelRuntime, getEmployee(ASSISTANT_ID)?.modelId);
   if (!model) {
-    // Silent by design before: an empty snapshot left every chat untitled with
-    // nothing in the log. Say why instead.
     console.warn(
       `[title-gen] no model resolved for chat ${chatId} ` +
         `(available models: ${modelRuntime.getAvailableSnapshot().length})`,
