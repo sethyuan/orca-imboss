@@ -73,3 +73,73 @@
 .imb-chat-pinned {
   background: var(--imb-bg-2);
 }
+
+/* --- Header actions + in-conversation search --- */
+.imb-chat-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-1);
+  flex: none;
+}
+
+.imb-thread-search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--imb-border);
+  border-radius: var(--imb-radius-md);
+  background: var(--imb-bg);
+}
+
+.imb-thread-search .imb-icon {
+  color: var(--imb-muted);
+  flex: none;
+}
+
+.imb-thread-search-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  outline: none;
+  font: inherit;
+  font-size: var(--imb-text-sm);
+  color: var(--imb-fg);
+}
+
+.imb-thread-search-input::placeholder {
+  color: var(--imb-muted);
+}
+
+.imb-thread-search-count {
+  flex: none;
+  font-size: var(--imb-text-xs);
+  color: var(--imb-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.imb-flip {
+  transform: rotate(180deg);
+}
+
+/* The per-message wrapper is display:contents, so search hits ring its inner
+   element rather than the wrapper. */
+.imb-thread-item {
+  display: contents;
+}
+
+.imb-search-hit > * {
+  border-radius: var(--imb-radius-lg);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--imb-accent) 28%, transparent);
+  transition: box-shadow var(--imb-motion-fast) var(--imb-ease-standard);
+}
+
+.imb-search-hit-current > * {
+  box-shadow: 0 0 0 2px var(--imb-accent);
+}
