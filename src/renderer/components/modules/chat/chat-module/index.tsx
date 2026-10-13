@@ -18,6 +18,8 @@ import { Avatar } from "../../../avatar";
 import { Button } from "../../../button";
 import { ContextMenu, type ContextMenuState } from "../../../context-menu";
 import { EmployeeAvatar } from "../../../employee-avatar";
+import { IconButton } from "../../../icon-button";
+import { IconAssets } from "../../../icons";
 import { Input } from "../../../input";
 import { ItemList } from "../../../item-list";
 import { useMentionResolver } from "../../../markdown/use-mention";
@@ -30,6 +32,7 @@ import { pairAskAnswers } from "../ask-answer";
 import { ChatInputBar } from "../chat-input-bar";
 import { MessageItem } from "../message-item";
 import { formatChatTime, previewText } from "../relative-time";
+import { AssetsPanel } from "../../assets/assets-panel";
 import "../thread.css";
 import "./index.css";
 
@@ -86,6 +89,7 @@ export function ChatModule(): React.JSX.Element {
   );
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [assetsOpen, setAssetsOpen] = useState(false);
   // Optimistic header title for a just-committed rename. Needed because the
   // active list may be a search page that is not refreshed by `chats:changed`.
   const [titleOverride, setTitleOverride] = useState<{
@@ -609,6 +613,11 @@ export function ChatModule(): React.JSX.Element {
             {t(INTEGRATION_LABEL_KEYS[selected.source])}
           </span>
         )}
+        <div className="imb-chat-header-actions">
+          <IconButton label={t("Assets")} onClick={() => setAssetsOpen(true)}>
+            <IconAssets className="imb-icon" />
+          </IconButton>
+        </div>
       </div>
       <div className="imb-thread" ref={threadRef} onScroll={handleThreadScroll}>
         {visibleMessages.map((message) => (
@@ -632,6 +641,12 @@ export function ChatModule(): React.JSX.Element {
         focusToken={focusToken}
         onSend={handleSend}
       />
+      {assetsOpen && (
+        <AssetsPanel
+          chatId={selected.id}
+          onClose={() => setAssetsOpen(false)}
+        />
+      )}
     </>
   ) : null;
 

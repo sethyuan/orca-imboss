@@ -2,6 +2,10 @@ import { DEFAULT_LOCALE } from "@shared/constants/locales";
 import type {
   AgentSessionViewEntry,
   AgentStreamPayload,
+  AssetDetail,
+  AssetFilter,
+  AssetRef,
+  AssetSummary,
   Chat,
   ChatParticipantUpdate,
   ChatSummary,
@@ -10,6 +14,7 @@ import type {
   EmployeeDeleteResult,
   EmployeeInput,
   EmployeeSession,
+  HiddenAsset,
   InstalledSkill,
   IntegrationConfigPatch,
   IntegrationPlatform,
@@ -253,6 +258,49 @@ const api = {
         content,
         attachments,
       ) as Promise<Message>,
+  },
+
+  assets: {
+    /** Page through deduplicated attachments across all chats. */
+    list: (filter: AssetFilter, page: PageQuery) =>
+      ipcRenderer.invoke("assets:list", filter, page) as Promise<
+        PageResult<AssetSummary>
+      >,
+    /** One asset's summary plus live on-disk state. */
+    detail: (ref: AssetRef) =>
+      ipcRenderer.invoke("assets:detail", ref) as Promise<AssetDetail | null>,
+    /** Every occurrence of the same asset (same path), newest first. */
+    occurrences: (ref: AssetRef) =>
+      ipcRenderer.invoke("assets:occurrences", ref) as Promise<AssetSummary[]>,
+    /** Hide an asset globally (by its trusted locator). */
+    hide: (ref: AssetRef) =>
+      ipcRenderer.invoke("assets:hide", ref) as Promise<void>,
+    /** Restore a previously hidden path. */
+    unhide: (path: string) =>
+      ipcRenderer.invoke("assets:unhide", path) as Promise<void>,
+    /** List hidden paths, most recently hidden first. */
+    hidden: () => ipcRenderer.invoke("assets:hidden") as Promise<HiddenAsset[]>,
+    /** Read a small text/Markdown preview (null when missing or too large). */
+    textPreview: (ref: AssetRef) =>
+      ipcRenderer.invoke("assets:textPreview", ref) as Promise<string | null>,
+    /** Read raw bytes for image/PDF/audio/video preview (null when missing or too large). */
+    fileBytes: (ref: AssetRef) =>
+      ipcRenderer.invoke("assets:fileBytes", ref) as Promise<Uint8Array | null>,
+    /** Save one asset to a chosen location; returns the saved path or null. */
+    saveAs: (ref: AssetRef) =>
+      ipcRenderer.invoke("assets:saveAs", ref) as Promise<string | null>,
+    /** Zip several assets to a chosen location; returns the zip path or null. */
+    exportZip: (refs: AssetRef[]) =>
+      ipcRenderer.invoke("assets:exportZip", refs) as Promise<string | null>,
+    /** Open an asset with the OS default application. */
+    open: (ref: AssetRef) =>
+      ipcRenderer.invoke("assets:open", ref) as Promise<void>,
+    /** Move an asset's file to the OS trash and hide it. */
+    trash: (ref: AssetRef) =>
+      ipcRenderer.invoke("assets:trash", ref) as Promise<void>,
+    /** Fired after hide/unhide/trash so open views can refresh. */
+    onChanged: (cb: (payload: Record<string, never>) => void) =>
+      on<Record<string, never>>("assets:changed", cb),
   },
 
   agentSession: {

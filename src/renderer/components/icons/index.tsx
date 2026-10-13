@@ -108,6 +108,50 @@ export function IconChatProduct(props: IconProps): React.JSX.Element {
   );
 }
 
+/** Asset library: a folder holding stacked files. */
+export function IconAssets(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)} strokeWidth={1.7}>
+      <path d="M3.5 7a2 2 0 0 1 2-2h3.1l1.7 2h8.2a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z" />
+      <path d="M7.5 12.5h7" />
+      <path d="M7.5 15.5h4.5" />
+    </svg>
+  );
+}
+
+/** Archive category (zip/tar/…): a lidded box. */
+export function IconArchive(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)} strokeWidth={1.7}>
+      <rect x="3.5" y="4" width="17" height="5" rx="1.2" />
+      <path d="M5 9v9.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V9" />
+      <path d="M10 13h4" />
+    </svg>
+  );
+}
+
+/** Media category (audio/video): a play glyph in a disc. */
+export function IconMedia(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)} strokeWidth={1.7}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M10 8.5 16 12l-6 3.5Z" />
+    </svg>
+  );
+}
+
+/** Sheet category (csv/xls/…): a grid table. */
+export function IconSheet(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)} strokeWidth={1.7}>
+      <rect x="3.5" y="4" width="17" height="16" rx="1.6" />
+      <path d="M3.5 9.5h17" />
+      <path d="M9.5 9.5V20" />
+      <path d="M15 9.5V20" />
+    </svg>
+  );
+}
+
 export function IconGear(props: IconProps): React.JSX.Element {
   return (
     <svg {...base(props)}>

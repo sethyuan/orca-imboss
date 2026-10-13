@@ -1,0 +1,7 @@
+.imb-asset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--imb-space-2);
+  max-width: 320px;
+}

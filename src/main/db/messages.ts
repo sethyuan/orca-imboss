@@ -1,6 +1,6 @@
 import {
   MAX_ATTACHMENT_TOTAL,
-  MAX_USER_ATTACHMENTS,
+  MAX_MESSAGE_ATTACHMENTS,
 } from "@shared/constants/attachments";
 import type {
   AppendMessageOptions,
@@ -31,7 +31,7 @@ interface MessageRow {
 const MAX_CONTENT_LENGTH = 100_000;
 const MAX_KIND_LENGTH = 64;
 const MAX_STEPS = 64;
-const MAX_ATTACHMENTS = MAX_USER_ATTACHMENTS;
+const MAX_ATTACHMENTS = MAX_MESSAGE_ATTACHMENTS;
 const MAX_STEP_NAME_LENGTH = 256;
 const MAX_STEP_ROLE_LENGTH = 256;
 const MAX_ATTACH_NAME_LENGTH = 256;
@@ -386,11 +386,15 @@ function parseSteps(raw: string | null): MessageStep[] | null {
 }
 
 /**
- * Parse a stored attachments JSON. Stored values are never trusted: entries
- * are validated field by field and invalid ones dropped; `null` is stored as
- * null and only ever surfaces as `[]` when the column held a valid array.
+ * Parse the `attachments` column (an object-wrapped JSON payload). Stored
+ * values are never trusted: entries are validated field by field and invalid
+ * ones dropped; `null` is stored as null and only ever surfaces as `[]` when
+ * the column held a valid array. Exported so the asset library derives its
+ * rows from the same parsing rules.
  */
-function parseAttachments(raw: string | null): MessageAttachment[] | null {
+export function parseAttachments(
+  raw: string | null,
+): MessageAttachment[] | null {
   if (!raw) return null;
   const parsed = parseJsonObject(raw);
   const list = parsed["attachments"];

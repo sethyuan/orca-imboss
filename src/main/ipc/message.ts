@@ -1,8 +1,7 @@
 import { READ_CHAT_PROMPT } from "@shared/constants/prompts";
 import { ipcMain, shell } from "electron";
-import { existsSync } from "fs";
-import { isAbsolute } from "path";
 import { wakeAgent } from "../agent/session-queue";
+import { resolveAssetPath } from "../assets";
 import * as dbMessages from "../db/messages";
 import { assertInteger, assertObject, assertString } from "./helpers";
 
@@ -72,24 +71,7 @@ export function registerMessageHandlers(): void {
     (_event, messageId: unknown, index: unknown) => {
       const safeId = assertInteger(messageId, "message id");
       const safeIndex = assertInteger(index, "attachment index");
-      if (safeIndex < 0) {
-        throw new Error("Attachment index must be non-negative.");
-      }
-      const message = dbMessages.getMessageById(safeId);
-      if (!message) throw new Error("Message does not exist.");
-      const attachments = message.attachments;
-      if (!attachments || safeIndex >= attachments.length) {
-        throw new Error("Attachment does not exist.");
-      }
-      const path = attachments[safeIndex].path;
-      if (!path) throw new Error("Attachment location is unavailable.");
-      if (!isAbsolute(path)) {
-        throw new Error("Attachment location is invalid.");
-      }
-      if (!existsSync(path)) {
-        throw new Error("Attachment file no longer exists.");
-      }
-      shell.showItemInFolder(path);
+      shell.showItemInFolder(resolveAssetPath(safeId, safeIndex));
     },
   );
 }

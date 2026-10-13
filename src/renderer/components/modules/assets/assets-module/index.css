@@ -1,0 +1,166 @@
+.imb-asset-view-toggle {
+  display: flex;
+  gap: var(--imb-space-2);
+  margin-bottom: var(--imb-space-2);
+}
+
+.imb-asset-view-toggle .imb-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Keep the (absolutely positioned) action row clear of a long asset name. */
+.imb-detail-head:has(.imb-asset-actions) h2 {
+  padding-right: 336px;
+}
+
+/* --- Hidden view ---------------------------------------------------------- */
+
+.imb-asset-hidden-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+}
+
+.imb-asset-hidden-row {
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-3);
+  padding: 10px var(--imb-space-3);
+  border-bottom: 1px solid var(--imb-border);
+}
+
+.imb-asset-hidden-body {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.imb-asset-hidden-name {
+  font-size: var(--imb-text-base);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.imb-asset-hidden-path,
+.imb-asset-hidden-meta {
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.imb-asset-hidden-path {
+  font-family: var(--imb-font-mono);
+  font-size: var(--imb-text-xs);
+}
+
+/* --- Detail metadata ------------------------------------------------------ */
+
+.imb-asset-meta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+  margin: var(--imb-space-4) 0 0;
+}
+
+.imb-asset-meta-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: var(--imb-space-3);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--imb-border-soft);
+}
+
+.imb-asset-meta-row dt {
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+}
+
+.imb-asset-meta-row dd {
+  margin: 0;
+  color: var(--imb-fg);
+  font-size: var(--imb-text-sm);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.imb-asset-missing {
+  margin: var(--imb-space-3) 0 0;
+  padding: 6px 10px;
+  border: 1px solid var(--imb-danger);
+  border-radius: var(--imb-radius-md);
+  color: var(--imb-danger);
+  font-size: var(--imb-text-sm);
+  background: color-mix(in oklch, var(--imb-danger) 10%, var(--imb-surface));
+}
+
+/* --- Occurrences ---------------------------------------------------------- */
+
+.imb-asset-section-title {
+  margin: var(--imb-space-5) 0 var(--imb-space-2);
+  font-size: var(--imb-text-sm);
+  font-weight: 600;
+  color: var(--imb-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.imb-asset-occurrences {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.imb-asset-occurrence {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--imb-space-3);
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--imb-radius-sm);
+  background: transparent;
+  transition: background var(--imb-motion-fast) var(--imb-ease-standard);
+}
+
+.imb-asset-occurrence:hover {
+  background: var(--imb-fg-soft);
+}
+
+.imb-asset-occurrence:focus-visible {
+  outline: none;
+  box-shadow: var(--imb-focus-ring);
+}
+
+.imb-asset-occurrence-title {
+  font-size: var(--imb-text-base);
+  color: var(--imb-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imb-asset-occurrence-meta {
+  flex: none;
+  font-family: var(--imb-font-mono);
+  font-size: var(--imb-text-xs);
+  color: var(--imb-muted);
+}
+
+.imb-asset-occurrences-empty {
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+  margin: 0;
+}

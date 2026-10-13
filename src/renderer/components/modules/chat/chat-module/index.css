@@ -64,3 +64,12 @@
   font-size: var(--imb-text-xl);
   font-weight: 600;
 }
+
+/* Trailing header actions (asset panel entry); pushed to the right edge. */
+.imb-chat-header-actions {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}

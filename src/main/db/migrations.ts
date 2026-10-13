@@ -146,6 +146,17 @@ const MIGRATIONS: Array<(db: Database) => void> = [
       UPDATE chats SET unread = 0 WHERE from_chat_id IS NOT NULL;
     `);
   },
+  // 2 — hidden assets. The asset library is derived from `messages` (there is
+  // no asset table), so hiding is a separate path-keyed list: any asset whose
+  // resolved path is recorded here is excluded from every library view.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS hidden_assets (
+        path       TEXT PRIMARY KEY,
+        hidden_at  INTEGER NOT NULL
+      );
+    `);
+  },
 ];
 
 export function migrate(db: Database): void {

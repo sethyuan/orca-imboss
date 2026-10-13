@@ -1,0 +1,65 @@
+/* In-chat asset panel: a two-column list + detail layout inside a Modal. */
+
+.imb-asset-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) 1fr;
+  gap: var(--imb-space-4);
+  min-height: 320px;
+  max-height: 60vh;
+}
+
+.imb-asset-panel-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-right: var(--imb-space-4);
+  border-right: 1px solid var(--imb-border);
+}
+
+.imb-asset-panel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-2);
+  margin-bottom: var(--imb-space-3);
+}
+
+.imb-asset-panel-toolbar > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.imb-asset-panel-toolbar .imb-select-wrap {
+  flex: none;
+  width: 132px;
+}
+
+.imb-asset-panel-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.imb-asset-panel-detail {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-3);
+}
+
+.imb-asset-panel-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-2);
+  padding: var(--imb-space-3);
+  border: 1px solid var(--imb-border);
+  border-radius: var(--imb-radius-md);
+  background: var(--imb-fg-soft);
+  font-size: var(--imb-text-sm);
+}
+
+.imb-asset-panel-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--imb-space-2);
+}

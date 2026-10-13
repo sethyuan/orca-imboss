@@ -5,7 +5,7 @@ import {
 } from "@shared/constants/agent_tools";
 import {
   MAX_ATTACHMENT_TOTAL,
-  MAX_TOOL_ATTACHMENTS,
+  MAX_MESSAGE_ATTACHMENTS,
 } from "@shared/constants/attachments";
 import { ASSISTANT_ID } from "@shared/constants/employees";
 import { READ_CHAT_PROMPT } from "@shared/constants/prompts";
@@ -106,7 +106,7 @@ async function resolveAttachments(
   paths: string[] | undefined,
 ): Promise<MessageAttachment[] | undefined> {
   if (!paths || paths.length === 0) return undefined;
-  if (paths.length > MAX_TOOL_ATTACHMENTS) {
+  if (paths.length > MAX_MESSAGE_ATTACHMENTS) {
     throw new Error("Too many attachments.");
   }
   const result: MessageAttachment[] = [];
@@ -490,7 +490,7 @@ function sendMessageTool(env: AgentEnvironment): AnyPiTool {
     label: "Send message",
     description:
       "Send a message into a chat as one of the active participants, with optional file-path attachments " +
-      "(at most 5; pass `attachmentTotal` when more files were produced) and notifications to other " +
+      "(at most 50; pass `attachmentTotal` when more files were produced) and notifications to other " +
       "participants. `kind` is `text` (the default) or `report` to report a finished task's result.",
     promptSnippet: "post to a chat",
     parameters: Type.Object({
@@ -501,7 +501,7 @@ function sendMessageTool(env: AgentEnvironment): AnyPiTool {
       ),
       content: Type.String({ minLength: 1, maxLength: 100000 }),
       attachments: Type.Optional(
-        Type.Array(Type.String(), { maxItems: MAX_TOOL_ATTACHMENTS }),
+        Type.Array(Type.String(), { maxItems: MAX_MESSAGE_ATTACHMENTS }),
       ),
       attachmentTotal: Type.Optional(
         Type.Integer({ minimum: 0, maximum: MAX_ATTACHMENT_TOTAL }),
@@ -858,7 +858,7 @@ function askTool(env: AgentEnvironment): AnyPiTool {
       "(single or multiple) and/or a free-form answer; the message body is the JSON serialization " +
       "of the question set. The boss answers through the question card, delivered back as an " +
       "`answer` message; call `imb_notify` afterwards so the boss is alerted. " +
-      "Attachments are capped at 5; pass `attachmentTotal` when more files were produced.",
+      "Attachments are capped at 50; pass `attachmentTotal` when more files were produced.",
     promptSnippet: "ask the boss a question set",
     parameters: Type.Object({
       chatId: Type.Integer({ minimum: 1 }),
@@ -880,7 +880,7 @@ function askTool(env: AgentEnvironment): AnyPiTool {
         ),
       }),
       attachments: Type.Optional(
-        Type.Array(Type.String(), { maxItems: MAX_TOOL_ATTACHMENTS }),
+        Type.Array(Type.String(), { maxItems: MAX_MESSAGE_ATTACHMENTS }),
       ),
       attachmentTotal: Type.Optional(
         Type.Integer({ minimum: 0, maximum: MAX_ATTACHMENT_TOTAL }),

@@ -1,0 +1,38 @@
+.imb-asset-filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-2);
+  padding-top: var(--imb-space-2);
+}
+
+.imb-asset-filters-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--imb-space-2);
+}
+
+.imb-asset-filters-row {
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-2);
+}
+
+.imb-asset-filters-date {
+  min-width: 0;
+  font-size: var(--imb-text-sm);
+}
+
+.imb-asset-filters-sep {
+  color: var(--imb-muted);
+  flex: none;
+}
+
+.imb-asset-filters-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--imb-space-2);
+  margin-left: auto;
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+  cursor: pointer;
+}

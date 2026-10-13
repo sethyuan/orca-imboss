@@ -9,6 +9,7 @@ import { EmployeeAvatar } from "../employee-avatar";
 import { GroupAvatar } from "../group-avatar";
 import {
   IconApp,
+  IconAssets,
   IconChat,
   IconCollapse,
   IconEmployees,
@@ -51,6 +52,12 @@ const NAV_ITEMS: NavItem[] = [
     module: "skills",
     labelKey: "Skills",
     icon: IconSkills,
+    section: "main",
+  },
+  {
+    module: "assets",
+    labelKey: "Assets",
+    icon: IconAssets,
     section: "main",
   },
   {

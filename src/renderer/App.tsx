@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { parseSessionKey, useApp, type AppModule } from "./app-store";
 import { AppShell } from "./components/app-shell";
 import { AgentSessionModule } from "./components/modules/agent-session/agent-session-module";
+import { AssetsModule } from "./components/modules/assets/assets-module";
 import { ChatModule } from "./components/modules/chat/chat-module";
 import { EmployeesModule } from "./components/modules/employees/employees-module";
 import { GroupChatModule } from "./components/modules/group-chat/group-chat-module";
@@ -16,6 +17,7 @@ const MODULE_VIEWS: Partial<Record<AppModule, () => React.JSX.Element>> = {
   providers: ProvidersModule,
   mcp: McpModule,
   skills: SkillsModule,
+  assets: AssetsModule,
   employees: EmployeesModule,
   settings: SettingsModule,
 };

@@ -31,6 +31,7 @@ export type AppModule =
   | "providers"
   | "mcp"
   | "skills"
+  | "assets"
   | "settings"
   | "miniapp"
   | "group-chat"
@@ -90,6 +91,7 @@ const VALID_MODULES: AppModule[] = [
   "providers",
   "mcp",
   "skills",
+  "assets",
   "settings",
   "miniapp",
 ];

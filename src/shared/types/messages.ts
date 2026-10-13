@@ -89,7 +89,7 @@ export interface AppendMessageOptions {
   attachments?: MessageAttachment[];
   /**
    * True attachment count when it exceeds `attachments.length` (agent tools
-   * that forward only the first `MAX_TOOL_ATTACHMENTS` paths). Defaults to
+   * that forward only the first `MAX_MESSAGE_ATTACHMENTS` paths). Defaults to
    * `attachments.length`.
    */
   attachmentTotal?: number;
