@@ -11,5 +11,6 @@ export * from "./miniapps";
 export * from "./paged_lists";
 export * from "./providers";
 export * from "./sessions";
+export * from "./stats";
 export * from "./themes";
 export * from "./updater";

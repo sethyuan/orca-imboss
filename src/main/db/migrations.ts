@@ -152,6 +152,54 @@ const MIGRATIONS: Array<(db: Database) => void> = [
       ALTER TABLE chats ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
     `);
   },
+
+  // 3 — daily stats rollup: counts that survive chat deletion and restarts
+  (db) => {
+    // Deliberately no FK: history outlives a deleted employee or chat.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS stats_daily (
+        day         TEXT NOT NULL,
+        employee_id INTEGER NOT NULL,
+        run_ms      INTEGER NOT NULL DEFAULT 0,
+        messages    INTEGER NOT NULL DEFAULT 0,
+        reports     INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (day, employee_id)
+      );
+    `);
+    // Seed from current live data so existing history is captured once.
+    const day = new Date().toISOString().slice(0, 10);
+    const upsert = db.prepare(
+      `INSERT INTO stats_daily (day, employee_id, run_ms, messages, reports)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(day, employee_id) DO UPDATE SET
+         run_ms = stats_daily.run_ms + excluded.run_ms,
+         messages = stats_daily.messages + excluded.messages,
+         reports = stats_daily.reports + excluded.reports`,
+    );
+    const counts = db
+      .prepare(
+        `SELECT sender_employee_id AS id, COUNT(*) AS n,
+                SUM(CASE WHEN kind = 'report' THEN 1 ELSE 0 END) AS reports
+           FROM messages WHERE sender_employee_id IS NOT NULL
+          GROUP BY sender_employee_id`,
+      )
+      .all() as Array<{ id: number; n: number; reports: number }>;
+    for (const row of counts) {
+      upsert.run(day, row.id, 0, row.n, row.reports ?? 0);
+    }
+    const runtime = db
+      .prepare(
+        "SELECT key, value FROM settings WHERE key LIKE 'employee.runtime.%'",
+      )
+      .all() as Array<{ key: string; value: string }>;
+    for (const row of runtime) {
+      const id = Number.parseInt(row.key.split(".").pop() ?? "", 10);
+      const ms = Number.parseInt(row.value, 10);
+      if (Number.isSafeInteger(id) && Number.isSafeInteger(ms) && ms > 0) {
+        upsert.run(day, id, ms, 0, 0);
+      }
+    }
+  },
 ];
 
 export function migrate(db: Database): void {

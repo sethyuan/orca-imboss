@@ -1,9 +1,11 @@
-import type { Employee, EmployeeInput } from "@shared/types";
+import type { Employee, EmployeeInput, EmployeeMetric } from "@shared/types";
 import { ipcMain } from "electron";
 import { disposeForEmployee } from "../agent/session-queue";
 import { deleteAvatarFiles, saveAvatar } from "../avatars";
 import * as cron from "../cron";
 import * as dbEmployees from "../db/employees";
+import { listEmployeeMessageMetrics } from "../db/metrics";
+import { getEmployeeRuntime } from "../employee-runtime";
 import { listByEmployee, unlinkSessionFile } from "../db/sessions";
 import { sendToRenderer } from "../notifications";
 import { assertInteger, assertString, parsePageQuery } from "./helpers";
@@ -19,6 +21,27 @@ export function registerEmployeeHandlers(): void {
   ipcMain.handle("employees:listPage", (_event, page: unknown) =>
     dbEmployees.listEmployeesPage(parsePageQuery(page)),
   );
+
+  // Live per-employee dashboard metrics (message/report counts, run time).
+  ipcMain.handle("employees:metrics", (): EmployeeMetric[] => {
+    const byId = new Map(
+      listEmployeeMessageMetrics().map((m) => [m.employeeId, m]),
+    );
+    return dbEmployees.listEmployees().map((employee) => {
+      const m = byId.get(employee.id);
+      return {
+        employeeId: employee.id,
+        working: false,
+        currentRunMs: 0,
+        totalRunMs: getEmployeeRuntime(employee.id),
+        messages: m?.messages ?? 0,
+        reports: m?.reports ?? 0,
+        lastText: m?.lastText ?? null,
+        lastAt: m?.lastAt ?? null,
+        tasks: { pending: 0, running: 0, done: 0, closed: 0 },
+      };
+    });
+  });
 
   ipcMain.handle(
     "employees:create",

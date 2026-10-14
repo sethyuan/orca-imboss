@@ -1,0 +1,188 @@
+/* Usage — the team's working-time ledger. */
+
+.imb-usage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--imb-space-3);
+}
+
+.imb-usage-head-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.imb-usage-sub {
+  font-size: var(--imb-text-xs);
+  color: var(--imb-muted);
+}
+
+.imb-usage {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--imb-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-4);
+}
+
+.imb-usage-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--imb-space-3);
+}
+
+.imb-usage-stat {
+  background: var(--imb-surface);
+  border: 1px solid var(--imb-border);
+  border-radius: var(--imb-radius-lg);
+  padding: 12px 14px;
+}
+
+.imb-usage-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.imb-usage-stat-label {
+  margin-top: 2px;
+  font-size: var(--imb-text-xs);
+  color: var(--imb-muted);
+}
+
+.imb-usage-section {
+  margin-top: var(--imb-space-6);
+}
+.imb-usage-section-title {
+  font-size: var(--imb-text-sm);
+  font-weight: 700;
+  color: var(--imb-fg);
+  padding: var(--imb-space-4) var(--imb-space-4) var(--imb-space-2);
+}
+.imb-usage-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.imb-usage-row {
+  display: grid;
+  grid-template-columns: 22px minmax(120px, 1.6fr) auto 96px 56px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 6px;
+  border-bottom: 1px solid var(--imb-border-soft);
+}
+
+/* The person cell is the door into what this employee actually worked on. */
+.imb-usage-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 4px 8px 4px 4px;
+  border: none;
+  background: transparent;
+  border-radius: var(--imb-radius-md);
+  cursor: pointer;
+  text-align: left;
+}
+
+.imb-usage-person:hover {
+  background: var(--imb-fg-soft);
+}
+
+.imb-usage-person:hover .imb-usage-name {
+  text-decoration: underline;
+}
+
+.imb-usage-row:last-child {
+  border-bottom: none;
+}
+
+.imb-usage-rank {
+  font-size: var(--imb-text-xs);
+  color: var(--imb-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.imb-usage-id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.imb-usage-name {
+  font-size: var(--imb-text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.imb-usage-meta {
+  font-size: var(--imb-text-xs);
+  color: var(--imb-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.imb-usage-states {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--imb-text-xs);
+  color: var(--imb-text-2);
+}
+
+.imb-usage-bar {
+  height: 6px;
+  border-radius: var(--imb-radius-pill);
+  background: color-mix(in oklch, var(--imb-fg) 8%, transparent);
+  overflow: hidden;
+}
+
+.imb-usage-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--imb-radius-pill);
+  opacity: 0.75;
+  transition: width var(--imb-motion-base) var(--imb-ease-standard);
+}
+
+.imb-usage-hours {
+  font-family: var(--imb-font-mono);
+  font-size: var(--imb-text-sm);
+  color: var(--imb-text-2);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.imb-usage-empty {
+  text-align: center;
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+  padding: var(--imb-space-5) 0;
+}
+
+@media (max-width: 920px) {
+  .imb-usage-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .imb-usage-row {
+    grid-template-columns: 22px minmax(0, 1fr) 56px;
+  }
+
+  .imb-usage-states,
+  .imb-usage-bar {
+    display: none;
+  }
+}

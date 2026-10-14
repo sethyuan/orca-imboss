@@ -319,5 +319,14 @@
   "Working directory": "工作目录",
   "XHigh": "很高",
   "You're up to date.": "已是最新版本。",
-  "Zoom": "缩放"
+  "Zoom": "缩放",
+  "${count} deliverables": "${count} 项交付",
+  "${count} messages": "${count} 条消息",
+  "Completed tasks": "已完成任务",
+  "Deliverables": "交付产出",
+  "No employees yet": "暂无员工",
+  "See ${name}'s tasks": "看 ${name} 的任务",
+  "Total hours": "总工时",
+  "Usage": "用量",
+  "Where the team's working time went.": "团队工时都花在了哪里。"
 }

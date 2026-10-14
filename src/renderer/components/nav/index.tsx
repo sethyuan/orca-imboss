@@ -36,6 +36,7 @@ import {
   IconGear,
   IconMcp,
   IconSkills,
+  IconUsage,
 } from "../icons";
 import { Tooltip } from "../tooltip";
 import "./index.css";
@@ -72,6 +73,12 @@ const NAV_ITEMS: NavItem[] = [
     labelKey: "Settings",
     icon: IconGear,
     section: "bottom",
+  },
+  {
+    module: "usage",
+    labelKey: "Usage",
+    icon: IconUsage,
+    section: "main",
   },
 ];
 

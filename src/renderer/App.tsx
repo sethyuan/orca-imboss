@@ -9,6 +9,7 @@ import { McpModule } from "./components/modules/mcp/mcp-module";
 import { MiniAppModule } from "./components/modules/miniapp/miniapp-module";
 import { SettingsModule } from "./components/modules/settings/settings-module";
 import { SkillsModule } from "./components/modules/skills/skills-module";
+import { UsageModule } from "./components/modules/usage/usage-module";
 
 const MODULE_VIEWS: Partial<Record<AppModule, () => React.JSX.Element>> = {
   chat: ChatModule,
@@ -16,6 +17,7 @@ const MODULE_VIEWS: Partial<Record<AppModule, () => React.JSX.Element>> = {
   skills: SkillsModule,
   employees: EmployeesModule,
   settings: SettingsModule,
+  usage: UsageModule,
 };
 
 export default function App(): React.JSX.Element {

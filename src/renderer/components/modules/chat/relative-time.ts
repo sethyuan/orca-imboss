@@ -76,3 +76,12 @@ export function previewText(
     : plain;
   return collapsed.length > max ? `${collapsed.slice(0, max)}…` : collapsed;
 }
+
+/** Compact duration label, e.g. `42s`, `7m`, `1h20m`. */
+export function formatDuration(ms: number): string {
+  const secs = Math.max(0, Math.floor(ms / 1000));
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m`;
+  return `${Math.floor(mins / 60)}h${mins % 60}m`;
+}

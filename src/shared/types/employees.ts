@@ -102,3 +102,24 @@ export interface BuildEmployeeSystemPromptArgs {
   /** Current date in `yyyy-MM-dd`. */
   today: string;
 }
+
+/** Live per-employee dashboard metrics (working status, run time, activity). */
+export interface EmployeeMetric {
+  employeeId: number;
+  /** An agent turn is currently running for this employee. */
+  working: boolean;
+  /** Elapsed ms of the current run (0 when idle). */
+  currentRunMs: number;
+  /** Accumulated run time (ms) since the app launched. */
+  totalRunMs: number;
+  /** Non-ack messages authored by the employee. */
+  messages: number;
+  /** Completed deliverables (report-kind messages). */
+  reports: number;
+  /** Latest message content authored by the employee. */
+  lastText: string | null;
+  /** Latest message epoch seconds authored by the employee. */
+  lastAt: number | null;
+  /** Board cards assigned to the employee, by column (GitHub-style summary). */
+  tasks: { pending: number; running: number; done: number; closed: number };
+}

@@ -32,6 +32,7 @@ export type AppModule =
   | "mcp"
   | "skills"
   | "settings"
+  | "usage"
   | "miniapp"
   | "group-chat"
   | "agent-session";
@@ -112,6 +113,7 @@ const VALID_MODULES: AppModule[] = [
   "mcp",
   "skills",
   "settings",
+  "usage",
   "miniapp",
 ];
 

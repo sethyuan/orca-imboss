@@ -20,6 +20,17 @@ function base(props: IconProps): IconProps {
   };
 }
 
+export function IconUsage(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 20h16" />
+      <path d="M7.5 20v-5" />
+      <path d="M12 20v-9" />
+      <path d="M16.5 20v-13" />
+    </svg>
+  );
+}
+
 export function IconChat(props: IconProps): React.JSX.Element {
   return (
     <svg {...base(props)}>

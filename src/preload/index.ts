@@ -9,6 +9,7 @@ import type {
   Employee,
   EmployeeDeleteResult,
   EmployeeInput,
+  EmployeeMetric,
   EmployeeSession,
   InstalledSkill,
   IntegrationConfigPatch,
@@ -28,6 +29,7 @@ import type {
   ProviderLoginEvent,
   ProviderModelsQuery,
   ProviderUpsert,
+  StatDaily,
   ThemeState,
   UpdaterState,
   WorkDirState,
@@ -174,10 +176,20 @@ const api = {
         ext,
         data,
       ) as Promise<Employee | null>,
+    /** Live per-employee dashboard metrics (working status, run time, activity). */
+    metrics: () =>
+      ipcRenderer.invoke("employees:metrics") as Promise<EmployeeMetric[]>,
     /** Fired when main creates/updates/deletes an employee (e.g. the agent's
      *  `imb_set_employees`), so the renderer cache can re-fetch. */
     onChanged: (cb: (payload: { ids: number[] }) => void) =>
       on<{ ids: number[] }>("employees:changed", cb),
+    /** Fired when any agent turn starts or stops (busy/idle changed). */
+    onActivity: (cb: () => void) => on<unknown>("agents:activity", () => cb()),
+  },
+
+  stats: {
+    /** Persistent daily per-employee counters (survives chat deletion). */
+    list: () => ipcRenderer.invoke("stats:list") as Promise<StatDaily[]>,
   },
 
   cron: {
