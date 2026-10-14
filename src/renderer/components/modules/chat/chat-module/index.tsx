@@ -9,7 +9,7 @@ import type {
   PageQuery,
   PageResult,
 } from "@shared/types";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { cls } from "reactutils";
 import { appStore, IS_MAC, useApp } from "../../../../app-store";
 import { useInfiniteList } from "../../../../hooks/use-infinite-list";
@@ -67,6 +67,23 @@ interface ChatScroll {
 }
 const chatScrollStore = new Map<number, ChatScroll>();
 
+/** Cap on cached per-chat message lists (keeps memory bounded). */
+const MESSAGE_CACHE_LIMIT = 30;
+
+/** Insert/refresh a chat's messages in the cache, evicting the oldest entry. */
+function cacheMessages(
+  cache: Map<number, Message[]>,
+  chatId: number,
+  data: Message[],
+): void {
+  cache.delete(chatId);
+  cache.set(chatId, data);
+  if (cache.size > MESSAGE_CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+}
+
 export function ChatModule(): React.JSX.Element {
   const { data, focusChatId } = useApp();
   const [selectedId, setSelectedId] = useState<number | null>(
@@ -109,6 +126,10 @@ export function ChatModule(): React.JSX.Element {
   const restoreScrollRef = useRef<{ chatId: number; scrollTop: number } | null>(
     null,
   );
+  // Last-known messages per chat. Switching back and forth then shows the
+  // right thread immediately, instead of briefly rendering the previous
+  // chat's messages while the new ones load (the source of the switch flicker).
+  const messagesCacheRef = useRef<Map<number, Message[]>>(new Map());
   const locale = getLocale();
   // Chat-list previews show `@名字` for `@<id>` mentions (plain text, so no
   // theme color or click target there).
@@ -160,6 +181,7 @@ export function ChatModule(): React.JSX.Element {
     try {
       const data = await imb.messages.list(chatId);
       loadedChatIdRef.current = chatId;
+      cacheMessages(messagesCacheRef.current, chatId, data);
       setMessages(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -253,6 +275,9 @@ export function ChatModule(): React.JSX.Element {
       saved && !saved.pinned
         ? { chatId: selectedId, scrollTop: saved.scrollTop }
         : null;
+    // Show this chat's last-known messages right away (empty only on a first
+    // visit) so the thread never flashes the previously selected chat.
+    setMessages(messagesCacheRef.current.get(selectedId) ?? []);
     void loadMessages(selectedId);
     void imb.chats.markRead(selectedId);
     appStore.setChatUnread(selectedId, 0);
@@ -369,9 +394,10 @@ export function ChatModule(): React.JSX.Element {
 
   // Auto-scroll to the newest message, but only while the user is pinned to
   // the bottom. Incoming messages/run events must not yank a user who scrolled
-  // up to read history. A restored (non-pinned) position wins once, after that
-  // chat's messages have rendered.
-  useEffect(() => {
+  // up to read history. Runs before paint (useLayoutEffect) so a chat switch
+  // never shows a frame parked at the previous chat's scroll offset before
+  // snapping down — that mid-switch jump read as a flicker.
+  useLayoutEffect(() => {
     const el = threadRef.current;
     if (!el) return;
     const restore = restoreScrollRef.current;
