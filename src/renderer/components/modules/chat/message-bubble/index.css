@@ -10,6 +10,8 @@
 }
 
 .imb-bubble {
+  /* Anchors the hover time at the bubble's bottom-right corner. */
+  position: relative;
   padding: 10px 14px;
   border-radius: var(--imb-radius-lg);
   font-size: var(--imb-text-base);
@@ -17,6 +19,36 @@
   word-break: break-word;
   min-width: 0;
   user-select: text;
+}
+
+/*
+ * Exact send time: a small tag straddling the bubble's bottom-right corner,
+ * so it covers only the bubble's own padding (never the last line of text)
+ * and needs no reserved space. Hidden until the row is hovered or holds
+ * keyboard focus; it stays in the DOM either way, so assistive tech reads it.
+ */
+.imb-bubble-time {
+  position: absolute;
+  right: 8px;
+  bottom: -7px;
+  padding: 0 6px;
+  border: 1px solid var(--imb-border);
+  border-radius: var(--imb-radius-sm);
+  background: var(--imb-surface);
+  color: var(--imb-muted);
+  box-shadow: var(--imb-elev-raised);
+  font-size: var(--imb-text-xs);
+  line-height: var(--imb-leading-tight);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity var(--imb-motion-fast) var(--imb-ease-standard);
+}
+
+.imb-msg:hover .imb-bubble-time,
+.imb-msg:focus-within .imb-bubble-time {
+  opacity: 1;
 }
 
 .imb-msg.imb-self .imb-bubble {

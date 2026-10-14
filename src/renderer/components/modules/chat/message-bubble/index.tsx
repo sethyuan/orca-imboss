@@ -41,6 +41,12 @@ export interface MessageBubbleProps {
   resolveMention?: (id: number) => string | null;
   /** When set, a resolved mention becomes a button that opens the agent session. */
   onMentionClick?: (id: number) => void;
+  /**
+   * Exact send time, revealed at the bubble's bottom-right corner while the
+   * row is hovered. The thread itself only shows a rough group divider, so
+   * this is where the precise time stays reachable. `null` hides it.
+   */
+  timeLabel?: string | null;
 }
 
 export function MessageBubble({
@@ -53,6 +59,7 @@ export function MessageBubble({
   markdown = false,
   resolveMention,
   onMentionClick,
+  timeLabel,
 }: MessageBubbleProps): React.JSX.Element {
   const [revealError, setRevealError] = useState<string | null>(null);
   // Attachment indices whose `imb-file:` image failed to load (missing file,
@@ -206,6 +213,9 @@ export function MessageBubble({
           ) : (
             <span className="imb-bubble-text">{content}</span>
           ))}
+        {timeLabel != null && timeLabel.length > 0 && (
+          <span className="imb-bubble-time">{timeLabel}</span>
+        )}
       </div>
     </div>
   );

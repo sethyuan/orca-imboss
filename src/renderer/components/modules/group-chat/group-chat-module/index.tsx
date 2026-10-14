@@ -1,10 +1,12 @@
 import { t } from "@shared/l10n";
 import type { Message } from "@shared/types";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../../../../app-store";
 import { ModuleView } from "../../../app-shell";
 import { GroupAvatar } from "../../../group-avatar";
 import { MessageItem } from "../../chat/message-item";
+import { shouldShowTimeSeparator } from "../../chat/relative-time";
+import { TimeSeparator } from "../../chat/time-separator";
 import "../../chat/thread.css";
 
 export interface GroupChatModuleProps {
@@ -112,12 +114,13 @@ export function GroupChatModule({
         {messages.length === 0 ? (
           <div className="imb-chat-empty-detail">{t("No messages yet")}</div>
         ) : (
-          messages.map((message) => (
-            <MessageItem
-              key={`${message.chatId}-${message.id}`}
-              message={message}
-              readonly
-            />
+          messages.map((message, index) => (
+            <Fragment key={`${message.chatId}-${message.id}`}>
+              {shouldShowTimeSeparator(messages[index - 1], message) && (
+                <TimeSeparator secs={message.createdAt} />
+              )}
+              <MessageItem message={message} readonly />
+            </Fragment>
           ))
         )}
       </div>

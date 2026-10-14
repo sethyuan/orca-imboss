@@ -1,5 +1,5 @@
 import type { Message } from "@shared/types";
-import { appStore } from "../../../../app-store";
+import { appStore, useApp } from "../../../../app-store";
 import { EmployeeAvatar } from "../../../employee-avatar";
 import { useMentionResolver } from "../../../markdown/use-mention";
 import { AckIndicator } from "../ack-indicator";
@@ -8,6 +8,7 @@ import { AskCard } from "../ask-card";
 import { ChatCard } from "../chat-card";
 import { MessageBubble } from "../message-bubble";
 import { ProgressCard } from "../progress-card";
+import { formatMessageTime } from "../relative-time";
 
 export interface MessageItemProps {
   message: Message;
@@ -32,6 +33,9 @@ export function MessageItem({
   // `@<id>` mentions in chat bubbles render as clickable employee names that
   // open the same agent session as the avatar for this chat.
   const mentions = useMentionResolver(message.chatId, true);
+  // Read from the store (not `getLocale()`) so a language switch re-renders
+  // the hover time.
+  const { locale } = useApp();
 
   // Clicking an employee/assistant avatar opens that sender's agent session for
   // this chat. The user (null sender) has no session avatar.
@@ -98,6 +102,7 @@ export function MessageItem({
           markdown={message.kind === "text" || message.kind === "report"}
           resolveMention={mentions.resolveMention}
           onMentionClick={mentions.onMentionClick}
+          timeLabel={formatMessageTime(message.createdAt, locale)}
           avatar={
             <EmployeeAvatar
               employeeId={message.senderEmployeeId}

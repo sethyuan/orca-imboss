@@ -9,7 +9,14 @@ import type {
   PageQuery,
   PageResult,
 } from "@shared/types";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { cls } from "reactutils";
 import { appStore, IS_MAC, useApp } from "../../../../app-store";
 import { useInfiniteList } from "../../../../hooks/use-infinite-list";
@@ -30,7 +37,12 @@ import { Tooltip } from "../../../tooltip";
 import { pairAskAnswers } from "../ask-answer";
 import { ChatInputBar } from "../chat-input-bar";
 import { MessageItem } from "../message-item";
-import { formatChatTime, previewText } from "../relative-time";
+import {
+  formatChatTime,
+  previewText,
+  shouldShowTimeSeparator,
+} from "../relative-time";
+import { TimeSeparator } from "../time-separator";
 import "../thread.css";
 import "./index.css";
 
@@ -660,13 +672,17 @@ export function ChatModule(): React.JSX.Element {
         )}
       </div>
       <div className="imb-thread" ref={threadRef} onScroll={handleThreadScroll}>
-        {visibleMessages.map((message) => (
-          <MessageItem
-            key={`${message.chatId}-${message.id}`}
-            message={message}
-            onAnswered={() => void loadMessages(message.chatId)}
-            askAnswer={pairing.answerByAskId.get(message.id)}
-          />
+        {visibleMessages.map((message, index) => (
+          <Fragment key={`${message.chatId}-${message.id}`}>
+            {shouldShowTimeSeparator(visibleMessages[index - 1], message) && (
+              <TimeSeparator secs={message.createdAt} />
+            )}
+            <MessageItem
+              message={message}
+              onAnswered={() => void loadMessages(message.chatId)}
+              askAnswer={pairing.answerByAskId.get(message.id)}
+            />
+          </Fragment>
         ))}
         {selectedRunStatus !== undefined && (
           // Reserved, fixed-height slot: it is present for the whole run, so

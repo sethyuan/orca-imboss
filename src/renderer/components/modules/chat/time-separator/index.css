@@ -1,0 +1,12 @@
+/*
+ * Time divider between message groups (thread layout: a centered, muted line
+ * of text). The surrounding thread gap supplies the breathing room, so this
+ * adds no margin of its own.
+ */
+.imb-time-separator {
+  align-self: center;
+  color: var(--imb-muted);
+  font-size: var(--imb-text-xs);
+  line-height: var(--imb-leading-tight);
+  user-select: none;
+}
