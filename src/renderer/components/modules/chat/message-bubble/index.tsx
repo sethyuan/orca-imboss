@@ -23,6 +23,8 @@ export interface MessageBubbleProps {
   /** Global message id; the reveal IPC resolves the stored path from it. */
   messageId: number;
   content: string;
+  /** Selected text quoted into this message, shown above the body. */
+  quotedText?: string | null;
   attachments: MessageAttachment[] | null;
   /**
    * True attachment count. May exceed `attachments.length` when an agent only
@@ -47,6 +49,7 @@ export function MessageBubble({
   self,
   messageId,
   content,
+  quotedText,
   attachments,
   attachmentsTotal,
   avatar,
@@ -130,6 +133,14 @@ export function MessageBubble({
     <div className={cls("imb-msg", self ? "imb-self" : "imb-other")}>
       {avatar}
       <div className={cls("imb-bubble", mediaOnly && "imb-bubble-media")}>
+        {quotedText !== undefined && quotedText !== null && quotedText.length > 0 && (
+          <div className="imb-bubble-quote">
+            <span className="imb-bubble-quote-mark" aria-hidden="true">
+              “
+            </span>
+            <span className="imb-bubble-quote-text">{quotedText}</span>
+          </div>
+        )}
         {hasAttachments && (
           <div className="imb-bubble-attachments">
             {showStack && (

@@ -42,6 +42,35 @@
   white-space: pre-wrap;
 }
 
+/* Quoted selection shown above the message body. */
+.imb-bubble-quote {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 5px 8px;
+  border-left: 3px solid currentColor;
+  border-radius: var(--imb-radius-sm);
+  background: color-mix(in oklab, currentColor 7%, transparent);
+  font-size: var(--imb-text-sm);
+  line-height: 1.4;
+  opacity: 0.8;
+  max-height: 132px;
+  overflow: hidden;
+}
+
+.imb-bubble-quote-mark {
+  flex: none;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+.imb-bubble-quote-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .imb-bubble-attachments {
   display: flex;
   flex-direction: column;
@@ -158,4 +187,31 @@
   .imb-msg.imb-self .imb-bubble-chip:hover:not(.imb-bubble-chip-static) {
     background: rgba(64, 64, 64, 0.4);
   }
+}
+
+/* A quoted selection shown above a message body. */
+.imb-bubble-quote {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 5px 8px;
+  border-left: 3px solid currentColor;
+  border-radius: var(--imb-radius-sm);
+  background: color-mix(in oklab, currentColor 7%, transparent);
+  font-size: var(--imb-text-sm);
+  line-height: 1.4;
+  opacity: 0.8;
+  max-height: 132px;
+  overflow: hidden;
+}
+
+.imb-bubble-quote-mark {
+  flex: none;
+  opacity: 0.7;
+}
+
+.imb-bubble-quote-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }

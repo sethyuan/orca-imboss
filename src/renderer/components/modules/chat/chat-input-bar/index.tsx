@@ -26,6 +26,7 @@ import {
 } from "../../../icons";
 import { Textarea } from "../../../textarea";
 import { Tooltip } from "../../../tooltip";
+import { joinQuoteTexts } from "../quote-text";
 import "./index.css";
 import { MentionPopup } from "./mention-popup";
 
@@ -39,7 +40,16 @@ export interface ChatInputBarProps {
    * steals focus on mount.
    */
   focusToken?: number;
-  onSend: (text: string, attachments: MessageAttachment[]) => void;
+  /**
+   * Bumped to move focus into the textarea without resetting the draft (used
+   * after a selection is quoted). Unlike `focusToken`, it never clears input.
+   */
+  focusRequest?: number;
+  onSend: (
+    text: string,
+    attachments: MessageAttachment[],
+    quotedText?: string,
+  ) => void;
 }
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico|heic|heif)$/i;
@@ -97,10 +107,28 @@ function pastedName(file: File): string {
   return `pasted-${date}-${time}${ext.length > 0 ? `.${ext}` : ""}`;
 }
 
+/** Small quotation-mark glyph for a composer quote chip. */
+function QuoteGlyph(): React.JSX.Element {
+  return (
+    <svg
+      className="imb-quote-chip-icon"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="M7.4 6.2C5.2 7.7 4 9.9 4 12.8V18h5.7v-5.7H7.1c.1-1.6.9-2.8 2.3-3.8l-2-2.3Z" />
+      <path d="M16.4 6.2c-2.2 1.5-3.4 3.7-3.4 6.6V18h5.7v-5.7h-2.6c.1-1.6.9-2.8 2.3-3.8l-2-2.3Z" />
+    </svg>
+  );
+}
+
 export function ChatInputBar({
   disabled = false,
   chatId,
   focusToken = 0,
+  focusRequest = 0,
   onSend,
 }: ChatInputBarProps): React.JSX.Element {
   // The draft is per chat and lives on appStore so it survives the chat module
@@ -108,7 +136,7 @@ export function ChatInputBar({
   // textarea's value/caret in step with the store.
   const snap = useAppSync();
   const draft = snap.chatDrafts[chatId] ?? EMPTY_DRAFT;
-  const { text, attachments } = draft;
+  const { text, attachments, quotes } = draft;
 
   const [notice, setNotice] = useState<string | null>(null);
   const [popupOpen, setPopupOpen] = useState(false);
@@ -138,6 +166,13 @@ export function ChatInputBar({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { panelStyle, positionPanel } = useDropdownPosition(popupRef);
+
+  // A selection was quoted: move focus into the textarea without resetting the
+  // draft (unlike `focusToken`).
+  useEffect(() => {
+    if (focusRequest === 0) return;
+    textareaRef.current?.focus();
+  }, [focusRequest]);
 
   // A new chat resets the composer (draft/attachments) and lands the caret in
   // the input. `focusToken` starts at `0`, so mounting with an existing chat
@@ -203,12 +238,13 @@ export function ChatInputBar({
   const send = (): void => {
     const value = text.trim();
     if (disabled) return;
-    if (!value && attachments.length === 0) return;
-    // Rebuild each attachment as a plain object: `attachments` comes from the
-    // Valtio snapshot, and its proxies cannot cross the IPC boundary.
+    if (!value && attachments.length === 0 && quotes.length === 0) return;
+    // The quote rides as its own field on the message (never mixed into the
+    // body) so the bubble shows it separately and the model still gets it.
     onSend(
       value,
       attachments.map((item) => toPlainAttachment(item.attachment)),
+      joinQuoteTexts(quotes),
     );
     // Clear the per-chat draft; the store revokes its preview URLs.
     appStore.clearChatDraft(chatId);
@@ -585,6 +621,27 @@ export function ChatInputBar({
         </div>
       )}
       <div className="imb-chat-input-card">
+        {quotes.length > 0 && (
+          <div className="imb-quote-chips">
+            {quotes.map((quote, index) => (
+              <div
+                className="imb-quote-chip"
+                key={`${quote.messageId ?? "q"}:${index}`}
+              >
+                <QuoteGlyph />
+                <span className="imb-quote-chip-text">{quote.text}</span>
+                <button
+                  type="button"
+                  className="imb-quote-chip-remove"
+                  aria-label={t("Remove")}
+                  onClick={() => appStore.removeChatDraftQuote(chatId, index)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         {attachments.length > 0 && (
           <div className="imb-attached-files">
             {attachments.map((item, index) => {

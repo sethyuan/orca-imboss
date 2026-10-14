@@ -51,6 +51,8 @@ export interface Message {
   senderEmployeeId: number | null;
   kind: MessageKind;
   content: string;
+  /** Text quoted into this message (composer "quote to chat"), or null. */
+  quotedText: string | null;
   /** Present when `kind` is `progress`. */
   steps: MessageStep[] | null;
   /**
@@ -85,6 +87,8 @@ export interface MessageSearchResult {
 /** Optional payload for `appendMessage` (all fields validated by the service). */
 export interface AppendMessageOptions {
   kind?: MessageKind;
+  /** Text quoted into this message (shown above the body, fed to the model). */
+  quotedText?: string;
   steps?: MessageStep[];
   /**
    * Task group a `progress` card links to (stored alongside `steps` in the

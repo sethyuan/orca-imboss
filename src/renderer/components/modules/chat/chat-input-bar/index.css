@@ -263,3 +263,53 @@
   color: var(--imb-muted);
   flex-shrink: 0;
 }
+
+/* Quoted selections waiting above the composer textarea. */
+.imb-quote-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px 0;
+}
+
+.imb-quote-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 8px;
+  border-radius: var(--imb-radius-sm);
+  background: var(--imb-accent-soft);
+  color: var(--imb-accent-active);
+  font-size: var(--imb-text-xs);
+  border-left: 3px solid var(--imb-accent);
+}
+
+.imb-quote-chip-icon {
+  flex: none;
+  opacity: 0.8;
+}
+
+.imb-quote-chip-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--imb-fg);
+}
+
+.imb-quote-chip-remove {
+  flex: none;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.7;
+}
+
+.imb-quote-chip-remove:hover {
+  opacity: 1;
+}

@@ -1,0 +1,42 @@
+/* Floating "quote to chat" button shown next to a committed text selection. */
+.imb-quote-action {
+  position: fixed;
+  z-index: 55;
+  animation: imb-popout var(--imb-duration-fast) var(--imb-ease-out);
+  transform-origin: bottom center;
+}
+
+.imb-quote-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--imb-border);
+  border-radius: var(--imb-radius-pill);
+  background: var(--imb-surface-raised, var(--imb-surface));
+  color: var(--imb-fg);
+  font-size: var(--imb-text-sm);
+  font-weight: 500;
+  box-shadow: var(--imb-elev-2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--imb-duration-fast) var(--imb-ease-standard),
+    color var(--imb-duration-fast) var(--imb-ease-standard),
+    transform var(--imb-duration-instant) var(--imb-ease-standard);
+}
+
+.imb-quote-action-btn:hover {
+  background: var(--imb-accent);
+  border-color: var(--imb-accent);
+  color: var(--imb-accent-on);
+}
+
+.imb-quote-action-btn:active {
+  transform: scale(0.96);
+}
+
+.imb-quote-action-btn svg {
+  flex: none;
+}

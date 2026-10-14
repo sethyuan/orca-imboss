@@ -152,6 +152,13 @@ const MIGRATIONS: Array<(db: Database) => void> = [
       ALTER TABLE chats ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
     `);
   },
+
+  // 3 — per-message quoted selection (composer "quote to chat")
+  (db) => {
+    db.exec(`
+      ALTER TABLE messages ADD COLUMN quoted_text TEXT;
+    `);
+  },
 ];
 
 export function migrate(db: Database): void {

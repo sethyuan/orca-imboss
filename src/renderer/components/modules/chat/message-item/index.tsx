@@ -93,6 +93,7 @@ export function MessageItem({
           self={message.senderEmployeeId === null}
           messageId={message.id}
           content={message.content}
+          quotedText={message.quotedText}
           attachments={message.attachments}
           attachmentsTotal={message.attachmentsTotal}
           markdown={message.kind === "text" || message.kind === "report"}

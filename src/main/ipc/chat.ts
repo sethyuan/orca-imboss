@@ -127,16 +127,29 @@ export function registerChatHandlers(): void {
    */
   ipcMain.handle(
     "chat:send",
-    async (_event, chatId: unknown, content: unknown, attachments: unknown) => {
+    async (
+      _event,
+      chatId: unknown,
+      content: unknown,
+      attachments: unknown,
+      quotedText: unknown,
+    ) => {
       const safeChatId = assertInteger(chatId, "chat id");
       const safeContent = assertString(content, "content");
       const safeAttachments = validateAttachmentsPayload(attachments);
+      const safeQuotedText =
+        quotedText === undefined || quotedText === null
+          ? undefined
+          : assertString(quotedText, "quoted text");
 
       const userMessage = dbMessages.appendMessage(
         safeChatId,
         null,
         userMessageContent(safeContent, safeAttachments),
-        !!safeAttachments?.length ? { attachments: safeAttachments } : {},
+        {
+          ...(safeAttachments?.length ? { attachments: safeAttachments } : {}),
+          ...(safeQuotedText ? { quotedText: safeQuotedText } : {}),
+        },
       );
 
       // Immediate, app-generated receipt so the user sees an acknowledgement
@@ -156,12 +169,13 @@ export function registerChatHandlers(): void {
 
       // Serialized run; the agent posts its own reply via `imb_send_message`.
       // Deliver the text plus the attachment locations so the model can read
-      // the files (a file-only send would otherwise be an empty prompt).
-      void deliver(
-        ASSISTANT_ID,
-        safeChatId,
-        agentPrompt(safeContent, safeAttachments),
-      );
+      // the files (a file-only send would otherwise be an empty prompt), and
+      // append any quoted selection so the reply keeps the original context.
+      const basePrompt = agentPrompt(safeContent, safeAttachments);
+      const prompt = safeQuotedText
+        ? `${basePrompt}\n\n[引用片段] ${safeQuotedText}`
+        : basePrompt;
+      void deliver(ASSISTANT_ID, safeChatId, prompt);
 
       // First message of an untitled chat → generate a title from it
       // (fire-and-forget; retries on the next message when it fails).
