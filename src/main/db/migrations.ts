@@ -167,6 +167,13 @@ const MIGRATIONS: Array<(db: Database) => void> = [
         ON chat_tags(tag);
     `);
   },
+  // 4 — muted conversations: the chat still records unread, but its messages
+  // raise no OS notification and no notification sound.
+  (db) => {
+    db.exec(`
+      ALTER TABLE chats ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;
+    `);
+  },
 ];
 
 export function migrate(db: Database): void {

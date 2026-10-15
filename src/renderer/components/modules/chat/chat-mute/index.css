@@ -1,0 +1,8 @@
+/* Per-conversation mute (see `index.tsx`). */
+
+/* Bell-off glyph shown before a muted conversation's title, mirroring the pin
+   glyph's placement. */
+.imb-chat-mute {
+  flex: none;
+  color: var(--imb-muted);
+}

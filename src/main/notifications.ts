@@ -36,6 +36,9 @@ export function focusMainWindow(): void {
  * (the badge is root-chat only and group chats track reads via read_cursors),
  * so a group chat id is rejected rather than silently ignored.
  *
+ * A muted chat keeps counting unread (the badge stays honest) but raises no OS
+ * notification.
+ *
  * Returns the new unread count.
  */
 export function notifyUnread(
@@ -49,6 +52,9 @@ export function notifyUnread(
 
   const newUnread = dbChats.addUnread(chatId, delta);
   sendToRenderer("chats:unreadChanged", { chatId, unread: newUnread });
+
+  // A muted conversation still counts unread, but never notifies.
+  if (chat.muted) return newUnread;
 
   const target = resolveTargetWindow();
   const focused = BrowserWindow.getFocusedWindow();

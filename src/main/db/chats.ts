@@ -34,6 +34,17 @@ export function setPinned(id: number, pinned: boolean): Chat | null {
   return changes > 0 ? getChat(id) : null;
 }
 
+/**
+ * Mute or unmute a conversation; returns the updated chat. A muted chat still
+ * records unread, but its messages raise no OS notification or sound.
+ */
+export function setMuted(id: number, muted: boolean): Chat | null {
+  const changes = getDB()
+    .prepare("UPDATE chats SET muted = ? WHERE id = ?")
+    .run(muted ? 1 : 0, id).changes;
+  return changes > 0 ? getChat(id) : null;
+}
+
 export function getChat(id: number): Chat | null {
   const row = getDB().prepare("SELECT * FROM chats WHERE id = ?").get(id) as
     ChatRow | undefined;
@@ -67,7 +78,7 @@ export function listChatSummaries(): ChatSummary[] {
   const rows = getDB()
     .prepare(
       `SELECT c.id, c.title, c.participants, c.unread, c.created_at, c.from_chat_id,
-              c.pinned, c.source, c.last_message_at,
+              c.pinned, c.muted, c.source, c.last_message_at,
               (SELECT m.content FROM messages m
                WHERE m.chat_id = c.id AND m.kind NOT IN ('ack', 'interrupted')
                ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS preview,
@@ -91,7 +102,7 @@ export function getChatSummary(id: number): ChatSummary | null {
   const row = getDB()
     .prepare(
       `SELECT c.id, c.title, c.participants, c.unread, c.created_at, c.from_chat_id,
-              c.pinned, c.source, c.last_message_at,
+              c.pinned, c.muted, c.source, c.last_message_at,
               (SELECT m.content FROM messages m
                WHERE m.chat_id = c.id AND m.kind NOT IN ('ack', 'interrupted')
                ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS preview,
@@ -173,7 +184,7 @@ export function listChatSummariesPage(
   const rows = db
     .prepare(
       `SELECT c.id, c.title, c.participants, c.unread, c.created_at, c.from_chat_id,
-              c.pinned, c.source, c.last_message_at,
+              c.pinned, c.muted, c.source, c.last_message_at,
               (SELECT m.content FROM messages m
                WHERE m.chat_id = c.id AND m.kind NOT IN ('ack', 'interrupted')
                ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS preview,
@@ -406,6 +417,7 @@ function toChat(row: ChatRow): Chat {
     fromChatId: row.from_chat_id ?? null,
     source: normalizeSource(row.source),
     pinned: (row.pinned ?? 0) === 1,
+    muted: (row.muted ?? 0) === 1,
   };
 }
 

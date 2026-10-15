@@ -981,15 +981,18 @@ export async function initAppStore(): Promise<void> {
   // Chats: every message append refreshes that chat's summary (preview,
   // lastAt, unread) and re-sorts the cached list. A lightweight unread-only
   // event (imb_notify) updates items[].unread directly.
-  imb.messages.onChanged(({ chatId, senderEmployeeId, silent, root }) => {
-    void appStore.refreshChatSummary(chatId);
-    // Beep for any non-silent employee/assistant message in a root chat,
-    // regardless of the active module or the selected chat (group chats and
-    // silent acks stay quiet). Throttled inside playNotificationSound().
-    if (root && senderEmployeeId !== null && !silent) {
-      playNotificationSound();
-    }
-  });
+  imb.messages.onChanged(
+    ({ chatId, senderEmployeeId, silent, root, muted }) => {
+      void appStore.refreshChatSummary(chatId);
+      // Beep for any non-silent employee/assistant message in a root chat,
+      // regardless of the active module or the selected chat (group chats, muted
+      // chats and silent acks stay quiet). Throttled inside
+      // playNotificationSound().
+      if (root && senderEmployeeId !== null && !silent && !muted) {
+        playNotificationSound();
+      }
+    },
+  );
   // Title-only updates (auto title generation lands asynchronously, after the
   // messages:changed refresh) — same summary refresh keeps list + header in sync.
   imb.chats.onChanged(({ chatId }) => {

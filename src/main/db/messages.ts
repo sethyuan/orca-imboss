@@ -158,12 +158,12 @@ export function appendMessage(
   if (content.length > MAX_CONTENT_LENGTH) {
     throw new Error("Message is too long.");
   }
-  // Resolve the owning chat's root/group nature while validating it: the
-  // renderer gates the notification beep on root chats only, and this is the
-  // synchronous place that knows it (no extra IPC round-trip).
+  // Resolve the owning chat's root/group nature and mute flag while validating
+  // it: the renderer gates the notification beep on root, unmuted chats, and
+  // this is the synchronous place that knows both (no extra IPC round-trip).
   const chatRow = db
-    .prepare("SELECT from_chat_id AS fromChatId FROM chats WHERE id = ?")
-    .get(chatId) as { fromChatId: number | null } | undefined;
+    .prepare("SELECT from_chat_id AS fromChatId, muted FROM chats WHERE id = ?")
+    .get(chatId) as { fromChatId: number | null; muted: number } | undefined;
   if (!chatRow) {
     throw new Error("Chat does not exist.");
   }
@@ -236,7 +236,8 @@ export function appendMessage(
 
   // Bump the chat's last-message timestamp so the list order reflects the
   // write, then notify the renderer centrally (the single append path). The
-  // sender is carried so the renderer can gate a beep on non-user sends.
+  // sender and the mute flag are carried so the renderer can gate a beep on
+  // non-user sends from unmuted chats.
   db.prepare("UPDATE chats SET last_message_at = ? WHERE id = ?").run(
     createdAt,
     chatId,
@@ -246,6 +247,7 @@ export function appendMessage(
     senderEmployeeId,
     silent: options.silent === true,
     root: chatRow.fromChatId === null,
+    muted: (chatRow.muted ?? 0) === 1,
   });
 
   const message = toMessage({

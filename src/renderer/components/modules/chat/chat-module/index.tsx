@@ -37,6 +37,7 @@ import { TagSelect } from "../../../tag-select";
 import { Tooltip } from "../../../tooltip";
 import { pairAskAnswers } from "../ask-answer";
 import { ChatInputBar } from "../chat-input-bar";
+import { CHAT_MUTE_ENABLED, MuteGlyph, chatMuteMenuItem } from "../chat-mute";
 import { MessageItem } from "../message-item";
 import {
   formatChatTime,
@@ -150,6 +151,19 @@ export function ChatModule(): React.JSX.Element {
     async (id: number, pinned: boolean): Promise<void> => {
       try {
         await imb.chats.setPinned(id, pinned);
+        await appStore.reloadChats();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [],
+  );
+
+  /** Mute or unmute one conversation, then refresh the list cache. */
+  const toggleMute = useCallback(
+    async (id: number, muted: boolean): Promise<void> => {
+      try {
+        await imb.chats.setMuted(id, muted);
         await appStore.reloadChats();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -694,6 +708,9 @@ export function ChatModule(): React.JSX.Element {
                 {chat.pinned && (
                   <PinGlyph className="imb-chat-pin" aria-hidden="true" />
                 )}
+                {CHAT_MUTE_ENABLED && chat.muted && (
+                  <MuteGlyph className="imb-chat-mute" aria-hidden="true" />
+                )}
                 <span className="imb-chat-name-text">
                   {displayTitle(chat.title)}
                 </span>
@@ -715,6 +732,10 @@ export function ChatModule(): React.JSX.Element {
             }
             onContextMenu={(e) => {
               e.preventDefault();
+              const muteItem = chatMuteMenuItem(
+                chat,
+                (muted) => void toggleMute(chat.id, muted),
+              );
               setCtxMenu({
                 x: e.clientX,
                 y: e.clientY,
@@ -729,6 +750,7 @@ export function ChatModule(): React.JSX.Element {
                     label: chat.pinned ? t("Unpin") : t("Pin"),
                     onSelect: () => void togglePin(chat.id, !chat.pinned),
                   },
+                  ...(muteItem ? [muteItem] : []),
                   {
                     key: "delete",
                     label: t("Delete"),
