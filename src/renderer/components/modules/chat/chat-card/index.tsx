@@ -1,5 +1,6 @@
 import { t } from "@shared/l10n";
 import type { Message } from "@shared/types";
+import { cls } from "reactutils";
 import { appStore } from "../../../../app-store";
 import { EmployeeAvatar } from "../../../employee-avatar";
 import { GroupAvatar } from "../../../group-avatar";
@@ -15,6 +16,11 @@ export interface ChatCardProps {
   onAvatarClick?: () => void;
   /** Exact send time, revealed on hover at the card's bottom-right corner. */
   timeLabel?: string | null;
+  /**
+   * True when the boss sent the card (a handoff), so it sits on their side of
+   * the thread instead of the incoming side.
+   */
+  self?: boolean;
 }
 
 /**
@@ -28,12 +34,13 @@ export function ChatCard({
   message,
   onAvatarClick,
   timeLabel,
+  self = false,
 }: ChatCardProps): React.JSX.Element {
   const chatId = parseChatId(message.content);
   const summary = useChatSummary(chatId);
 
   return (
-    <div className="imb-msg imb-other">
+    <div className={cls("imb-msg", self ? "imb-self" : "imb-other")}>
       <EmployeeAvatar
         employeeId={message.senderEmployeeId}
         size={34}

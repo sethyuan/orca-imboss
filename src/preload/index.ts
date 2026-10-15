@@ -1,3 +1,4 @@
+import type { HandoffResult } from "@shared/chat-handoff";
 import { DEFAULT_LOCALE } from "@shared/constants/locales";
 import type {
   AgentSessionViewEntry,
@@ -283,6 +284,20 @@ const api = {
      * dropped when they reach the renderer.
      */
     list: () => ipcRenderer.invoke("projects:list") as Promise<CommonProject[]>,
+  },
+
+  handoff: {
+    /**
+     * Hand a conversation to another one (`CHAT_HANDOFF_ENABLED`). Main builds
+     * the transcript, stores it as an attachment of the target conversation and
+     * appends the linking card there.
+     */
+    toChat: (sourceChatId: number, targetChatId: number) =>
+      ipcRenderer.invoke(
+        "handoff:toChat",
+        sourceChatId,
+        targetChatId,
+      ) as Promise<HandoffResult>,
   },
 
   messages: {

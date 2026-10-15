@@ -91,6 +91,7 @@ export function MessageItem({
           message={message}
           onAvatarClick={openSession}
           timeLabel={timeLabel}
+          self={message.senderEmployeeId === null}
         />
       );
     case "interrupted":

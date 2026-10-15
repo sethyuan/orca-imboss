@@ -38,6 +38,7 @@ import { SearchInput } from "../../../search-input";
 import { TagSelect } from "../../../tag-select";
 import { Tooltip } from "../../../tooltip";
 import { pairAskAnswers } from "../ask-answer";
+import { HandoffPicker, handoffMenuItem } from "../chat-handoff";
 import { ChatInputBar } from "../chat-input-bar";
 import { CHAT_MUTE_ENABLED, MuteGlyph, chatMuteMenuItem } from "../chat-mute";
 import { MessageItem } from "../message-item";
@@ -132,6 +133,8 @@ export function ChatModule(): React.JSX.Element {
     chatId: number;
     title: string;
   } | null>(null);
+  // Conversation being handed off to another one (null = picker closed).
+  const [handoffSource, setHandoffSource] = useState<ChatSummary | null>(null);
   // Set on the first commit/cancel so the blur that follows (the input
   // unmounts) cannot persist a second time.
   const titleDoneRef = useRef(false);
@@ -867,6 +870,7 @@ export function ChatModule(): React.JSX.Element {
                 chat,
                 (muted) => void toggleMute(chat.id, muted),
               );
+              const handoffItem = handoffMenuItem(chat, setHandoffSource);
               setCtxMenu({
                 x: e.clientX,
                 y: e.clientY,
@@ -882,6 +886,7 @@ export function ChatModule(): React.JSX.Element {
                     onSelect: () => void togglePin(chat.id, !chat.pinned),
                   },
                   ...(muteItem ? [muteItem] : []),
+                  ...(handoffItem ? [handoffItem] : []),
                   {
                     key: "delete",
                     label: t("Delete"),
@@ -1007,6 +1012,11 @@ export function ChatModule(): React.JSX.Element {
           )}
         </p>
       </Modal>
+      <HandoffPicker
+        source={handoffSource}
+        chats={chats}
+        onClose={() => setHandoffSource(null)}
+      />
       {error !== null && (
         <p className="imb-error-text imb-chat-error">{error}</p>
       )}
