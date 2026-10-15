@@ -2,6 +2,8 @@ import { DEFAULT_LOCALE } from "@shared/constants/locales";
 import type {
   AgentSessionViewEntry,
   AgentStreamPayload,
+  BackupInfo,
+  BackupStatus,
   Chat,
   ChatParticipantUpdate,
   ChatSummary,
@@ -30,6 +32,7 @@ import type {
   ProviderUpsert,
   SpendRange,
   SpendReport,
+  StagedRestore,
   ThemeState,
   UpdaterState,
   WorkDirState,
@@ -461,6 +464,25 @@ const api = {
     /** Aggregated token/cost report, per employee and as a grand total. */
     report: (range: SpendRange) =>
       ipcRenderer.invoke("spend:report", range) as Promise<SpendReport>,
+  },
+
+  backup: {
+    /** Staged-restore state and the folders earlier restores kept aside. */
+    status: () => ipcRenderer.invoke("backup:status") as Promise<BackupStatus>,
+    /** Pick a destination and write a full backup; `null` when cancelled. */
+    export: (options: { includeCredentials: boolean }) =>
+      ipcRenderer.invoke("backup:export", options) as Promise<BackupInfo | null>,
+    /** Pick an archive and read its manifest; `null` when cancelled. */
+    inspect: () =>
+      ipcRenderer.invoke("backup:inspect") as Promise<BackupInfo | null>,
+    /** Unpack an archive and stage it for the next launch. */
+    restore: (path: string) =>
+      ipcRenderer.invoke("backup:restore", path) as Promise<StagedRestore>,
+    /** Forget a staged restore and delete its unpacked copy. */
+    cancelRestore: () =>
+      ipcRenderer.invoke("backup:cancelRestore") as Promise<void>,
+    /** Restart the app so a staged restore is applied. */
+    restart: () => ipcRenderer.invoke("backup:restart") as Promise<void>,
   },
 };
 

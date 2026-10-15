@@ -1,6 +1,7 @@
 export * from "./agent_session";
 export * from "./agent_stream";
 export * from "./agents";
+export * from "./backup";
 export * from "./chats";
 export * from "./cron";
 export * from "./employees";

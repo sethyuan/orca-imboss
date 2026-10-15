@@ -5,6 +5,7 @@ import { ListPane } from "../../../list-pane";
 import { ListRow } from "../../../list-row";
 import "../../module-common.css";
 import { SettingsAbout } from "../settings-about";
+import { SettingsBackup } from "../settings-backup";
 import { SettingsGeneral } from "../settings-general";
 import { SettingsIntegrations } from "../settings-integrations";
 import { SettingsMcp } from "../settings-mcp";
@@ -45,6 +46,11 @@ const SECTIONS: Array<{
     labelKey: "Network",
     descKey: "Proxy for outbound model requests",
   },
+  {
+    id: "backup",
+    labelKey: "Backup",
+    descKey: "Export and restore all local data",
+  },
   { id: "about", labelKey: "About", descKey: "Version info" },
 ];
 
@@ -80,6 +86,8 @@ export function SettingsModule(): React.JSX.Element {
       <SettingsIntegrations />
     ) : settingsSection === "network" ? (
       <SettingsNetwork />
+    ) : settingsSection === "backup" ? (
+      <SettingsBackup />
     ) : settingsSection === "about" ? (
       <SettingsAbout />
     ) : (

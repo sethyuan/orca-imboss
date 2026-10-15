@@ -1,0 +1,116 @@
+.imb-backup-intro {
+  margin: 0 0 var(--imb-space-5);
+  max-width: 620px;
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+  line-height: 1.5;
+}
+
+.imb-backup-card {
+  padding: var(--imb-space-4) var(--imb-space-5);
+  margin-bottom: var(--imb-space-4);
+  max-width: 620px;
+  border: 1px solid var(--imb-border);
+  border-radius: var(--imb-radius-md);
+  background: var(--imb-surface);
+}
+
+.imb-backup-card.imb-is-pending {
+  border-color: color-mix(in oklch, var(--imb-warn) 45%, var(--imb-border));
+  background: color-mix(in oklch, var(--imb-warn) 8%, var(--imb-surface));
+}
+
+.imb-backup-card h3 {
+  margin: 0 0 var(--imb-space-2);
+  font-size: var(--imb-text-lg);
+  font-weight: 600;
+}
+
+.imb-backup-text {
+  margin: 0;
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+  line-height: 1.5;
+}
+
+.imb-backup-credential-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--imb-space-2);
+  margin-top: var(--imb-space-4);
+}
+
+.imb-backup-credential-row .imb-toggle {
+  flex: none;
+  margin-top: 1px;
+}
+
+.imb-backup-credential-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--imb-text-sm);
+}
+
+.imb-backup-hint {
+  color: var(--imb-muted);
+  line-height: 1.5;
+}
+
+.imb-backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--imb-space-2);
+  margin-top: var(--imb-space-4);
+}
+
+.imb-backup-result {
+  margin: var(--imb-space-3) 0 0;
+  color: var(--imb-success);
+  font-size: var(--imb-text-sm);
+  word-break: break-all;
+}
+
+.imb-backup-note {
+  margin: var(--imb-space-3) 0 0;
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+  word-break: break-all;
+}
+
+.imb-backup-error {
+  margin: var(--imb-space-3) 0 0;
+  color: var(--imb-danger);
+  font-size: var(--imb-text-sm);
+  line-height: 1.5;
+}
+
+.imb-backup-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-2);
+}
+
+.imb-backup-summary-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--imb-space-3);
+  font-size: var(--imb-text-sm);
+}
+
+.imb-backup-summary-label {
+  flex: none;
+  width: 92px;
+  color: var(--imb-muted);
+}
+
+.imb-backup-summary-value {
+  min-width: 0;
+  word-break: break-all;
+}
+
+.imb-backup-summary-value.imb-is-mono {
+  font-family: var(--imb-font-mono);
+  font-size: var(--imb-text-xs);
+}

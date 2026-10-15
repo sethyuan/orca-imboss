@@ -5,6 +5,7 @@ import { materializeBuiltinSkills } from "./agent/builtin-skills";
 import { refreshModelStore } from "./agent/model-runtime";
 import { disposeAll } from "./agent/session-queue";
 import { deleteAvatarFiles } from "./avatars";
+import { applyPendingRestore } from "./backup";
 import * as cron from "./cron";
 import { getAgentRoot } from "./data-dir";
 import { initDatabase } from "./db";
@@ -45,6 +46,19 @@ registerImbFileScheme();
 const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) {
   app.quit();
+}
+
+// A restore staged from Settings › Backup replaces the whole data folder, so it
+// has to be applied before anything reads or creates it — and only in the
+// process that actually owns the single-instance lock.
+if (singleInstanceLock) {
+  const restored = applyPendingRestore();
+  if (restored) {
+    console.log(
+      `[backup] restored ${restored.restoredFrom}` +
+        (restored.keptAt ? ` (previous data kept at ${restored.keptAt})` : ""),
+    );
+  }
 }
 
 // Single window

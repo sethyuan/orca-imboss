@@ -100,6 +100,7 @@ export type SettingsSection =
   | "skills"
   | "integrations"
   | "network"
+  | "backup"
   | "about";
 
 /** True when running on macOS (native traffic lights stay, no custom buttons). */
