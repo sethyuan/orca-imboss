@@ -96,7 +96,7 @@ export function McpConfigFields({
 
   return (
     <>
-      <Field label={t("Transport")}>
+      <Field label={t("Transport")} htmlFor={`${idPrefix}-transport`}>
         <Select
           id={`${idPrefix}-transport`}
           value={value.transport}
@@ -113,6 +113,7 @@ export function McpConfigFields({
           <Field
             label={t("Command")}
             hint={t("The executable's name, e.g. npx, node, python")}
+            htmlFor={`${idPrefix}-command`}
           >
             <Input
               id={`${idPrefix}-command`}
@@ -122,7 +123,7 @@ export function McpConfigFields({
               onChange={(e) => set({ command: e.target.value })}
             />
           </Field>
-          <Field label={t("Arguments")}>
+          <Field label={t("Arguments")} htmlFor={`${idPrefix}-args`}>
             <Textarea
               id={`${idPrefix}-args`}
               mono
@@ -135,6 +136,7 @@ export function McpConfigFields({
           <Field
             label={t("Environment variables")}
             hint={t("One KEY=value per line")}
+            htmlFor={`${idPrefix}-env`}
           >
             <Textarea
               id={`${idPrefix}-env`}
@@ -148,7 +150,7 @@ export function McpConfigFields({
         </>
       ) : (
         <>
-          <Field label={t("Server URL")}>
+          <Field label={t("Server URL")} htmlFor={`${idPrefix}-url`}>
             <Input
               id={`${idPrefix}-url`}
               mono
@@ -157,7 +159,11 @@ export function McpConfigFields({
               onChange={(e) => set({ url: e.target.value })}
             />
           </Field>
-          <Field label={t("Headers")} hint={t("One KEY=value per line")}>
+          <Field
+            label={t("Headers")}
+            hint={t("One KEY=value per line")}
+            htmlFor={`${idPrefix}-headers`}
+          >
             <Textarea
               id={`${idPrefix}-headers`}
               mono

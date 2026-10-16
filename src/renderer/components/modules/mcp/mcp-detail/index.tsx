@@ -88,11 +88,13 @@ export function McpDetail({
         <Field
           label={t("MCP name")}
           hint={t("Server names are set when created and cannot be changed.")}
+          htmlFor="mcp-detail-name"
         >
-          <Input value={server.name} readOnly />
+          <Input id="mcp-detail-name" value={server.name} readOnly />
         </Field>
-        <Field label={t("Description")}>
+        <Field label={t("Description")} htmlFor="mcp-detail-description">
           <Textarea
+            id="mcp-detail-description"
             value={description}
             minHeight={72}
             onChange={(e) => updateDescription(e.target.value)}
@@ -130,7 +132,7 @@ export function McpDetail({
           </>
         }
       >
-        <p className="imb-mcp-remove-note">
+        <p className="imb-module-note">
           {t("Linked employees must choose again after removing.")}
         </p>
       </Modal>

@@ -13,7 +13,7 @@ import type {
   IntegrationQrState,
   IntegrationStatus,
 } from "@shared/types";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { cls } from "reactutils";
 import { appStore, useApp } from "../../../../app-store";
 import { Button } from "../../../button";
@@ -356,6 +356,10 @@ function FieldControl({
 }: FieldControlProps): React.JSX.Element {
   const label = t(FIELD_LABELS[field.key] ?? field.key);
   const hint = field.hintText ? t(field.hintText) : undefined;
+  const uid = useId();
+  // Unique per field so the `<label>` is associated with its control (several
+  // integrations can render a field with the same key on one page).
+  const inputId = `integration-${uid}`;
   // Controlled local draft; the value is only committed on blur/Enter so
   // typing a secret never triggers a per-keystroke save (which would also
   // remount the field and discard the rest of the secret).
@@ -397,8 +401,10 @@ function FieldControl({
           ? t("Stored: ${hint}", { hint: field.hint ?? "••••" })
           : hint
       }
+      htmlFor={inputId}
     >
       <Input
+        id={inputId}
         type={field.kind === "password" ? "password" : undefined}
         autoComplete={field.kind === "password" ? "off" : undefined}
         spellCheck={false}
