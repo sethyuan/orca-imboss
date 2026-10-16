@@ -223,9 +223,24 @@ export function listChatSummariesPage(
   };
 }
 
-/** Clear a chat's unread counter (opening the chat). */
-export function markRead(id: number): void {
-  getDB().prepare("UPDATE chats SET unread = 0 WHERE id = ?").run(id);
+/**
+ * Clear a chat's unread counter (opening the chat) and advance its read
+ * position to the newest message. Returns the position *before* the advance —
+ * where the previous visit left off — so the caller can mark the first message
+ * the user has not seen yet. A chat with no messages keeps its old position.
+ */
+export function markRead(id: number): number {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT last_read_message_id FROM chats WHERE id = ?")
+    .get(id) as { last_read_message_id: number } | undefined;
+  const previous = row?.last_read_message_id ?? 0;
+  db.prepare(
+    "UPDATE chats SET unread = 0, last_read_message_id = " +
+      "COALESCE((SELECT MAX(id) FROM messages WHERE chat_id = ?), " +
+      "last_read_message_id) WHERE id = ?",
+  ).run(id, id);
+  return previous;
 }
 
 /**
