@@ -408,6 +408,8 @@
   "Version info": "版本信息",
   "Version": "版本号",
   "View official docs": "查看官方文档",
+  "Vision model": "视觉模型",
+  "One app-wide choice: the model that describes pictures for agents whose own model cannot see them. Leave it empty to turn the vision bridge off.": "全局选项：当智能体自身的模型无法看图时，用来描述图片的模型。留空即关闭视觉桥接。",
   "Waiting for authorization in the browser…": "正在等待你在浏览器里确认登录…",
   "WeChat login QR code": "微信登录二维码",
   "WeChat": "微信",

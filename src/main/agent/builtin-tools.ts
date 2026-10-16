@@ -11,6 +11,7 @@ import {
 } from "@shared/constants/attachments";
 import { ASSISTANT_ID } from "@shared/constants/employees";
 import { READ_CHAT_PROMPT } from "@shared/constants/prompts";
+import { VISION_BRIDGE_ENABLED } from "@shared/constants/vision";
 import { t } from "@shared/l10n";
 import type {
   AgentEnvironment,
@@ -37,9 +38,11 @@ import * as dbReadCursors from "../db/read-cursors";
 import * as dbSessions from "../db/sessions";
 import { readMcpServers } from "../mcp-store";
 import { notifyUnread, sendToRenderer } from "../notifications";
+import { describeImage, getVisionModelRef, visionModelRef } from "../vision";
 import { materializeSessionFile, sessionPathFor } from "./session-files";
 import { wakeAgent } from "./session-queue";
 import { listSkills } from "./skills";
+import { resolveWorkDir } from "./workdir";
 
 /**
  * Imboss built-in team tools.
@@ -1111,6 +1114,58 @@ function askTool(env: AgentEnvironment): AnyPiTool {
 }
 
 /**
+ * `imb_look_at_image` — see what a picture contains, through the configured
+ * vision model.
+ *
+ * Images reach an agent as file paths, not pixels, so a model that cannot see
+ * has no way into them. This tool is the bridge: it sends one image file to the
+ * vision model chosen in Settings › General and returns that model's
+ * description as text (see `../vision`). Registered for every agent while
+ * `VISION_BRIDGE_ENABLED` is set — a picture can land in any conversation.
+ */
+function lookAtImageTool(): AnyPiTool {
+  return {
+    name: "imb_look_at_image",
+    label: "Look at an image",
+    description:
+      "Look at an image and get a description of what it shows. Use it whenever you need to know " +
+      "what is in a picture — one the boss sent (its path is in the [Attachments] block), a " +
+      "screenshot, a chart, a photo. Images reach you as file paths rather than pixels, so this is " +
+      "how you see them: the file is sent to the vision model configured in Settings › General and " +
+      "its description comes back as text. Pass a specific `question` when you need something " +
+      'particular (for example "what does the error message say?"); without one you get a full ' +
+      "description, including any text in the picture. Image files only (png, jpg, webp, gif, avif, " +
+      "bmp); it needs a vision model to be configured.",
+    promptSnippet: "see what an image shows",
+    parameters: Type.Object({
+      path: Type.String({ minLength: 1, maxLength: 4096 }),
+      question: Type.Optional(Type.String({ maxLength: 2000 })),
+    }),
+    execute: async (_toolCallId, params) => {
+      const input = params as { path: string; question?: string };
+      return performLookAtImage(input);
+    },
+  };
+}
+
+async function performLookAtImage(input: { path: string; question?: string }) {
+  const asked = (input.path ?? "").trim();
+  if (asked.length === 0) throw new Error("An image path is required.");
+  // A relative path is resolved against the agent working directory, the way
+  // the SDK's own file tools treat it.
+  const path = resolve(resolveWorkDir(), asked);
+  const ref = getVisionModelRef();
+  if (ref === null) {
+    throw new Error(
+      "No vision model is configured. Ask the boss to choose one under " +
+        "Settings › General › Vision model.",
+    );
+  }
+  const description = await describeImage(ref, path, input.question);
+  return toolResult({ path, model: visionModelRef(ref), description });
+}
+
+/**
  * Build the role-based tool set for the calling agent.
  *
  * - Assistant (id 0): orchestration tools — `imb_set_employees`,
@@ -1156,5 +1211,6 @@ export function createTeamToolDefinitions(
   }
   tools.push(sendMessageTool(env));
   tools.push(readChatTool(employeeId));
+  if (VISION_BRIDGE_ENABLED) tools.push(lookAtImageTool());
   return tools;
 }

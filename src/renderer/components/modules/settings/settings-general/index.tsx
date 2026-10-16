@@ -1,5 +1,6 @@
 import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from "@shared/constants/locales";
 import { SettingKeys } from "@shared/constants/settings";
+import { VISION_BRIDGE_ENABLED } from "@shared/constants/vision";
 import { t } from "@shared/l10n";
 import type { ModelOption, WorkDirState } from "@shared/types";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -28,6 +29,7 @@ const SAVE_DEBOUNCE_MS = 400;
 export function SettingsGeneral(): React.JSX.Element {
   const { locale } = useApp();
   const [defaultModel, setDefaultModel] = useState("");
+  const [visionModel, setVisionModel] = useState("");
   const [defaultThinking, setDefaultThinking] = useState("");
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -47,12 +49,14 @@ export function SettingsGeneral(): React.JSX.Element {
     void (async () => {
       const [
         defaultModelStored,
+        visionModelStored,
         defaultThinkingStored,
         envStored,
         models,
         workDir,
       ] = await Promise.all([
         imb.settings.get(SettingKeys.DefaultModel),
+        imb.settings.get(SettingKeys.VisionModel),
         imb.settings.get(SettingKeys.DefaultThinkingLevel),
         imb.settings.get(SettingKeys.UserEnv),
         imb.models.list(),
@@ -60,6 +64,7 @@ export function SettingsGeneral(): React.JSX.Element {
       ]);
       if (!alive) return;
       setDefaultModel(defaultModelStored ?? "");
+      setVisionModel(visionModelStored ?? "");
       setDefaultThinking(defaultThinkingStored ?? "");
       setEnvVars(parseEnv(envStored));
       setModels(models);
@@ -74,6 +79,11 @@ export function SettingsGeneral(): React.JSX.Element {
   function changeDefaultModel(value: string): void {
     setDefaultModel(value);
     void imb.settings.set(SettingKeys.DefaultModel, value);
+  }
+
+  function changeVisionModel(value: string): void {
+    setVisionModel(value);
+    void imb.settings.set(SettingKeys.VisionModel, value);
   }
 
   function changeDefaultThinking(value: string): void {
@@ -152,6 +162,27 @@ export function SettingsGeneral(): React.JSX.Element {
             onChange={changeDefaultModel}
           />
         </Field>
+
+        {VISION_BRIDGE_ENABLED && (
+          <Field
+            label={t("Vision model")}
+            hint={t(
+              "One app-wide choice: the model that describes pictures for agents whose own model cannot see them. Leave it empty to turn the vision bridge off.",
+            )}
+          >
+            <Select
+              value={visionModel}
+              options={[
+                { value: "", label: t("None") },
+                ...models.map((model) => ({
+                  value: modelRef(model),
+                  label: modelRef(model),
+                })),
+              ]}
+              onChange={changeVisionModel}
+            />
+          </Field>
+        )}
 
         <Field
           label={t("Default thinking level")}

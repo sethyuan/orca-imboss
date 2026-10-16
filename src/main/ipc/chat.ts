@@ -1,5 +1,7 @@
 import { ASSISTANT_ID } from "@shared/constants/employees";
 import { MAX_TAGS_PER_CHAT, normalizeTag } from "@shared/constants/tags";
+import { VISION_BRIDGE_ENABLED } from "@shared/constants/vision";
+import { isPreviewableImage } from "@shared/image-attachments";
 import type { ChatParticipantUpdate, MessageAttachment } from "@shared/types";
 import { ipcMain } from "electron";
 import { isAbsolute } from "path";
@@ -290,6 +292,18 @@ function formatAttachmentBlock(
         : "";
     return path.length > 0 ? `${base}: ${path}` : base;
   });
+  // A picture cannot be read as text, so point the agent at the bridge tool
+  // that can see it (see `src/main/vision.ts`).
+  if (
+    VISION_BRIDGE_ENABLED &&
+    attachments.some((attachment) =>
+      isPreviewableImage(attachment.type, attachment.name),
+    )
+  ) {
+    lines.push(
+      "(An image cannot be read as text — use imb_look_at_image to see what one contains.)",
+    );
+  }
   return `[Attachments]\n${lines.join("\n")}`;
 }
 

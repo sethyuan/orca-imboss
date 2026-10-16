@@ -2,6 +2,12 @@
 export const SettingKeys = {
   Locale: "app.locale",
   DefaultModel: "agent.defaultModel",
+  /**
+   * `"<provider>/<modelId>"` of the model that describes pictures for agents
+   * that cannot see them (empty = not configured, and `imb_look_at_image` then
+   * reports that clearly).
+   */
+  VisionModel: "agent.visionModel",
   DefaultThinkingLevel: "agent.defaultThinkingLevel",
   UserEnv: "agent.userEnv",
   WorkDir: "agent.workdir",
