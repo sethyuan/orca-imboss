@@ -82,3 +82,7 @@ h4 {
   width: 14px;
   height: 14px;
 }
+
+.imb-error-text {
+  color: var(--imb-danger);
+}

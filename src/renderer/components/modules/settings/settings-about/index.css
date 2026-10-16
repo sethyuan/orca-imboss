@@ -145,3 +145,9 @@
   color: var(--imb-muted);
   user-select: text;
 }
+
+/* The updater's error line also carries `imb-error-text`, which must win over
+   the muted status colour above (both are single-class selectors). */
+.imb-error-text.imb-update-status {
+  color: var(--imb-danger);
+}
