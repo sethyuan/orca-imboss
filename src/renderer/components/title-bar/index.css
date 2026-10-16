@@ -49,3 +49,33 @@
   background: var(--imb-danger);
   color: #fff;
 }
+
+.imb-titlebar-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-1);
+  margin-left: var(--imb-space-2);
+}
+
+.imb-titlebar-navbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 24px;
+  border: none;
+  border-radius: var(--imb-radius-md);
+  background: transparent;
+  color: var(--imb-text-2);
+  cursor: pointer;
+}
+
+.imb-titlebar-navbtn:hover:not(:disabled) {
+  background: var(--imb-fg-soft);
+  color: var(--imb-fg);
+}
+
+.imb-titlebar-navbtn:disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}

@@ -17,7 +17,7 @@ import type {
   UpdaterState,
 } from "@shared/types";
 import { createRef } from "react";
-import { proxy, useSnapshot } from "valtio";
+import { proxy, subscribe, useSnapshot } from "valtio";
 import {
   revokeDraftUrls,
   type ChatDraft,
@@ -104,6 +104,25 @@ export type SettingsSection =
   | "backup"
   | "about";
 
+/** One place the app can be looking at (what back / forward restores). */
+interface NavView {
+  module: AppModule;
+  chatId: number | null;
+  sessionKey: string | null;
+  miniAppId: string | null;
+  settingsSection: SettingsSection;
+}
+
+function navViewKey(view: NavView): string {
+  return [
+    view.module,
+    view.chatId ?? "",
+    view.sessionKey ?? "",
+    view.miniAppId ?? "",
+    view.settingsSection,
+  ].join("\u0000");
+}
+
 /** True when running on macOS (native traffic lights stay, no custom buttons). */
 export const IS_MAC = imb.platform === "darwin";
 
@@ -141,6 +160,24 @@ export const appStore = proxy({
   locale: imb.initialLocale,
   theme: { mode: "system", color: "#07C160" } as ThemeState,
   navCollapsed: false,
+
+  // View history for the title-bar back / forward controls. Session-only: one
+  // entry per place you actually landed on, with the index pointing at the
+  // current one. Forward entries are dropped once you navigate away from them.
+  navHistory: [] as NavView[],
+  navHistoryIndex: -1,
+  /** Set while history navigation applies a view (suppresses recording). */
+  navHistoryLocked: false,
+
+  /** Go back to the previous place you were looking at. */
+  goBack(): void {
+    applyNavView(appStore.navHistoryIndex - 1);
+  },
+
+  /** Go forward again after a back. */
+  goForward(): void {
+    applyNavView(appStore.navHistoryIndex + 1);
+  },
   module: "chat" as AppModule,
 
   /** Folder id of the mini app currently open in `module === "miniapp"`. */
@@ -928,6 +965,59 @@ export const appStore = proxy({
   },
 });
 
+/** The place the app is looking at right now. */
+function currentNavView(): NavView {
+  return {
+    module: appStore.module,
+    chatId: appStore.activeChatId,
+    sessionKey: appStore.activeSessionKey,
+    miniAppId: appStore.activeMiniAppId,
+    settingsSection: appStore.settingsSection,
+  };
+}
+
+/** How many places the back / forward controls remember. */
+const NAV_HISTORY_LIMIT = 60;
+
+/** Jump the app to one recorded place, without recording it again. */
+function applyNavView(index: number): void {
+  const view = appStore.navHistory[index];
+  if (!view || index === appStore.navHistoryIndex) return;
+  appStore.navHistoryLocked = true;
+  appStore.navHistoryIndex = index;
+  appStore.module = view.module;
+  appStore.activeChatId = view.chatId;
+  appStore.activeSessionKey = view.sessionKey;
+  appStore.activeMiniAppId = view.miniAppId;
+  appStore.settingsSection = view.settingsSection;
+  // Release on the next tick, once the recorder has seen the settled frame.
+  window.setTimeout(() => {
+    appStore.navHistoryLocked = false;
+  }, 0);
+}
+
+// Navigation lands in several steps (chat id, then module, then pane), so a
+// short quiet period collapses one hop into one history entry.
+let navRecordTimer: number | null = null;
+
+function recordNavView(): void {
+  if (appStore.navHistoryLocked) return;
+  if (navRecordTimer !== null) window.clearTimeout(navRecordTimer);
+  navRecordTimer = window.setTimeout(() => {
+    navRecordTimer = null;
+    const view = currentNavView();
+    const previous = appStore.navHistory[appStore.navHistoryIndex];
+    if (previous && navViewKey(previous) === navViewKey(view)) return;
+    // Navigating from the middle of the stack drops the forward entries.
+    appStore.navHistory.splice(appStore.navHistoryIndex + 1);
+    appStore.navHistory.push(view);
+    if (appStore.navHistory.length > NAV_HISTORY_LIMIT) {
+      appStore.navHistory.shift();
+    }
+    appStore.navHistoryIndex = appStore.navHistory.length - 1;
+  }, 80);
+}
+
 /** One-time app-state bootstrap (theme/locale subscriptions + persisted prefs). */
 let initialized = false;
 export async function initAppStore(): Promise<void> {
@@ -957,6 +1047,8 @@ export async function initAppStore(): Promise<void> {
   });
   imb.onLocaleChanged(updateLocale);
   imb.theme.onChanged(updateThemeState);
+  // Record every place the app lands on, for the back / forward controls.
+  subscribe(appStore, recordNavView);
 
   // Mini apps back the always-mounted Nav, so load them eagerly, then drop a
   // stale restored app (folder deleted since last launch) back to Chat.

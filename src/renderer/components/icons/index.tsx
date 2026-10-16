@@ -20,6 +20,24 @@ function base(props: IconProps): IconProps {
   };
 }
 
+export function IconBack(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)} strokeWidth={1.9}>
+      <line x1="19" y1="12" x2="5" y2="12" />
+      <polyline points="12 19 5 12 12 5" />
+    </svg>
+  );
+}
+
+export function IconForward(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)} strokeWidth={1.9}>
+      <line x1="5" y1="12" x2="19" y2="12" />
+      <polyline points="12 5 19 12 12 19" />
+    </svg>
+  );
+}
+
 export function IconChat(props: IconProps): React.JSX.Element {
   return (
     <svg {...base(props)}>
