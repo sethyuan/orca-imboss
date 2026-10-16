@@ -99,6 +99,10 @@
   background: var(--imb-fg-soft);
 }
 
+.imb-select-option:active {
+  background: rgba(0, 0, 0, 0.08);
+}
+
 .imb-select-option.imb-is-selected {
   color: var(--imb-accent-active);
   font-weight: 500;

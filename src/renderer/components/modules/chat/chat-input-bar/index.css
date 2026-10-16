@@ -260,6 +260,10 @@
   background: var(--imb-bg);
 }
 
+.imb-attach-popup-item:active {
+  background: rgba(0, 0, 0, 0.08);
+}
+
 .imb-attach-popup-item svg {
   width: 18px;
   height: 18px;
