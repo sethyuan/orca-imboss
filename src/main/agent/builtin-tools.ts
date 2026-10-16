@@ -550,12 +550,12 @@ function createChatTool(
       "passing their ids in `notify` to wake them.",
     promptSnippet: "new team chat",
     parameters: Type.Object({
-      title: Type.String({ minLength: 1, maxLength: 200 }),
+      title: Type.Optional(Type.String({ maxLength: 200 })),
       participants: Type.Array(Type.Integer({ minimum: 1 }), { minItems: 1 }),
     }),
     execute: async (_toolCallId, params) => {
       const input = params as {
-        title: string;
+        title?: string;
         participants: number[];
       };
       for (const pid of input.participants) assertActiveEmployee(pid);
@@ -567,6 +567,12 @@ function createChatTool(
         throw new Error("Spawning chat does not exist.");
       }
 
+      const explicitTitle = input.title?.trim();
+      const title =
+        explicitTitle && explicitTitle.length > 0
+          ? explicitTitle
+          : input.participants.map(employeeDisplayName).join(", ");
+
       // The assistant joins every task chat it creates so participants can
       // notify it and it can post through the normal `imb_send_message` path.
       const participants = [...new Set([ASSISTANT_ID, ...input.participants])];
@@ -576,7 +582,7 @@ function createChatTool(
       // together. The assistant is deliberately skipped (see
       // `recordParticipantSessions`).
       const { chat, sessionRecords } = db.transaction(() => {
-        const chat = dbChats.createChat(input.title, participants, {
+        const chat = dbChats.createChat(title, participants, {
           fromChatId: callingChatId,
         });
         return {
