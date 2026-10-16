@@ -31,6 +31,8 @@ import type {
   ProviderLoginEvent,
   ProviderModelsQuery,
   ProviderUpsert,
+  RemoteAgent,
+  RemoteAgentInput,
   SpendRange,
   SpendReport,
   StagedRestore,
@@ -480,6 +482,16 @@ const api = {
       on<IntegrationState>("integrations:state", cb),
     onQr: (cb: (qr: IntegrationQrState) => void) =>
       on<IntegrationQrState>("integrations:qr", cb),
+  },
+
+  remote: {
+    list: () => ipcRenderer.invoke("remote:list") as Promise<RemoteAgent[]>,
+    add: (input: RemoteAgentInput) =>
+      ipcRenderer.invoke("remote:add", input) as Promise<RemoteAgent>,
+    refresh: (id: number) =>
+      ipcRenderer.invoke("remote:refresh", id) as Promise<RemoteAgent>,
+    remove: (id: number) =>
+      ipcRenderer.invoke("remote:remove", id) as Promise<boolean>,
   },
 
   mcp: {

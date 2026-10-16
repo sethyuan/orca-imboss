@@ -183,6 +183,47 @@ const MIGRATIONS: Array<(db: Database) => void> = [
       ALTER TABLE messages ADD COLUMN image_model TEXT;
     `);
   },
+  // 6 — remote A2A peers. A peer is a user-added agent reachable over the A2A
+  // protocol; it gets its own conversation (chats.source = 'a2a') and a
+  // dedicated employee row for message authorship, flagged by
+  // `employees.remote_agent_id` so it never shows up as local staff.
+  (db) => {
+    db.exec(`
+      ALTER TABLE employees ADD COLUMN remote_agent_id INTEGER;
+
+      CREATE TABLE IF NOT EXISTS remote_agents (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        -- Agent-card base URL; the card itself is resolved at
+        -- /.well-known/agent-card.json.
+        url           TEXT NOT NULL,
+        -- Cached agent card (normalized JSON), re-used for every request so a
+        -- send never has to re-resolve the card.
+        card          TEXT,
+        -- 'ok' | 'error' after the last resolve/refresh.
+        status        TEXT NOT NULL DEFAULT 'unknown',
+        status_detail TEXT,
+        created_at    INTEGER NOT NULL DEFAULT (CAST(strftime('%s', 'now') AS INTEGER))
+      );
+    `);
+  },
+  // 7 — multi-turn remote A2A conversations and recoverable runs.
+  //
+  // `context_id` is the A2A conversation id the peer hands back; sending it on
+  // the next turn is what lets a peer keep its own context across turns.
+  //
+  // `run_state` / `last_task_id` make a run survive a dropped stream or a
+  // restart: the peer's task id is the handle used to re-attach (A2A
+  // `resubscribe`) or to read the finished task, and a row still marked
+  // 'working' at startup is by definition orphaned (the process that owned the
+  // stream is gone), so it is resumed rather than left hanging.
+  (db) => {
+    db.exec(`
+      ALTER TABLE remote_agents ADD COLUMN context_id TEXT;
+      ALTER TABLE remote_agents ADD COLUMN last_task_id TEXT;
+      ALTER TABLE remote_agents ADD COLUMN run_state TEXT NOT NULL DEFAULT 'idle';
+      ALTER TABLE remote_agents ADD COLUMN run_started_at INTEGER;
+    `);
+  },
 ];
 
 export function migrate(db: Database): void {

@@ -93,6 +93,15 @@ export function getIntegrationsPath(): string {
 }
 
 /**
+ * Path of the remote A2A peer secrets file (`remote-agents.json`). Kept
+ * separate from the CSV-exported `settings` table and the database, so peer
+ * bearer tokens are never included in a database export.
+ */
+export function getRemoteAgentsPath(): string {
+  return join(getDataRoot(), "remote-agents.json");
+}
+
+/**
  * Directory holding media downloaded from IM platforms
  * (`<platform>/<chatId>/<file>`). Deleted per-chat when a bridged chat is
  * removed.

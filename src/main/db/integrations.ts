@@ -1,7 +1,8 @@
-import type { IntegrationPlatform } from "@shared/types";
+import type { ChatSourceKind, IntegrationPlatform } from "@shared/types";
 import { getDB } from "./index";
 
 const PLATFORMS: readonly IntegrationPlatform[] = ["wechat", "qq", "telegram"];
+const SOURCE_KINDS: readonly ChatSourceKind[] = [...PLATFORMS, "a2a"];
 
 function isPlatform(value: unknown): value is IntegrationPlatform {
   return (
@@ -10,11 +11,19 @@ function isPlatform(value: unknown): value is IntegrationPlatform {
   );
 }
 
-/** Platform binding of one chat (see the `chats.source*` columns). */
+function isSourceKind(value: unknown): value is ChatSourceKind {
+  return (
+    typeof value === "string" &&
+    (SOURCE_KINDS as readonly string[]).includes(value)
+  );
+}
+
+/** Binding of one chat (see the `chats.source*` columns). */
 export interface ChatSource {
   chatId: number;
-  platform: IntegrationPlatform;
-  /** Platform conversation id (stable per platform). */
+  /** IM platform, or `a2a` for a user-added remote agent peer. */
+  platform: ChatSourceKind;
+  /** Platform conversation id (stable per source). */
   session: string;
   /** Per-conversation reply credential (e.g. iLink `context_token`). */
   context: string | null;
@@ -48,7 +57,7 @@ export function getChatSource(chatId: number): ChatSource | null {
         source_context: string | null;
       }
     | undefined;
-  if (!row || !isPlatform(row.source) || !row.source_session) return null;
+  if (!row || !isSourceKind(row.source) || !row.source_session) return null;
   return {
     chatId: row.id,
     platform: row.source,

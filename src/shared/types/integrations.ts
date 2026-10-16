@@ -9,6 +9,15 @@
 
 export type IntegrationPlatform = "wechat" | "qq" | "telegram";
 
+/**
+ * Everything a chat can be bridged to.
+ *
+ * `IntegrationPlatform` is the fixed set of IM platforms the app ships; `a2a`
+ * is a user-added remote A2A agent (see `RemoteAgent`). Chats carry this kind;
+ * the IM settings UI keeps working with `IntegrationPlatform` alone.
+ */
+export type ChatSourceKind = IntegrationPlatform | "a2a";
+
 /** Connection lifecycle of one platform adapter. */
 export type IntegrationConnectionState =
   "disabled" | "connecting" | "connected" | "error" | "loginRequired";

@@ -1,4 +1,4 @@
-import type { IntegrationPlatform } from "./integrations";
+import type { ChatSourceKind } from "./integrations";
 
 /** Summary view of a chat row (includes unread count). */
 export interface Chat {
@@ -14,7 +14,7 @@ export interface Chat {
    * Platform this conversation is bridged to (`null` for local-only chats).
    * Doubles as the conversation's platform label in the UI.
    */
-  source: IntegrationPlatform | null;
+  source: ChatSourceKind | null;
   /** Pinned conversations sort above the rest of the list. */
   pinned: boolean;
   /**
