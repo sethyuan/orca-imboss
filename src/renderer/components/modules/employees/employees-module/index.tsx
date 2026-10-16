@@ -232,6 +232,7 @@ export function EmployeesModule(): React.JSX.Element {
         getItemKey={(employee) => employee.id}
         loading={loading}
         loadError={listError}
+        emptyMessage={t("No employees found")}
         selectable
         selectedKeys={multi.selectedKeys}
         onItemClick={(employee, index, mods) =>

@@ -239,7 +239,11 @@ export function CronModule(): React.JSX.Element {
         }
         loading={loading}
         loadError={listError}
-        emptyMessage={t("No scheduled tasks")}
+        emptyMessage={
+          debouncedQuery.trim().length > 0
+            ? t("No scheduled tasks match your search")
+            : t("No scheduled tasks yet. Ask an employee to create one.")
+        }
         renderItem={(row) =>
           row.kind === "group" ? (
             <CronGroupRow

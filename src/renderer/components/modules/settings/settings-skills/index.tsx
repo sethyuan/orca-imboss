@@ -174,6 +174,11 @@ export function SettingsSkills(): React.JSX.Element {
         getItemKey={(skill) => skill.name}
         loading={loading}
         loadError={listError}
+        emptyMessage={
+          debouncedQuery.trim().length > 0
+            ? t("No skills match your search")
+            : t("No skills installed")
+        }
         selectable
         selectedKeys={multi.selectedKeys}
         onItemClick={(skill, index, mods) =>

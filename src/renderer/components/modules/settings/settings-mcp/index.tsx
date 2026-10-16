@@ -173,6 +173,11 @@ export function SettingsMcp(): React.JSX.Element {
         getItemKey={(server) => server.name}
         loading={loading}
         loadError={listError}
+        emptyMessage={
+          debouncedQuery.trim().length > 0
+            ? t("No MCP servers match your search")
+            : t("No MCP configured")
+        }
         selectable
         selectedKeys={multi.selectedKeys}
         onItemClick={(server, index, mods) =>

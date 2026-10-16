@@ -65,6 +65,17 @@ const CHAT_ROW_ESTIMATE = 90;
 const chatItemKey = (chat: ChatSummary): number => chat.id;
 const chatRowEstimate = (): number => CHAT_ROW_ESTIMATE;
 
+/**
+ * Empty-list text for the conversation list: an empty list means something
+ * different depending on why it is empty (no chats at all, a search with no
+ * hits, or a tag filter that matches nothing).
+ */
+function chatListEmptyMessage(isSearching: boolean, tagCount: number): string {
+  if (isSearching) return t("No conversations match your search");
+  if (tagCount > 0) return t("No conversations with these tags");
+  return t("No conversations yet");
+}
+
 /** Transient per-chat run status driven by bound agent events. */
 interface ChatRunStatus {
   /** A run is in progress (keeps the reserved status slot in the layout). */
@@ -798,6 +809,7 @@ export function ChatModule(): React.JSX.Element {
         hasMore={listHasMore}
         loadMore={() => void search.loadMore()}
         loadError={listError}
+        emptyMessage={chatListEmptyMessage(isSearching, tagFilter.length)}
         selectable
         selectedKeys={multi.selectedKeys}
         onItemClick={(chat, index, mods) =>

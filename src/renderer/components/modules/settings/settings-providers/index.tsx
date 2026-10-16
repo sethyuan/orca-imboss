@@ -131,6 +131,7 @@ export function SettingsProviders(): React.JSX.Element {
             getItemKey={(provider) => provider.id}
             loading={loading}
             loadError={listError}
+            emptyMessage={t("No providers configured yet")}
             selectable
             selectedKeys={multi.selectedKeys}
             onItemClick={(provider, index, mods) =>
