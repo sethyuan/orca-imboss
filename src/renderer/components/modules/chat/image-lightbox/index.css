@@ -31,6 +31,31 @@
   min-width: 0;
 }
 
+/* Wraps the picture so zoom/pan owns a transform of its own: the open
+   animation writes a transform straight onto the image element. */
+.imb-lightbox-zoom {
+  display: block;
+  width: fit-content;
+  transform-origin: center;
+  transition: transform 120ms var(--imb-ease-standard);
+  /* The picture is dragged, never text-selected. */
+  user-select: none;
+}
+
+.imb-lightbox-zoom > .imb-lightbox-image {
+  display: block;
+}
+
+.imb-lightbox-zoom-zoomed {
+  cursor: grab;
+}
+
+.imb-lightbox-zoom-dragging {
+  cursor: grabbing;
+  /* Follow the pointer exactly. */
+  transition: none;
+}
+
 .imb-lightbox-image {
   max-width: 90vw;
   max-height: 80vh;
@@ -56,10 +81,20 @@
 }
 
 .imb-lightbox-caption {
+  /* A zoomed picture is scaled past its own box, and the transform puts it in
+     the z-index 0 layer, above in-flow content: lift the caption so the name,
+     the counter and the reset control stay readable and clickable over it. */
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: baseline;
   gap: 10px;
   max-width: 90vw;
+  padding: 4px 10px;
+  border-radius: var(--imb-radius-pill);
+  /* Invisible against the backdrop; keeps the text legible once a picture
+     reaches under it. */
+  background: rgba(0, 0, 0, 0.35);
   color: rgba(255, 255, 255, 0.82);
   font-size: var(--imb-text-sm);
 }
@@ -75,9 +110,34 @@
   opacity: 0.7;
 }
 
+.imb-lightbox-zoom-reset {
+  flex: none;
+  border: none;
+  padding: 2px 8px;
+  border-radius: var(--imb-radius-pill);
+  background: rgba(255, 255, 255, 0.14);
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--imb-motion-fast) var(--imb-ease-standard);
+}
+
+.imb-lightbox-zoom-reset:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.imb-lightbox-zoom-reset:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
 .imb-lightbox-close,
 .imb-lightbox-nav {
   position: absolute;
+  /* A zoomed picture is scaled past its own box, and the transform puts it in
+     the z-index 0 layer: keep the controls above it. */
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;

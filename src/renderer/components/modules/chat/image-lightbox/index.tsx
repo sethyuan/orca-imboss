@@ -1,8 +1,10 @@
 import { t } from "@shared/l10n";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { cls } from "reactutils";
 import { useWheelStep } from "../../../../hooks/use-wheel-step";
 import { IconChevronDown, IconX } from "../../../icons";
+import { useImageZoom } from "./use-image-zoom";
 import "./index.css";
 
 export interface LightboxImage {
@@ -28,10 +30,28 @@ export interface ImageLightboxProps {
 const OPEN_MS = 280;
 
 /**
+ * Zoom and pan in the full-screen viewer.
+ *
+ * The viewer's original behaviour is wheel/arrow stepping between pictures;
+ * this constant is the only integration point for the extra gestures, so it can
+ * be introduced in whichever form suits the project:
+ *
+ * - leave it `true` to ship zoom and pan on;
+ * - set it `false` to keep the viewer exactly as it was (stepping only, no
+ *   zoom, no pan — nothing else needs to change);
+ * - replace it with a stored setting read (`SettingKeys` + `imb.settings`) to
+ *   expose it as a user option;
+ * - or drop the commit to leave no trace.
+ */
+export const IMAGE_ZOOM_ENABLED = true;
+
+/**
  * Full-screen image viewer for the in-chat attachment previews. Rendered into
  * `document.body` so it escapes the thread's stacking context. Esc closes,
  * arrow keys / on-screen arrows / the wheel step between images, and a click on
- * the backdrop (never the image) closes.
+ * the backdrop (never the image) closes. Cmd/Ctrl + wheel (or a trackpad pinch)
+ * zooms at the pointer, dragging a zoomed picture moves it around, double
+ * clicking jumps in and back out, and `+` / `-` / `0` zoom in, out and reset.
  */
 export function ImageLightbox({
   images,
@@ -44,10 +64,18 @@ export function ImageLightbox({
   const closeRef = useRef<HTMLButtonElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const zoomRef = useRef<HTMLDivElement>(null);
+  const zoom = useImageZoom(zoomRef, IMAGE_ZOOM_ENABLED);
+  const { zoomIn, zoomOut, reset } = zoom;
 
   useEffect(() => {
     closeRef.current?.focus();
   }, []);
+
+  // Every picture opens fitted; the pan of the one before it would be wrong.
+  useEffect(() => {
+    reset();
+  }, [index, reset]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -60,16 +88,37 @@ export function ImageLightbox({
       } else if (count > 1 && event.key === "ArrowRight") {
         event.stopPropagation();
         onIndexChange((index + 1) % count);
+      } else if (
+        IMAGE_ZOOM_ENABLED &&
+        (event.key === "+" || event.key === "=")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        zoomIn();
+      } else if (
+        IMAGE_ZOOM_ENABLED &&
+        (event.key === "-" || event.key === "_")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        zoomOut();
+      } else if (IMAGE_ZOOM_ENABLED && event.key === "0") {
+        event.preventDefault();
+        event.stopPropagation();
+        reset();
       }
     };
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [count, index, onIndexChange, onClose]);
+  }, [count, index, onIndexChange, onClose, reset, zoomIn, zoomOut]);
 
   useWheelStep(
     overlayRef,
-    (direction) => onIndexChange((index + direction + count) % count),
-    count > 1,
+    (direction) => {
+      if (count > 1) onIndexChange((index + direction + count) % count);
+    },
+    count > 1 || IMAGE_ZOOM_ENABLED,
+    IMAGE_ZOOM_ENABLED ? zoom.interceptWheel : undefined,
   );
 
   // FLIP the image out of the thumbnail: place it at the thumbnail's box for
@@ -133,18 +182,46 @@ export function ImageLightbox({
       )}
 
       <figure className="imb-lightbox-figure">
-        <img
-          key={index}
-          ref={imageRef}
-          className="imb-lightbox-image"
-          src={current.src}
-          alt={current.name}
-          draggable={false}
-        />
+        <div
+          ref={zoomRef}
+          className={cls(
+            "imb-lightbox-zoom",
+            zoom.scale > 1 && "imb-lightbox-zoom-zoomed",
+            zoom.dragging && "imb-lightbox-zoom-dragging",
+          )}
+          style={{
+            transform: `translate(${zoom.offset.x}px, ${zoom.offset.y}px) scale(${zoom.scale})`,
+          }}
+          onPointerDown={zoom.onPointerDown}
+          onPointerMove={zoom.onPointerMove}
+          onPointerUp={zoom.onPointerUp}
+          onPointerCancel={zoom.onPointerUp}
+          onDoubleClick={zoom.onDoubleClick}
+        >
+          <img
+            key={index}
+            ref={imageRef}
+            className="imb-lightbox-image"
+            src={current.src}
+            alt={current.name}
+            draggable={false}
+          />
+        </div>
         <figcaption className="imb-lightbox-caption">
           <span className="imb-lightbox-name">{current.name}</span>
           {count > 1 && (
             <span className="imb-lightbox-count">{`${index + 1} / ${count}`}</span>
+          )}
+          {IMAGE_ZOOM_ENABLED && zoom.scale > 1 && (
+            <button
+              type="button"
+              className="imb-lightbox-zoom-reset"
+              onClick={reset}
+              aria-label={t("Reset zoom")}
+              title={t("Reset zoom")}
+            >
+              {`${Math.round(zoom.scale * 100)}%`}
+            </button>
           )}
         </figcaption>
       </figure>
