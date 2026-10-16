@@ -495,6 +495,13 @@ function setEmployeesTool(): AnyPiTool {
                 "Names of installed skills to assign (see `imb_toolset`: `skills`).",
             }),
           ),
+          groups: Type.Optional(
+            Type.Array(Type.String({ maxLength: 100 }), {
+              maxItems: 50,
+              description:
+                "Names of groups/departments to assign to this employee (e.g. ['信息检索', '开发功能']).",
+            }),
+          ),
           modelId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
           thinkingLevel: Type.Optional(
             Type.Union([
@@ -520,6 +527,7 @@ function setEmployeesTool(): AnyPiTool {
           systemPrompt?: string;
           mcp?: string[];
           skills?: string[];
+          groups?: string[];
           modelId?: string | null;
           thinkingLevel?:
             "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;

@@ -15,6 +15,7 @@ import { employeeAvatarSrc } from "../../../employee-avatar/avatar-src";
 import { Field } from "../../../field";
 import { IconCamera } from "../../../icons";
 import { Input } from "../../../input";
+import { GroupSelect } from "../../../group-select";
 import { Modal } from "../../../modal";
 import { MultiSelect, type MultiSelectOption } from "../../../multi-select";
 import { Select } from "../../../select";
@@ -26,6 +27,7 @@ export interface EmployeeDetailProps {
   employee: Employee;
   mcpOptions: MultiSelectOption[];
   skillOptions: MultiSelectOption[];
+  groupOptions: string[];
   models: ModelOption[];
   /** App default model (`provider/id`), used when this employee follows it. */
   defaultModel: string;
@@ -41,6 +43,7 @@ export function EmployeeDetail({
   employee,
   mcpOptions,
   skillOptions,
+  groupOptions,
   models,
   defaultModel,
   onPatch,
@@ -57,6 +60,7 @@ export function EmployeeDetail({
           name: employee.name,
           systemPrompt: employee.systemPrompt,
           skills: employee.skills,
+          groups: employee.groups,
           modelId: employee.modelId ?? "",
           thinkingLevel: employee.thinkingLevel,
         }
@@ -66,6 +70,7 @@ export function EmployeeDetail({
           systemPrompt: employee.systemPrompt,
           mcp: employee.mcp,
           skills: employee.skills,
+          groups: employee.groups,
           modelId: employee.modelId ?? "",
           thinkingLevel: employee.thinkingLevel,
         },
@@ -260,6 +265,16 @@ export function EmployeeDetail({
             onValueCommit={(systemPrompt) =>
               scheduleSave({ ...form, systemPrompt })
             }
+          />
+        </Field>
+
+        <Field label={t("Groups")}>
+          <GroupSelect
+            value={form.groups ?? []}
+            options={groupOptions}
+            allowCreate
+            placeholder={t("Select or enter groups")}
+            onChange={(groups) => scheduleSave({ ...form, groups })}
           />
         </Field>
 

@@ -8,6 +8,7 @@ import { Input } from "../../../input";
 import { Modal } from "../../../modal";
 import { MultiSelect, type MultiSelectOption } from "../../../multi-select";
 import { Select } from "../../../select";
+import { GroupSelect } from "../../../group-select";
 import { Textarea } from "../../../textarea";
 import {
   modelRef,
@@ -20,6 +21,7 @@ export interface EmployeeRecruitModalProps {
   onClose: () => void;
   mcpOptions: MultiSelectOption[];
   skillOptions: MultiSelectOption[];
+  groupOptions: string[];
   models: ModelOption[];
   /** App default model (`provider/id`), used when the recruit follows it. */
   defaultModel: string;
@@ -31,6 +33,7 @@ export function EmployeeRecruitModal({
   onClose,
   mcpOptions,
   skillOptions,
+  groupOptions,
   models,
   defaultModel,
   onCreate,
@@ -40,6 +43,7 @@ export function EmployeeRecruitModal({
   const [prompt, setPrompt] = useState("");
   const [mcp, setMcp] = useState<string[]>([]);
   const [skills, setSkills] = useState<string[]>([]);
+  const [groups, setGroups] = useState<string[]>([]);
   const [modelId, setModelId] = useState("");
   const [thinkingLevel, setThinkingLevel] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +55,7 @@ export function EmployeeRecruitModal({
     setPrompt("");
     setMcp([]);
     setSkills([]);
+    setGroups([]);
     setModelId("");
     setThinkingLevel("");
     setError(null);
@@ -67,6 +72,7 @@ export function EmployeeRecruitModal({
         systemPrompt: prompt,
         mcp,
         skills,
+        groups,
         modelId: modelId || null,
         thinkingLevel: isThinkingLevel(thinkingLevel) ? thinkingLevel : null,
       });
@@ -134,6 +140,15 @@ export function EmployeeRecruitModal({
           )}
           minHeight={120}
           onChange={(e) => setPrompt(e.target.value)}
+        />
+      </Field>
+      <Field label={t("Groups")}>
+        <GroupSelect
+          value={groups}
+          options={groupOptions}
+          allowCreate
+          placeholder={t("Select or enter groups")}
+          onChange={setGroups}
         />
       </Field>
       <Field label={t("Linked MCP")}>
