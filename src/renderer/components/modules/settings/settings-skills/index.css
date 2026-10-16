@@ -5,3 +5,10 @@
   word-break: break-word;
   user-select: text;
 }
+
+/* "Import Skills" (a local folder) above "Import from URL" (a download). */
+.imb-skill-import-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-2);
+}

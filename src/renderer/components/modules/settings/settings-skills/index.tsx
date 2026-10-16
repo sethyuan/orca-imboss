@@ -1,3 +1,4 @@
+import { SKILL_IMPORT_ENABLED } from "@shared/constants/skills";
 import { t } from "@shared/l10n";
 import type { InstalledSkill } from "@shared/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -13,6 +14,7 @@ import { ListPane } from "../../../list-pane";
 import { ListRow } from "../../../list-row";
 import { Modal } from "../../../modal";
 import { SearchInput } from "../../../search-input";
+import { SkillImport } from "./skill-import";
 import "../../module-common.css";
 import "../settings-split.css";
 import "./index.css";
@@ -32,6 +34,7 @@ export function SettingsSkills(): React.JSX.Element {
   );
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkNames, setBulkNames] = useState<string[]>([]);
+  const [importOpen, setImportOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
 
@@ -160,9 +163,20 @@ export function SettingsSkills(): React.JSX.Element {
         />
       }
       footer={
-        <Button block loading={busy} onClick={() => void importFromFolder()}>
-          {t("Import Skills")}
-        </Button>
+        <div className="imb-skill-import-actions">
+          <Button block loading={busy} onClick={() => void importFromFolder()}>
+            {t("Import Skills")}
+          </Button>
+          {SKILL_IMPORT_ENABLED && (
+            <Button
+              block
+              variant="secondary"
+              onClick={() => setImportOpen(true)}
+            >
+              {t("Import from URL")}
+            </Button>
+          )}
+        </div>
       }
     >
       <ItemList
@@ -298,6 +312,12 @@ export function SettingsSkills(): React.JSX.Element {
           {t("Linked employees must choose again after removing.")}
         </p>
       </Modal>
+      {SKILL_IMPORT_ENABLED && importOpen && (
+        <SkillImport
+          onClose={() => setImportOpen(false)}
+          onInstalled={() => appStore.reloadSkills()}
+        />
+      )}
       {error !== null && (
         <p className="imb-error-text imb-module-error">{error}</p>
       )}

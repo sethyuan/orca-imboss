@@ -31,6 +31,7 @@ import type {
   ProviderLoginEvent,
   ProviderModelsQuery,
   ProviderUpsert,
+  SkillPreview,
   SpendRange,
   SpendReport,
   StagedRestore,
@@ -481,6 +482,23 @@ const api = {
       >,
     install: () =>
       ipcRenderer.invoke("skills:install") as Promise<string[] | null>,
+    /**
+     * Fetch a link (a .zip, a SKILL.md, or a GitHub repo/folder) and stage the
+     * skills in it; nothing is written until `commitInstall`.
+     */
+    inspectUrl: (url: string) =>
+      ipcRenderer.invoke("skills:inspectUrl", url) as Promise<SkillPreview[]>,
+    /** Pick a .zip and stage the skills in it (`null` = cancelled). */
+    inspectArchive: () =>
+      ipcRenderer.invoke("skills:inspectArchive") as Promise<
+        SkillPreview[] | null
+      >,
+    /** Write the reviewed skills to disk; returns the installed names. */
+    commitInstall: (ids: string[]) =>
+      ipcRenderer.invoke("skills:commitInstall", ids) as Promise<string[]>,
+    /** Drop staged skills the boss did not approve. */
+    discardInstall: (ids: string[]) =>
+      ipcRenderer.invoke("skills:discardInstall", ids) as Promise<void>,
     uninstall: (name: string) =>
       ipcRenderer.invoke("skills:uninstall", name) as Promise<void>,
     onChanged: (cb: () => void) => on("skills:changed", cb),

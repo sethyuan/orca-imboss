@@ -13,6 +13,7 @@ export * from "./paged_lists";
 export * from "./projects";
 export * from "./providers";
 export * from "./sessions";
+export * from "./skills";
 export * from "./spend";
 export * from "./themes";
 export * from "./updater";

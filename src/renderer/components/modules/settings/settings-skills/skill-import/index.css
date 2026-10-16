@@ -1,0 +1,91 @@
+.imb-skill-import-archive {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: var(--imb-space-3);
+}
+
+.imb-skill-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-3);
+}
+
+.imb-skill-review-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-2);
+  padding: var(--imb-space-3) var(--imb-space-4);
+  border: 1px solid var(--imb-border);
+  border-radius: var(--imb-radius-md);
+  background: var(--imb-surface);
+}
+
+.imb-skill-review-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--imb-space-3);
+}
+
+.imb-skill-review-name {
+  color: var(--imb-fg);
+  font-size: var(--imb-text-base);
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.imb-skill-review-meta {
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.imb-skill-review-desc {
+  margin: 0;
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+  line-height: var(--imb-leading-body);
+  word-break: break-word;
+}
+
+.imb-skill-review-warn {
+  margin: 0;
+  color: var(--imb-warn);
+  font-size: var(--imb-text-sm);
+  line-height: var(--imb-leading-body);
+  word-break: break-word;
+}
+
+.imb-skill-review-files {
+  max-height: 220px;
+  overflow: auto;
+  margin: var(--imb-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.imb-skill-review-file {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--imb-space-3);
+  padding: 3px 0;
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+}
+
+.imb-skill-review-path {
+  font-family: var(--imb-font-mono, monospace);
+  word-break: break-all;
+}
+
+.imb-skill-review-size {
+  color: var(--imb-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.imb-skill-review-script .imb-skill-review-path {
+  color: var(--imb-warn);
+}

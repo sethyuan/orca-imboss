@@ -9,10 +9,11 @@ import { isBuiltinSkillName } from "./builtin-skills";
 /**
  * Install / uninstall of skills under `~/.imboss/agent/skills/<name>/`.
  * A valid skill folder contains a `SKILL.md` (Agent Skills standard).
- * Local-folder import only this iteration (confirmed scope).
+ * Local-folder import is handled here; archives and links go through
+ * `src/main/skill-import.ts`, which stages them for review first.
  */
 
-const SKILL_FILE = "SKILL.md";
+export const SKILL_FILE = "SKILL.md";
 
 const SAFE_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
@@ -166,7 +167,7 @@ export async function uninstallSkill(name: string): Promise<void> {
   await rm(dest, { recursive: true, force: true });
 }
 
-function isValidSkillName(name: string): boolean {
+export function isValidSkillName(name: string): boolean {
   return SAFE_NAME_RE.test(name);
 }
 
@@ -180,21 +181,29 @@ async function readSkillMetadata(skillFilePath: string): Promise<{
   description: string | null;
 }> {
   try {
-    const head = (await readFile(skillFilePath, "utf8")).slice(0, 4096);
-    const nameMatch = /^name:\s*(.+)$/m.exec(head);
-    const descMatch = /^description:\s*(.+)$/m.exec(head);
-    const clean = (raw: string | undefined): string | null =>
-      raw ? raw.trim().replace(/^["']|["']$/g, "") : null;
-    const name = clean(nameMatch?.[1]);
-    const description = clean(descMatch?.[1]);
-    return {
-      name: name && name.length > 0 ? name : null,
-      description:
-        description && description.length > 0
-          ? description.slice(0, 500)
-          : null,
-    };
+    return parseSkillMetadata(
+      (await readFile(skillFilePath, "utf8")).slice(0, 4096),
+    );
   } catch {
     return { name: null, description: null };
   }
+}
+
+/** Same parse as `readSkillMetadata`, for SKILL.md text already in hand. */
+export function parseSkillMetadata(text: string): {
+  name: string | null;
+  description: string | null;
+} {
+  const head = text.slice(0, 4096);
+  const nameMatch = /^name:\s*(.+)$/m.exec(head);
+  const descMatch = /^description:\s*(.+)$/m.exec(head);
+  const clean = (raw: string | undefined): string | null =>
+    raw ? raw.trim().replace(/^["']|["']$/g, "") : null;
+  const name = clean(nameMatch?.[1]);
+  const description = clean(descMatch?.[1]);
+  return {
+    name: name && name.length > 0 ? name : null,
+    description:
+      description && description.length > 0 ? description.slice(0, 500) : null,
+  };
 }
