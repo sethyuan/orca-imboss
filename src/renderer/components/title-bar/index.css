@@ -49,3 +49,8 @@
   background: var(--imb-danger);
   color: #fff;
 }
+
+.imb-winbtn:focus-visible {
+  outline: none;
+  box-shadow: var(--imb-focus-ring);
+}
