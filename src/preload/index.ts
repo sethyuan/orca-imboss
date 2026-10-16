@@ -235,6 +235,11 @@ const api = {
       >,
     summary: (id: number) =>
       ipcRenderer.invoke("chats:summary", id) as Promise<ChatSummary | null>,
+    latestForEmployee: (employeeId: number) =>
+      ipcRenderer.invoke(
+        "chats:latestForEmployee",
+        employeeId,
+      ) as Promise<number | null>,
     rootId: (id: number) =>
       ipcRenderer.invoke("chats:rootId", id) as Promise<number>,
     markRead: (id: number) =>

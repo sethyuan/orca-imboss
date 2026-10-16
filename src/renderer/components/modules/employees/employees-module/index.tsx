@@ -23,6 +23,7 @@ import { ListPane } from "../../../list-pane";
 import { ListRow } from "../../../list-row";
 import { Modal } from "../../../modal";
 import "../../../modules/module-common.css";
+import "./index.css";
 import type { MultiSelectOption } from "../../../multi-select";
 import { SearchInput } from "../../../search-input";
 import { EmployeeDetail } from "../employee-detail";
@@ -102,8 +103,7 @@ export function EmployeesModule(): React.JSX.Element {
   const multi = useMultiSelect<Employee, number>({
     getKey: (employee) => employee.id,
     items: employees,
-    onActivate: (employee) => setSelectedId(employee.id),
-    // The built-in assistant is always pinned but never selectable; bulk
+    onActivate: (employee) => setSelectedId(employee.id),    // The built-in assistant is always pinned but never selectable; bulk
     // actions and "Select all" must not be able to reach it.
     isSelectable: (employee) => employee.id !== 0,
   });
@@ -111,6 +111,20 @@ export function EmployeesModule(): React.JSX.Element {
   const selectSelection = multi.select;
   const selectedIdRef = useRef<number | null>(null);
   selectedIdRef.current = selectedId;
+
+  /** Open an employee's daily agent session ("private chat") in its latest chat. */
+  const openEmployeeSession = useCallback(
+    async (employeeId: number): Promise<void> => {
+      try {
+        const chatId = await imb.chats.latestForEmployee(employeeId);
+        if (chatId === null) return;
+        await appStore.openAgentSession(employeeId, chatId);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [],
+  );
 
   // Query changes reset the selection.
   useEffect(() => {
@@ -245,7 +259,18 @@ export function EmployeesModule(): React.JSX.Element {
           <ListRow
             active={employee.id === selectedId}
             selected={isSelectedRow}
-            avatar={<EmployeeAvatar employeeId={employee.id} alt />}
+            avatar={
+              <span
+                className="imb-emp-avatar-hit"
+                title={t("Double-click to open private chat")}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  void openEmployeeSession(employee.id);
+                }}
+              >
+                <EmployeeAvatar employeeId={employee.id} alt />
+              </span>
+            }
             name={employee.name || t("Unnamed")}
             meta={`#${employee.id}`}
             sub={employee.role || "—"}
@@ -257,6 +282,11 @@ export function EmployeesModule(): React.JSX.Element {
             onContextMenu={(e) => {
               e.preventDefault();
               const items: ContextMenuItem[] = [
+                {
+                  key: "dm",
+                  label: t("Private chat"),
+                  onSelect: () => void openEmployeeSession(employee.id),
+                },
                 {
                   key: "select-all",
                   label: t("Select all"),

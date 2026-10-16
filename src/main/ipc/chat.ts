@@ -50,6 +50,12 @@ export function registerChatHandlers(): void {
     dbChats.getChatSummary(assertInteger(id, "chat id")),
   );
 
+  // Most recent chat (root or group) an employee participates in; used by the
+  // employees list to open that employee's agent session ("private chat").
+  ipcMain.handle("chats:latestForEmployee", (_event, employeeId: unknown) =>
+    dbChats.findLatestChatForEmployee(assertInteger(employeeId, "employee id")),
+  );
+
   // Root (user) chat of a chat, resolved by walking `from_chat_id` upward.
   // Used by the session view to redirect the assistant from a task group chat
   // to the root-chat session it actually runs in.
