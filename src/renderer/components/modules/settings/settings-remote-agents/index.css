@@ -1,0 +1,156 @@
+.imb-remote-intro {
+  margin: 0 0 var(--imb-space-5);
+  max-width: 620px;
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+  line-height: 1.5;
+}
+
+.imb-remote-actions {
+  display: flex;
+  gap: var(--imb-space-3);
+  margin-bottom: var(--imb-space-4);
+}
+
+.imb-remote-error {
+  margin: var(--imb-space-2) 0 0;
+  color: var(--imb-danger);
+  font-size: var(--imb-text-sm);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.imb-remote-card {
+  padding: var(--imb-space-4) var(--imb-space-5);
+  margin-bottom: var(--imb-space-4);
+  border: 1px solid var(--imb-border);
+  border-radius: var(--imb-radius-md);
+  background: var(--imb-surface);
+}
+
+.imb-remote-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--imb-space-3);
+  flex-wrap: wrap;
+}
+
+.imb-remote-title {
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-2);
+  min-width: 0;
+}
+
+.imb-remote-name {
+  font-size: var(--imb-text-lg);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imb-remote-status {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: var(--imb-radius-pill);
+  font-size: var(--imb-text-xs);
+  color: var(--imb-muted);
+  background: color-mix(in oklch, var(--imb-muted) 14%, transparent);
+}
+
+.imb-remote-status.imb-is-ok {
+  color: var(--imb-success);
+  background: color-mix(in oklch, var(--imb-success) 16%, transparent);
+}
+
+.imb-remote-status.imb-is-error {
+  color: var(--imb-danger);
+  background: color-mix(in oklch, var(--imb-danger) 14%, transparent);
+}
+
+.imb-remote-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-2);
+  flex: none;
+}
+
+.imb-remote-url {
+  margin: var(--imb-space-3) 0 0;
+  font-family: var(--imb-font-mono);
+  font-size: var(--imb-text-xs);
+  color: var(--imb-muted);
+  word-break: break-all;
+}
+
+.imb-remote-desc {
+  margin: var(--imb-space-2) 0 0;
+  font-size: var(--imb-text-sm);
+  color: var(--imb-text);
+  line-height: 1.5;
+}
+
+.imb-remote-skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--imb-space-2);
+  margin: var(--imb-space-3) 0 0;
+}
+
+.imb-remote-skill {
+  padding: 1px 8px;
+  border-radius: var(--imb-radius-pill);
+  font-size: var(--imb-text-xs);
+  color: var(--imb-muted);
+  background: color-mix(in oklch, var(--imb-muted) 12%, transparent);
+}
+
+.imb-remote-inbound {
+  margin-top: var(--imb-space-7);
+  padding-top: var(--imb-space-6);
+  border-top: 1px solid var(--imb-border);
+}
+
+.imb-remote-inbound-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--imb-space-4);
+}
+
+.imb-remote-section-title {
+  margin: 0 0 var(--imb-space-2);
+  font-size: var(--imb-text-md);
+  font-weight: 600;
+}
+
+.imb-remote-status-line {
+  margin: var(--imb-space-3) 0 var(--imb-space-4);
+  font-size: var(--imb-text-sm);
+  color: var(--imb-muted);
+  word-break: break-all;
+}
+
+.imb-remote-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--imb-space-3);
+  margin-bottom: var(--imb-space-5);
+}
+
+.imb-remote-grid-action {
+  display: flex;
+  align-items: center;
+}
+
+.imb-remote-token {
+  margin: var(--imb-space-3) 0 0;
+  font-family: var(--imb-font-mono);
+  font-size: var(--imb-text-xs);
+  color: var(--imb-muted);
+  word-break: break-all;
+  user-select: all;
+}

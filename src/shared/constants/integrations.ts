@@ -1,4 +1,7 @@
-import type { IntegrationPlatform } from "@shared/types/integrations";
+import type {
+  ChatSourceKind,
+  IntegrationPlatform,
+} from "@shared/types/integrations";
 
 /** Canonical order used by the Settings → Integrations page. */
 export const INTEGRATION_PLATFORMS: IntegrationPlatform[] = [
@@ -12,6 +15,16 @@ export const INTEGRATION_LABEL_KEYS: Record<IntegrationPlatform, string> = {
   wechat: "WeChat",
   qq: "QQ",
   telegram: "Telegram",
+};
+
+/**
+ * English source label key for a chat's `source` chip. Extends the IM platform
+ * labels with the user-added A2A peers, which are not IM platforms.
+ */
+export const CHAT_SOURCE_LABEL_KEYS: Record<ChatSourceKind, string> = {
+  ...INTEGRATION_LABEL_KEYS,
+  a2a: "A2A",
+  "a2a-in": "A2A inbound",
 };
 
 /**

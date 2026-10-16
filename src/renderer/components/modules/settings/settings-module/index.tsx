@@ -13,6 +13,7 @@ import { SettingsNetwork } from "../settings-network";
 import { SettingsProjects } from "../settings-projects";
 import { SettingsProviders } from "../settings-providers";
 import { SettingsSkills } from "../settings-skills";
+import { SettingsRemoteAgents } from "../settings-remote-agents";
 import { SettingsTheme } from "../settings-theme";
 
 const SECTIONS: Array<{
@@ -46,6 +47,11 @@ const SECTIONS: Array<{
     id: "integrations",
     labelKey: "Integrations",
     descKey: "Connect WeChat, QQ and Telegram",
+  },
+  {
+    id: "remote",
+    labelKey: "Remote agents",
+    descKey: "Collaborate with agents on other machines over A2A",
   },
   {
     id: "network",
@@ -92,6 +98,8 @@ export function SettingsModule(): React.JSX.Element {
       <SettingsSkills />
     ) : settingsSection === "integrations" ? (
       <SettingsIntegrations />
+    ) : settingsSection === "remote" ? (
+      <SettingsRemoteAgents />
     ) : settingsSection === "network" ? (
       <SettingsNetwork />
     ) : settingsSection === "backup" ? (

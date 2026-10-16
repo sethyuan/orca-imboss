@@ -25,3 +25,14 @@ export const MAX_VISIBLE_ATTACHMENTS = 5;
  * `MAX_TOOL_ATTACHMENTS` to the message.
  */
 export const MAX_ATTACHMENT_TOTAL = 1000;
+
+/**
+ * Caps for files carried over the A2A bridge. Much lower than
+ * `MAX_ATTACHMENT_BYTES` because the payload is base64-ish JSON on the wire and
+ * the peer's inbox is not ours to fill: files past the cap stay named in the
+ * message text instead of being uploaded.
+ */
+export const MAX_REMOTE_FILE_BYTES = 8 * 1024 * 1024;
+
+/** Max bytes of all uploaded files in a single A2A message. */
+export const MAX_REMOTE_TOTAL_BYTES = 24 * 1024 * 1024;

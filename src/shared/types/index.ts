@@ -12,6 +12,7 @@ export * from "./miniapps";
 export * from "./paged_lists";
 export * from "./projects";
 export * from "./providers";
+export * from "./remote";
 export * from "./sessions";
 export * from "./spend";
 export * from "./themes";
