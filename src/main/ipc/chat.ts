@@ -57,11 +57,14 @@ export function registerChatHandlers(): void {
     dbChats.getRootChatId(assertInteger(id, "chat id")),
   );
 
+  // Clears unread and advances the read position; resolves to the *previous*
+  // position so the thread can mark the first message the user has not seen.
   ipcMain.handle("chats:markRead", (_event, id: unknown) => {
     const safeId = assertInteger(id, "chat id");
-    dbChats.markRead(safeId);
+    const previous = dbChats.markRead(safeId);
     // Keep the renderer unread mirror in sync (cleared on open).
     sendToRenderer("chats:unreadChanged", { chatId: safeId, unread: 0 });
+    return previous;
   });
 
   ipcMain.handle(

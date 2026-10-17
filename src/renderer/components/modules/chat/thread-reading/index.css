@@ -1,0 +1,65 @@
+/* Thread reading aids (see `index.tsx`). Both are inserted by the chat module
+   only while `THREAD_READING_ENABLED` is true. */
+
+/* Positioning context for the floating jump button. The thread keeps its own
+   flex sizing inside it, so the wrapper is layout-neutral. */
+.imb-thread-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* "New messages" divider: a hairline with a centered label, rendered before
+   the first message the user has not seen. */
+.imb-unread-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  color: var(--imb-accent);
+  font-size: var(--imb-text-xs);
+  user-select: none;
+}
+
+.imb-unread-divider-rule {
+  flex: 1;
+  height: 1px;
+  background: color-mix(in oklch, var(--imb-accent) 45%, transparent);
+}
+
+.imb-unread-divider-label {
+  flex: none;
+  font-weight: 600;
+}
+
+/* Jump to the newest message: floats over the bottom of the thread while the
+   user is scrolled up (the wrapper above is the positioning context). */
+.imb-jump-latest {
+  position: absolute;
+  right: var(--imb-space-6);
+  bottom: var(--imb-space-4);
+  z-index: 5;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--imb-border);
+  border-radius: var(--imb-radius-pill);
+  background: var(--imb-surface);
+  color: var(--imb-fg);
+  box-shadow: var(--imb-elev-raised);
+  cursor: pointer;
+}
+
+.imb-jump-latest:hover {
+  background: var(--imb-bg-2);
+}
+
+.imb-jump-latest svg {
+  width: 18px;
+  height: 18px;
+}

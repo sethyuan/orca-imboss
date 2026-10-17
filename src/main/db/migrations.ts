@@ -183,6 +183,14 @@ const MIGRATIONS: Array<(db: Database) => void> = [
       ALTER TABLE messages ADD COLUMN image_model TEXT;
     `);
   },
+  // 6 — the user's read position in a chat: the id of the newest message seen
+  // the last time the chat was open. `markRead` advances it, so the thread can
+  // mark where the previous visit left off. 0 = nothing read yet.
+  (db) => {
+    db.exec(`
+      ALTER TABLE chats ADD COLUMN last_read_message_id INTEGER NOT NULL DEFAULT 0;
+    `);
+  },
 ];
 
 export function migrate(db: Database): void {

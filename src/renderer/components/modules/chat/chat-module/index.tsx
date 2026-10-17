@@ -48,6 +48,12 @@ import {
   previewText,
   shouldShowTimeSeparator,
 } from "../relative-time";
+import {
+  JumpToLatest,
+  THREAD_READING_ENABLED,
+  UnreadDivider,
+  firstUnreadIndex,
+} from "../thread-reading";
 import "../thread.css";
 import { TimeSeparator } from "../time-separator";
 import "./index.css";
@@ -142,6 +148,13 @@ export function ChatModule(): React.JSX.Element {
     chatId: number;
     title: string;
   } | null>(null);
+  // Whether the thread is at (near) the bottom — `pinnedRef` mirrored as state
+  // so the jump-to-latest affordance can react to scrolling (React bails out
+  // when the value is unchanged, so this is cheap).
+  const [atBottom, setAtBottom] = useState(true);
+  // Read position captured when a chat is opened: the newest message id of the
+  // previous visit (0 = nothing read yet). Feeds the "new messages" divider.
+  const [readAnchor, setReadAnchor] = useState(0);
   // Set on the first commit/cancel so the blur that follows (the input
   // unmounts) cannot persist a second time.
   const titleDoneRef = useRef(false);
@@ -400,16 +413,20 @@ export function ChatModule(): React.JSX.Element {
    * server-paged search / tag filter — the matching row in `search.items`
    * (otherwise its badge would stay stale). Unconditional; callers either know
    * the chat is unread or call the guarded {@link clearSelectedUnread}.
+   *
+   * Resolves to the read position *before* the advance, which is what the
+   * "new messages" divider is placed from.
    */
   const applyUnreadCleared = useCallback(
-    (chatId: number): void => {
-      void imb.chats.markRead(chatId);
+    (chatId: number): Promise<number> => {
+      const advanced = imb.chats.markRead(chatId);
       appStore.setChatUnread(chatId, 0);
       if (serverModeRef.current) {
         search.mutate((items) =>
           items.map((c) => (c.id === chatId ? { ...c, unread: 0 } : c)),
         );
       }
+      return advanced;
     },
     [search.mutate],
   );
@@ -420,15 +437,16 @@ export function ChatModule(): React.JSX.Element {
    * re-selection) are therefore cheap and never re-issue IPC. Used wherever a
    * chat can become the displayed one *without* the `selectedId` effect running
    * (e.g. regaining window focus, or a notification click landing on the chat
-   * that is already selected).
+   * that is already selected). Resolves to the read position before the advance
+   * when it cleared something, `null` when there was nothing to clear.
    */
   const clearSelectedUnread = useCallback(
-    (chatId: number | null): void => {
-      if (chatId === null) return;
+    (chatId: number | null): Promise<number> | null => {
+      if (chatId === null) return null;
       const inCache = appStore.data.chats.items.find((c) => c.id === chatId);
       const inList = chatsRef.current.find((c) => c.id === chatId);
-      if ((inCache?.unread ?? 0) <= 0 && (inList?.unread ?? 0) <= 0) return;
-      applyUnreadCleared(chatId);
+      if ((inCache?.unread ?? 0) <= 0 && (inList?.unread ?? 0) <= 0) return null;
+      return applyUnreadCleared(chatId);
     },
     [applyUnreadCleared],
   );
@@ -509,6 +527,8 @@ export function ChatModule(): React.JSX.Element {
     if (selectedId === null) {
       restoreScrollRef.current = null;
       pinnedRef.current = true;
+      setAtBottom(true);
+      setReadAnchor(0);
       setMessages([]);
       return;
     }
@@ -516,13 +536,26 @@ export function ChatModule(): React.JSX.Element {
     // (a fresh selection with no saved position also starts pinned).
     const saved = chatScrollStore.get(selectedId);
     pinnedRef.current = saved ? saved.pinned : true;
+    setAtBottom(pinnedRef.current);
     restoreScrollRef.current =
       saved && !saved.pinned
         ? { chatId: selectedId, scrollTop: saved.scrollTop }
         : null;
     void loadMessages(selectedId);
-    clearSelectedUnread(selectedId);
-  }, [selectedId, loadMessages, clearSelectedUnread]);
+    // Clear this chat's unread (which mirrors the cleared counter into every
+    // list source) and keep the read position from *before* the advance: that
+    // is what places the "new messages" divider. Opening a chat is exactly when
+    // the position must advance, so the call is unconditional here; with the
+    // feature off the guarded path behaves as it always did. The guard drops a
+    // late answer from a chat the user has already left.
+    if (THREAD_READING_ENABLED) {
+      void applyUnreadCleared(selectedId).then((previous) => {
+        if (selectedIdRef.current === selectedId) setReadAnchor(previous);
+      });
+    } else {
+      clearSelectedUnread(selectedId);
+    }
+  }, [selectedId, loadMessages, applyUnreadCleared, clearSelectedUnread]);
 
   // Switching chats abandons any in-progress rename and drops the optimistic
   // title (the new chat's title comes from its own summary).
@@ -668,6 +701,25 @@ export function ChatModule(): React.JSX.Element {
     [messages, pairing],
   );
 
+  // First message this visit has not seen (-1 = everything is read). Derived
+  // from the anchor captured at open, so messages arriving while the chat is
+  // open never move the divider.
+  const unreadIndex =
+    THREAD_READING_ENABLED && readAnchor > 0
+      ? firstUnreadIndex(visibleMessages, readAnchor)
+      : -1;
+
+  const showJumpToLatest =
+    THREAD_READING_ENABLED && !atBottom && visibleMessages.length > 0;
+
+  const jumpToLatest = useCallback((): void => {
+    const el = threadRef.current;
+    if (!el) return;
+    pinnedRef.current = true;
+    el.scrollTop = el.scrollHeight;
+    setAtBottom(true);
+  }, []);
+
   // Cmd/Ctrl+K focuses the chat search (the same muscle memory as most apps).
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -711,6 +763,7 @@ export function ChatModule(): React.JSX.Element {
     const pinned =
       el.scrollHeight - el.scrollTop - el.clientHeight <= PIN_THRESHOLD;
     pinnedRef.current = pinned;
+    setAtBottom(pinned);
     if (selectedIdRef.current !== null) {
       chatScrollStore.set(selectedIdRef.current, {
         scrollTop: el.scrollTop,
@@ -1051,26 +1104,34 @@ export function ChatModule(): React.JSX.Element {
           </span>
         )}
       </div>
-      <div className="imb-thread" ref={threadRef} onScroll={handleThreadScroll}>
-        {visibleMessages.map((message, index) => (
-          <Fragment key={`${message.chatId}-${message.id}`}>
-            {shouldShowTimeSeparator(visibleMessages[index - 1], message) && (
-              <TimeSeparator secs={message.createdAt} />
-            )}
-            <MessageItem
-              message={message}
-              onAnswered={() => void loadMessages(message.chatId)}
-              askAnswer={pairing.answerByAskId.get(message.id)}
-            />
-          </Fragment>
-        ))}
-        {selectedRunStatus !== undefined && (
-          // Reserved, fixed-height slot: it is present for the whole run, so
-          // toggling the compaction text never shifts the messages above it.
-          <div className="imb-run-status" role="status">
-            {selectedRunStatus.compacting ? t("Compacting…") : ""}
-          </div>
-        )}
+      <div className="imb-thread-wrap">
+        <div
+          className="imb-thread"
+          ref={threadRef}
+          onScroll={handleThreadScroll}
+        >
+          {visibleMessages.map((message, index) => (
+            <Fragment key={`${message.chatId}-${message.id}`}>
+              {index === unreadIndex && <UnreadDivider />}
+              {shouldShowTimeSeparator(visibleMessages[index - 1], message) && (
+                <TimeSeparator secs={message.createdAt} />
+              )}
+              <MessageItem
+                message={message}
+                onAnswered={() => void loadMessages(message.chatId)}
+                askAnswer={pairing.answerByAskId.get(message.id)}
+              />
+            </Fragment>
+          ))}
+          {selectedRunStatus !== undefined && (
+            // Reserved, fixed-height slot: it is present for the whole run, so
+            // toggling the compaction text never shifts the messages above it.
+            <div className="imb-run-status" role="status">
+              {selectedRunStatus.compacting ? t("Compacting…") : ""}
+            </div>
+          )}
+        </div>
+        {showJumpToLatest && <JumpToLatest onClick={jumpToLatest} />}
       </div>
       <ChatInputBar
         chatId={selected.id}

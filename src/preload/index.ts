@@ -269,8 +269,9 @@ const api = {
       ipcRenderer.invoke("chats:summary", id) as Promise<ChatSummary | null>,
     rootId: (id: number) =>
       ipcRenderer.invoke("chats:rootId", id) as Promise<number>,
+    /** Clear unread; resolves to the read position *before* the advance. */
     markRead: (id: number) =>
-      ipcRenderer.invoke("chats:markRead", id) as Promise<void>,
+      ipcRenderer.invoke("chats:markRead", id) as Promise<number>,
     onUnreadChanged: (
       cb: (payload: { chatId: number; unread: number }) => void,
     ) => on<{ chatId: number; unread: number }>("chats:unreadChanged", cb),
