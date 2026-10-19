@@ -1,0 +1,6 @@
+/* Clickable/double-clickable avatar holder in the employees list. */
+.imb-emp-avatar-hit {
+  display: inline-flex;
+  flex-shrink: 0;
+  cursor: pointer;
+}

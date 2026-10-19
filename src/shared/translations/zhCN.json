@@ -529,5 +529,8 @@
   "Working directory": "工作目录",
   "XHigh": "很高",
   "You're up to date.": "已是最新版本。",
-  "Zoom": "缩放"
+  "Zoom": "缩放",
+  "Double-click to open private chat": "双击头像发起私聊",
+  "Private chat": "私聊"
 }
+

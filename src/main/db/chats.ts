@@ -15,6 +15,25 @@ import { escapeLike, toFtsPhrase } from "./text-search";
 
 const MAX_QUERY_LENGTH = 200;
 
+/**
+ * Id of the most recent chat (any chat, root or group) whose participants
+ * include `employeeId`, or `null` when the employee is in no chat yet. Used by
+ * the employees list to open an employee's daily agent session.
+ */
+export function findLatestChatForEmployee(employeeId: number): number | null {
+  const rows = getDB()
+    .prepare(
+      "SELECT id, participants FROM chats ORDER BY last_message_at DESC, id DESC",
+    )
+    .all() as Array<{ id: number; participants: string }>;
+  for (const row of rows) {
+    if (parseNumberArray(row.participants).includes(employeeId)) {
+      return row.id;
+    }
+  }
+  return null;
+}
+
 export function listChats(): Chat[] {
   return (
     getDB()
