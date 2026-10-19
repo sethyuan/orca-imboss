@@ -430,9 +430,13 @@ function toChat(row: ChatRow): Chat {
   };
 }
 
-/** Coerce a stored `source` string to a known platform, else null. */
+/** Coerce a stored `source` string to a known source kind, else null. */
 function normalizeSource(value: string | null): Chat["source"] {
-  return value === "wechat" || value === "qq" || value === "telegram"
+  return value === "wechat" ||
+    value === "qq" ||
+    value === "telegram" ||
+    value === "a2a" ||
+    value === "a2a-in"
     ? value
     : null;
 }

@@ -48,13 +48,23 @@ interface QueueState {
   /** App wrapper, persistent across queued messages until idle disposal. */
   session?: AppAgentSession;
   busy: boolean;
-  /** Pending message texts, in arrival order. */
-  queue: string[];
+  /** Pending turns, in arrival order. */
+  queue: QueueItem[];
   idleTimer?: NodeJS.Timeout;
   /** Windows that bound this key (receive its streamed events). */
   boundSenders: Set<WebContents>;
   /** Set by lifecycle teardown so an in-flight drain stops cleanly. */
   disposed: boolean;
+}
+
+/** One queued turn, plus the promise hooks when a caller awaits it. */
+interface QueueItem {
+  text: string;
+  /**
+   * Present only for `deliverAndAwait` callers (inbound A2A requests, which
+   * must answer the caller). A fire-and-forget turn has no hooks.
+   */
+  settle?: { resolve: () => void; reject: (err: unknown) => void };
 }
 
 const states = new Map<string, QueueState>();
@@ -88,12 +98,12 @@ export async function deliver(
   text: string,
   opts?: DeliverOptions,
 ): Promise<void> {
-  const state = getOrCreateState(employeeId, chatId);
-  clearIdleTimer(state);
   // Mid-run user message: steer the live Pi run so it is seen at the next turn
   // boundary rather than after the whole run settles. `isStreaming` (not just
   // `busy`) gates this: `busy` also covers the between-turns gap inside one
   // awaited `prompt()`, where a steer has no active run to be delivered into.
+  const state = getOrCreateState(employeeId, chatId);
+  clearIdleTimer(state);
   if (opts?.mode === "steer" && state.busy && state.session?.isStreaming) {
     try {
       await state.session.steer(text);
@@ -107,7 +117,31 @@ export async function deliver(
       );
     }
   }
-  state.queue.push(text);
+  enqueue(employeeId, chatId, { text });
+}
+
+/**
+ * Schedule a turn and resolve once it has finished.
+ *
+ * Used where the caller has to *answer* someone — an inbound A2A request must
+ * report what the agent produced, so it cannot be fire-and-forget. Rejects when
+ * the run failed (or the state was torn down), which is how the caller tells a
+ * completed turn from a broken one.
+ */
+export function deliverAndAwait(
+  employeeId: number,
+  chatId: number,
+  text: string,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    enqueue(employeeId, chatId, { text, settle: { resolve, reject } });
+  });
+}
+
+function enqueue(employeeId: number, chatId: number, item: QueueItem): void {
+  const state = getOrCreateState(employeeId, chatId);
+  clearIdleTimer(state);
+  state.queue.push(item);
   if (state.busy) return;
   state.busy = true;
   void drain(state);
@@ -304,20 +338,25 @@ export async function disposeAll(): Promise<void> {
 async function drain(state: QueueState): Promise<void> {
   try {
     while (!state.disposed) {
-      const text = state.queue.shift();
-      if (text === undefined) break;
+      const item = state.queue.shift();
+      if (item === undefined) break;
       try {
         await ensureSession(state);
         if (state.disposed) {
           await disposeSessionOf(state);
+          item.settle?.reject(disposedError());
           break;
         }
-        await state.session?.prompt(text);
+        await state.session?.prompt(item.text);
+        item.settle?.resolve();
       } catch (err) {
         emitError(state, err);
+        item.settle?.reject(err);
       }
     }
   } finally {
+    // A teardown mid-queue must never leave an awaiting caller hanging.
+    if (state.disposed) rejectQueued(state);
     state.busy = false;
     if (state.disposed) return;
     if (state.queue.length > 0) {
@@ -327,6 +366,17 @@ async function drain(state: QueueState): Promise<void> {
       scheduleIdleDispose(state);
     }
   }
+}
+
+/** Fail every queued turn (the state is going away). */
+function rejectQueued(state: QueueState): void {
+  for (const pending of state.queue.splice(0)) {
+    pending.settle?.reject(disposedError());
+  }
+}
+
+function disposedError(): Error {
+  return new Error("Agent session state has been disposed.");
 }
 
 /**
@@ -412,6 +462,8 @@ async function disposeState(
   if (forceRemove) {
     state.disposed = true;
     states.delete(keyFor(state.employeeId, state.chatId));
+    // The drain loop will not pick these up again; fail them explicitly.
+    rejectQueued(state);
   }
 
   await disposeSessionOf(state);

@@ -86,6 +86,21 @@ When the boss explicitly asks you to change something about yourself, you may ed
 - Your \`role\` and \`mcp\` are immutable and cannot be changed.
 - Do this only at the boss's explicit request, and never pass \`id: 0\` to create an employee — omitting \`id\` creates one.
 
+## Working with Remote Agents
+
+\`imb_list_employees\` also returns \`remoteAgents\`: AIs running on other machines or at
+other companies, each with a description and a list of skills.
+
+- Reach for a remote agent only when its description or skills clearly cover part of the
+  task and no local employee does. Never invent one — only the \`remoteAgents\` listed exist.
+- Delegate with \`imb_delegate_remote\`, passing the agent's name (or id) and a
+  self-contained request, exactly as you would brief an employee.
+- The request and the answer are posted in that agent's own conversation, so the boss can
+  read the exchange and continue it directly. Mention that conversation when you report.
+- \`imb_delegate_remote\` waits for the answer, so keep \`waitSeconds\` modest. If it returns
+  status \`working\`, the agent is still running: do not wait or poll — tell the boss the
+  answer will appear in that conversation and get on with other work.
+
 ## Asking the Boss
 
 Most questions should be settled inside the team: ask an employee with a plain

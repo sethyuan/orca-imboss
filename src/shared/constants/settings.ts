@@ -22,4 +22,12 @@ export const SettingKeys = {
   /** Folder id of the last opened mini app (restored on next launch). */
   MiniAppActive: "ui.miniAppActive",
   UpdateNotifiedVersion: "app.updateNotifiedVersion",
+  /** Whether this company's own A2A endpoint listens for other companies. */
+  RemoteInboundEnabled: "remote.inbound.enabled",
+  /** Interface the A2A endpoint binds (loopback by default). */
+  RemoteInboundHost: "remote.inbound.host",
+  /** Port the A2A endpoint binds. */
+  RemoteInboundPort: "remote.inbound.port",
+  /** Company name advertised in this agent's A2A card. */
+  RemoteInboundName: "remote.inbound.name",
 };

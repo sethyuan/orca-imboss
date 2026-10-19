@@ -35,6 +35,11 @@ import type {
   ProviderLoginEvent,
   ProviderModelsQuery,
   ProviderUpsert,
+  RemoteAgent,
+  RemoteAgentInput,
+  RemoteCaller,
+  RemoteInboundConfig,
+  RemoteInboundInput,
   SpendRange,
   SpendReport,
   StagedRestore,
@@ -512,6 +517,41 @@ const api = {
       on<IntegrationState>("integrations:state", cb),
     onQr: (cb: (qr: IntegrationQrState) => void) =>
       on<IntegrationQrState>("integrations:qr", cb),
+  },
+
+  remote: {
+    list: () => ipcRenderer.invoke("remote:list") as Promise<RemoteAgent[]>,
+    add: (input: RemoteAgentInput) =>
+      ipcRenderer.invoke("remote:add", input) as Promise<RemoteAgent>,
+    refresh: (id: number) =>
+      ipcRenderer.invoke("remote:refresh", id) as Promise<RemoteAgent>,
+    remove: (id: number) =>
+      ipcRenderer.invoke("remote:remove", id) as Promise<boolean>,
+    inbound: {
+      status: () =>
+        ipcRenderer.invoke(
+          "remote:inbound:status",
+        ) as Promise<RemoteInboundConfig>,
+      update: (input: RemoteInboundInput) =>
+        ipcRenderer.invoke(
+          "remote:inbound:update",
+          input,
+        ) as Promise<RemoteInboundConfig>,
+      callers: () =>
+        ipcRenderer.invoke("remote:inbound:callers") as Promise<RemoteCaller[]>,
+      addCaller: (name: string) =>
+        ipcRenderer.invoke(
+          "remote:inbound:caller:add",
+          name,
+        ) as Promise<RemoteCaller>,
+      regenerateToken: (id: number) =>
+        ipcRenderer.invoke(
+          "remote:inbound:caller:token",
+          id,
+        ) as Promise<RemoteCaller>,
+      removeCaller: (id: number) =>
+        ipcRenderer.invoke("remote:inbound:caller:remove", id) as Promise<void>,
+    },
   },
 
   mcp: {
