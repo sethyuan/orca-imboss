@@ -49,3 +49,99 @@
   background: var(--imb-danger);
   color: #fff;
 }
+/* Theme quick-switch cluster (right side, left of the window controls). */
+.imb-titlebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 10px;
+  position: relative;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.imb-theme-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--imb-text-2);
+  border-radius: var(--imb-radius-md);
+  cursor: pointer;
+  transition:
+    background var(--imb-motion-fast) var(--imb-ease-standard),
+    color var(--imb-motion-fast) var(--imb-ease-standard);
+}
+
+.imb-theme-btn:hover {
+  background: var(--imb-fg-soft);
+  color: var(--imb-fg);
+}
+
+.imb-theme-btn .imb-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.imb-theme-pop {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  width: 208px;
+  background: var(--imb-surface);
+  border: 1px solid var(--imb-border);
+  border-radius: var(--imb-radius-md);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+  animation: imb-fade-in var(--imb-motion-fast) var(--imb-ease-out);
+}
+
+.imb-theme-modes {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--imb-bg);
+  border-radius: var(--imb-radius-sm);
+}
+
+.imb-theme-mode {
+  flex: 1;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: var(--imb-text-2);
+  font-size: var(--imb-text-xs);
+  border-radius: var(--imb-radius-sm);
+  cursor: pointer;
+}
+
+.imb-theme-mode.imb-is-active {
+  background: var(--imb-surface);
+  color: var(--imb-fg);
+}
+
+.imb-theme-swatches {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+
+.imb-theme-swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.imb-theme-swatch.imb-is-active {
+  border-color: var(--imb-fg);
+}
