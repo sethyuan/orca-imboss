@@ -21,6 +21,7 @@ import { registerIpcHandlers } from "./ipc";
 import { getResolvedLocale, initLocale } from "./locale";
 import { stopAllMiniAppServers, syncMiniAppIndex } from "./mini-apps";
 import { setMainWindow } from "./notifications";
+import { initRemoteAgents, shutdownRemoteAgents } from "./remote";
 import { initTheme } from "./theme";
 import { initUpdater } from "./updater";
 import {
@@ -81,6 +82,7 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   cron.stopAll();
   stopAllMiniAppServers();
+  shutdownRemoteAgents();
   void disposeAll();
   void shutdownIntegrations();
 });
@@ -114,6 +116,9 @@ app.whenReady().then(() => {
 
   // Start enabled IM integrations (WeChat / QQ / Telegram) in the background.
   void initIntegrations();
+
+  // Warm the remote A2A peer secrets so the first send never waits on disk.
+  void initRemoteAgents();
 
   createWindow();
 

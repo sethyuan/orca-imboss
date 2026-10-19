@@ -1,5 +1,5 @@
 import { ASSISTANT_ID } from "@shared/constants/employees";
-import { INTEGRATION_LABEL_KEYS } from "@shared/constants/integrations";
+import { CHAT_SOURCE_LABEL_KEYS } from "@shared/constants/integrations";
 import { TAG_FILTER_NONE } from "@shared/constants/tags";
 import { getLocale, t } from "@shared/l10n";
 import type {
@@ -1067,7 +1067,7 @@ export function ChatModule(): React.JSX.Element {
                 </span>
                 {chat.source && (
                   <span className="imb-chat-source">
-                    {t(INTEGRATION_LABEL_KEYS[chat.source])}
+                    {t(CHAT_SOURCE_LABEL_KEYS[chat.source])}
                   </span>
                 )}
               </span>
@@ -1168,7 +1168,7 @@ export function ChatModule(): React.JSX.Element {
         )}
         {selected.source && (
           <span className="imb-chat-source">
-            {t(INTEGRATION_LABEL_KEYS[selected.source])}
+            {t(CHAT_SOURCE_LABEL_KEYS[selected.source])}
           </span>
         )}
       </div>

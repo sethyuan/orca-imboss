@@ -100,6 +100,7 @@ export type SettingsSection =
   | "mcp"
   | "skills"
   | "integrations"
+  | "remote"
   | "network"
   | "backup"
   | "about";

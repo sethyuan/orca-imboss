@@ -417,6 +417,10 @@ export class IntegrationManager {
     if (message.kind === "ack") return;
     const source = dbIntegrations.getChatSource(message.chatId);
     if (!source) return;
+    // A remote A2A peer's conversation has no IM adapter: its outbound path is
+    // the A2A client, driven from `chat:send`, and its inbound messages are
+    // stored by the remote-agent manager (so they must not be echoed back).
+    if (source.platform === "a2a") return;
     const adapter = this.adapters.get(source.platform);
     if (!adapter) return;
     const text = formatOutbound(message);

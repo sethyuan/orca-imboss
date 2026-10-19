@@ -24,7 +24,9 @@ const MAX_BATCH_SIZE = 50;
 export function listEmployees(): Employee[] {
   return (
     getDB()
-      .prepare("SELECT * FROM employees WHERE disabled = 0 ORDER BY id ASC")
+      .prepare(
+        "SELECT * FROM employees WHERE disabled = 0 AND remote_agent_id IS NULL ORDER BY id ASC",
+      )
       .all() as EmployeeRow[]
   ).map(toEmployee);
 }
@@ -43,7 +45,11 @@ export function listEmployeesPage(page: PageQuery = {}): PageResult<Employee> {
   );
   const needle = (page.query ?? "").trim();
   const db = getDB();
-  const conditions: string[] = ["id <> ?", "disabled = 0"];
+  const conditions: string[] = [
+    "id <> ?",
+    "disabled = 0",
+    "remote_agent_id IS NULL",
+  ];
   const params: Array<string | number> = [ASSISTANT_ID];
 
   if (page.cursor) {
@@ -284,7 +290,9 @@ export function deleteEmployee(id: number): EmployeeDeleteResult {
 export function purgeDisabledEmployees(): PurgedEmployee[] {
   const db = getDB();
   const disabled = db
-    .prepare("SELECT id FROM employees WHERE disabled = 1")
+    .prepare(
+      "SELECT id FROM employees WHERE disabled = 1 AND remote_agent_id IS NULL",
+    )
     .all() as Array<{ id: number }>;
   const purged: PurgedEmployee[] = [];
 

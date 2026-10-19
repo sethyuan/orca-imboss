@@ -45,6 +45,7 @@ import {
 } from "../image-gen";
 import { readMcpServers } from "../mcp-store";
 import { notifyUnread, sendToRenderer } from "../notifications";
+import { remoteAgentManager } from "../remote";
 import { materializeSessionFile, sessionPathFor } from "./session-files";
 import { wakeAgent } from "./session-queue";
 import { listSkills } from "./skills";
@@ -896,8 +897,10 @@ function listEmployeesTool(): AnyPiTool {
       "A single-employee fetch always includes that employee's current `systemPrompt`. " +
       "For the full list, pass `withSystemPrompt: true` to also include each employee's current `systemPrompt`; " +
       "use this only before editing an employee's description at the boss's request. " +
-      "Call `imb_toolset` for the `mcp` / `skills` values assignable via `imb_set_employees`.",
-    promptSnippet: "team members",
+      "Call `imb_toolset` for the `mcp` / `skills` values assignable via `imb_set_employees`. " +
+      "The full list also carries `remoteAgents`: the agents running on other machines " +
+      "or at other companies that you can reach with `imb_delegate_remote`.",
+    promptSnippet: "team members + remote agents",
     parameters: Type.Object({
       employeeID: Type.Optional(
         Type.Integer({
@@ -932,7 +935,17 @@ function listEmployeesTool(): AnyPiTool {
         .listEmployees()
         .filter((employee) => employee.id !== ASSISTANT_ID)
         .map((employee) => toEmployeeBrief(employee, withSystemPrompt));
-      return toolResult({ employees });
+      // Peers are not local employees — they have no model, prompt or tools —
+      // so they are listed separately, with the conversation they answer in.
+      const remoteAgents = remoteAgentManager.list().map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        description: agent.description,
+        skills: agent.skills,
+        status: agent.status,
+        chatId: agent.chatId,
+      }));
+      return toolResult({ employees, remoteAgents });
     },
   };
 }
@@ -966,6 +979,53 @@ function toolsetTool(): AnyPiTool {
         builtinTools: builtinToolOptions,
         skills,
       });
+    },
+  };
+}
+
+/**
+ * `imb_delegate_remote` — hand a task to an A2A peer and read its answer.
+ *
+ * Assistant-only. The request and the answer are posted in the peer's own
+ * conversation, so the boss can follow the exchange and reply there directly.
+ */
+function delegateRemoteTool(): AnyPiTool {
+  return {
+    name: "imb_delegate_remote",
+    label: "Delegate to a remote agent",
+    description:
+      "Send a request to a remote agent (an AI running for another team or " +
+      "company, listed in `imb_list_employees`'s `remoteAgents`) and wait for " +
+      "its answer. Both the request and the answer are posted in that agent's " +
+      "conversation, so the boss can follow and continue the exchange there. " +
+      "`agent` is the remote agent's name or id. When the agent is still " +
+      "working after `waitSeconds`, the result status is `working` and the " +
+      "answer will appear in that conversation instead.",
+    promptSnippet: "ask another company's agent",
+    parameters: Type.Object({
+      agent: Type.String({ minLength: 1, maxLength: 200 }),
+      message: Type.String({ minLength: 1, maxLength: 100000 }),
+      waitSeconds: Type.Optional(
+        Type.Integer({
+          minimum: 0,
+          maximum: 900,
+          description:
+            "How long to wait for the answer before reporting `working`. Defaults to 120.",
+        }),
+      ),
+    }),
+    execute: async (_toolCallId, params) => {
+      const input = params as {
+        agent: string;
+        message: string;
+        waitSeconds?: number;
+      };
+      const result = await remoteAgentManager.delegate({
+        agent: input.agent,
+        message: input.message,
+        waitMs: (input.waitSeconds ?? 120) * 1000,
+      });
+      return toolResult(result);
     },
   };
 }
@@ -1361,6 +1421,9 @@ export function createTeamToolDefinitions(
     tools.push(listEmployeesTool());
     tools.push(toolsetTool());
     tools.push(notifyTool());
+    // Reaching another company's agent is an orchestration decision, so the
+    // delegation tool is assistant-only.
+    tools.push(delegateRemoteTool());
     // Progress cards are assistant-only: the tool hardcodes the sender to the
     // assistant and participants have no way to post one (they lack `steps`).
     tools.push(progressTool(env));

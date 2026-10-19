@@ -7,8 +7,10 @@ import { deliver, disposeForChat } from "../agent/session-queue";
 import { deletePastedFilesForChat } from "../attachments";
 import { integrationManager } from "../integrations";
 import { maybeGenerateChatTitle } from "../agent/title-gen";
+import { remoteAgentManager } from "../remote";
 import * as cron from "../cron";
 import * as dbChats from "../db/chats";
+import * as dbIntegrations from "../db/integrations";
 import * as dbMessages from "../db/messages";
 import * as dbTags from "../db/tags";
 import { listByChat, unlinkSessionFile } from "../db/sessions";
@@ -156,6 +158,9 @@ export function registerChatHandlers(): void {
     // spawn further chats, so delete the whole descendant tree.
     const chatIds = dbChats.listChatTreeIds(safeId);
     if (chatIds.length === 0) return false;
+    // Peers bridged to these conversations are removed with them, so no peer
+    // is left behind without its chat. Read before the rows go away.
+    const peerIds = remoteAgentManager.peerIdsForChats(chatIds);
     // Stop the live timers first: the FK cascade removes the `cron_jobs` rows
     // when the chats are deleted, but the in-process Cron handles would
     // otherwise keep firing into a now-deleted chat.
@@ -164,8 +169,15 @@ export function registerChatHandlers(): void {
     const records = chatIds.flatMap((chatId) => listByChat(chatId));
     // Tear down any warm agent sessions for these chats before files go away.
     await Promise.all(chatIds.map((chatId) => disposeForChat(chatId)));
+    // Stop in-flight remote-agent streams into chats that are about to vanish.
+    for (const chatId of chatIds) remoteAgentManager.disposeForChat(chatId);
     const removed = dbChats.deleteChats(chatIds) > 0;
     if (removed) {
+      // Remove the peers whose conversations just went away (their hidden
+      // employee rows and cached tokens go with them).
+      await Promise.all(
+        peerIds.map((peerId) => remoteAgentManager.remove(peerId)),
+      );
       await Promise.all(records.map((r) => unlinkSessionFile(r.session)));
       // Drop platform media downloaded for these bridged chats and files
       // pasted into their composers.
@@ -212,6 +224,15 @@ export function registerChatHandlers(): void {
           "[chat:send] failed to append receipt ack:",
           err instanceof Error ? err.message : err,
         );
+      }
+
+      // A conversation bridged to a remote A2A peer never wakes a local
+      // session: the message goes to the peer, and its answer is posted back
+      // into this chat by the remote-agent manager.
+      if (dbIntegrations.getChatSource(safeChatId)?.platform === "a2a") {
+        void remoteAgentManager.send(safeChatId, safeContent, safeAttachments);
+        maybeGenerateChatTitle(safeChatId, safeContent);
+        return userMessage;
       }
 
       // Serialized run; the agent posts its own reply via `imb_send_message`.

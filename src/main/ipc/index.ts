@@ -12,6 +12,7 @@ import { registerMiniAppHandlers } from "./miniapps";
 import { registerNetworkHandlers } from "./network";
 import { registerProjectHandlers } from "./project";
 import { registerProviderHandlers } from "./provider";
+import { registerRemoteAgentHandlers } from "./remote";
 import { registerSessionHandlers } from "./session";
 import { registerSettingsHandlers } from "./settings";
 import { registerSkillHandlers } from "./skill";
@@ -38,6 +39,7 @@ export function registerIpcHandlers(): void {
   registerCronHandlers();
   registerMessageHandlers();
   registerProviderHandlers();
+  registerRemoteAgentHandlers();
   registerSkillHandlers();
   // Pluggable feature: its own master switch (see `SPEND_STATS_ENABLED`).
   if (SPEND_STATS_ENABLED) registerSpendHandlers();

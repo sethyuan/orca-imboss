@@ -28,6 +28,7 @@
     "dist:linux": "pnpm run build && electron-builder --linux"
   },
   "dependencies": {
+    "@a2a-js/sdk": "^1.3.0",
     "@earendil-works/pi-coding-agent": "^1.0.4",
     "better-sqlite3": "^13.0.3",
     "croner": "^10.0.1",
