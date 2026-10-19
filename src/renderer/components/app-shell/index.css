@@ -27,6 +27,11 @@
   display: none;
 }
 
+/* Brief fade of the content region on a module switch. */
+.imb-content-enter {
+  animation: imb-fade-in 220ms var(--imb-ease-out);
+}
+
 @media (max-width: 920px) {
   .imb-field-row {
     grid-template-columns: 1fr;

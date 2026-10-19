@@ -37,6 +37,10 @@
   background: var(--imb-bg);
 }
 
+.imb-ctx-menu-item:active {
+  background: rgba(0, 0, 0, 0.08);
+}
+
 .imb-ctx-menu-item:focus-visible {
   outline: none;
   box-shadow: var(--imb-focus-ring);

@@ -1,5 +1,5 @@
 import { SettingKeys } from "@shared/constants/settings";
-import { useLayoutEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cls } from "reactutils";
 import {
@@ -44,6 +44,16 @@ export function AppShell(): React.JSX.Element {
   const { module, navCollapsed } = useApp();
   const layout = shellLayoutFor(module);
 
+  // Fade the content region on a module change. A whole-region fade (rather
+  // than per-module wrappers) is the least invasive transition and needs no
+  // structural changes inside the modules.
+  const [contentAnim, setContentAnim] = useState(false);
+  useEffect(() => {
+    setContentAnim(true);
+    const timer = window.setTimeout(() => setContentAnim(false), 240);
+    return () => window.clearTimeout(timer);
+  }, [module]);
+
   async function setNavCollapsed(collapsed: boolean): Promise<void> {
     appStore.navCollapsed = collapsed;
     void imb.settings.set(SettingKeys.NavCollapse, collapsed ? "1" : "0");
@@ -60,6 +70,7 @@ export function AppShell(): React.JSX.Element {
         className={cls(
           "imb-shell-content",
           layout === "single" && "imb-layout-single",
+          contentAnim && "imb-content-enter",
         )}
       >
         {/* Always mounted: it hosts the persistent mini-app iframes, which
