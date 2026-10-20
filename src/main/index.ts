@@ -1,25 +1,15 @@
 import { app, BrowserWindow, shell } from "electron";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
-import { materializeBuiltinSkills } from "./agent/builtin-skills";
-import { refreshModelStore } from "./agent/model-runtime";
 import { disposeAll } from "./agent/session-queue";
-import { deleteAvatarFiles } from "./avatars";
 import { applyPendingRestore } from "./backup";
-import * as cron from "./cron";
-import { getAgentRoot } from "./data-dir";
-import { initDatabase } from "./db";
-import { purgeDisabledEmployees } from "./db/employees";
-import { unlinkSessionFile } from "./db/sessions";
-import { applyStoredHttpProxy } from "./http-proxy";
+import { startCore, stopCore } from "./core";
 import {
   registerImbFileHandler,
   registerImbFileScheme,
 } from "./imb-file-protocol";
-import { initIntegrations, shutdownIntegrations } from "./integrations";
 import { registerIpcHandlers } from "./ipc";
-import { getResolvedLocale, initLocale } from "./locale";
-import { stopAllMiniAppServers, syncMiniAppIndex } from "./mini-apps";
+import { getResolvedLocale } from "./locale";
 import { setMainWindow } from "./notifications";
 import { initTheme } from "./theme";
 import { initUpdater } from "./updater";
@@ -31,12 +21,6 @@ import {
   MIN_WINDOW_WIDTH,
   saveWindowBounds,
 } from "./window-state";
-
-// Keep the Pi SDK's own agent-dir defaults (MCP OAuth credentials and MCP logs)
-// inside the app's isolated data dir instead of the host's `~/.pi/agent`. The
-// app passes explicit `agentDir`/paths everywhere else, and the MCP extension's
-// server discovery is supplied by the app's own `loadConfig`.
-process.env.PI_CODING_AGENT_DIR = getAgentRoot();
 
 // Must run before the `app` `ready` event (Electron requires it): registers the
 // `imb-file:` scheme used by `<img>` to load attachment/avatar files directly.
@@ -79,10 +63,10 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  cron.stopAll();
-  stopAllMiniAppServers();
+  // The core stops the scheduler, mini-app servers and IM integrations; agent
+  // sessions are disposed separately.
+  void stopCore();
   void disposeAll();
-  void shutdownIntegrations();
 });
 
 app.on("activate", () => {
@@ -93,18 +77,11 @@ app.whenReady().then(() => {
   // Matches `appId` in electron-builder.yml.
   app.setAppUserModelId("com.orcastudio.imboss");
 
-  initDatabase();
-  // Apply the persisted outbound proxy before any network work (integrations,
-  // model-catalog refresh, provider "Fetch models") so it takes effect from the
-  // very first request.
-  applyStoredHttpProxy();
-  // Localize main-process strings (native dialogs, OS notifications) from the
-  // stored/system locale. Must run after the database is available.
-  initLocale();
-  // Generate the app's built-in Skills (hidden from Settings › Skills) so the
-  // assistant's sessions can load them. Best-effort: a failure is logged and
-  // never blocks startup.
-  materializeBuiltinSkills();
+  // Database, proxy, translations, built-in skills, IM integrations, cron and
+  // the model catalog — the same core the headless daemon runs.
+  startCore();
+
+  // GUI-only wiring.
   registerIpcHandlers();
   initTheme();
 
@@ -112,19 +89,7 @@ app.whenReady().then(() => {
   // before the first window loads.
   registerImbFileHandler();
 
-  // Start enabled IM integrations (WeChat / QQ / Telegram) in the background.
-  void initIntegrations();
-
   createWindow();
-
-  // Keep `index.json` in sync (append new apps, prune stale ids).
-  void syncMiniAppIndex();
-
-  cron.initCron();
-
-  void purgeDisabledEmployeesOnStartup();
-
-  void refreshModelStore(new AbortController().signal);
 
   // Always initialize the updater: the automatic startup check is packaged-only
   // (inside `initUpdater`), but the renderer's manual check also works in dev.
@@ -230,23 +195,5 @@ function createWindow(): void {
     mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
     mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
-  }
-}
-
-async function purgeDisabledEmployeesOnStartup(): Promise<void> {
-  try {
-    const purged = purgeDisabledEmployees();
-    for (const entry of purged) {
-      // The employee row (and its `cron_jobs` via FK cascade) is already gone;
-      // stop the corresponding live Cron handles so they cannot keep firing.
-      cron.stopJobsForEmployee(entry.employeeId);
-      await Promise.all(entry.sessionPaths.map(unlinkSessionFile));
-      deleteAvatarFiles(entry.employeeId);
-    }
-  } catch (err) {
-    console.error(
-      "[startup] purge disabled employees failed:",
-      err instanceof Error ? err.message : err,
-    );
   }
 }
