@@ -33,9 +33,14 @@ import { Modal } from "../../../modal";
 import "../../../modules/module-common.css";
 import type { MultiSelectOption } from "../../../multi-select";
 import { SearchInput } from "../../../search-input";
+import {
+  GroupSelect,
+  GROUP_FILTER_UNGROUPED,
+} from "../../../group-select";
 import { EmployeeDetail } from "../employee-detail";
 import { EmployeeImportModal } from "../employee-import-modal";
 import { EmployeeRecruitModal } from "../employee-recruit-modal";
+import "./index.css";
 
 /**
  * How long the transient import result stays on screen. The app's other short
@@ -52,6 +57,7 @@ export function EmployeesModule(): React.JSX.Element {
   // debounced value so large lists are not re-scanned on every keystroke.
   const { query, setQuery } = useModuleFilter("employees");
   const debouncedQuery = useDebouncedValue(query);
+  const [groupFilter, setGroupFilter] = useState<string[]>([]);
   const [recruitOpen, setRecruitOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteIds, setDeleteIds] = useState<number[]>([]);
@@ -72,6 +78,19 @@ export function EmployeesModule(): React.JSX.Element {
   const loading = data.employees.loading;
   const listError = data.employees.error;
 
+  // Distinct group options collected across all employees
+  const allGroups = useMemo((): string[] => {
+    const set = new Set<string>();
+    for (const emp of data.employees.items) {
+      if (emp.groups) {
+        for (const g of emp.groups) {
+          if (g) set.add(g);
+        }
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [data.employees.items]);
+
   // Centralized in appStore (loaded once at startup); filter client-side.
   const employees = useMemo((): Employee[] => {
     // Valtio snapshot elements are deeply readonly; clone the nested ref
@@ -80,15 +99,32 @@ export function EmployeesModule(): React.JSX.Element {
       ...employee,
       mcp: [...employee.mcp],
       skills: [...employee.skills],
+      groups: employee.groups ? [...employee.groups] : [],
     }));
+
     const needle = debouncedQuery.trim().toLowerCase();
-    if (!needle) return source;
-    return source.filter(
-      (employee) =>
+    return source.filter((employee) => {
+      // Group filter matching (AND logic):
+      // GROUP_FILTER_UNGROUPED matches employees with empty groups
+      if (groupFilter.length > 0) {
+        const matchesGroup = groupFilter.every((target) => {
+          if (target === GROUP_FILTER_UNGROUPED) {
+            return !employee.groups || employee.groups.length === 0;
+          }
+          return employee.groups && employee.groups.includes(target);
+        });
+        if (!matchesGroup) return false;
+      }
+
+      if (!needle) return true;
+      return (
         employee.name.toLowerCase().includes(needle) ||
-        employee.role.toLowerCase().includes(needle),
-    );
-  }, [data.employees.items, debouncedQuery]);
+        employee.role.toLowerCase().includes(needle) ||
+        (employee.groups &&
+          employee.groups.some((g) => g.toLowerCase().includes(needle)))
+      );
+    });
+  }, [data.employees.items, debouncedQuery, groupFilter]);
 
   // Model options still come via IPC (models out of scope); loaded once.
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -140,10 +176,10 @@ export function EmployeesModule(): React.JSX.Element {
   const selectedIdRef = useRef<number | null>(null);
   selectedIdRef.current = selectedId;
 
-  // Query changes reset the selection.
+  // Query or groupFilter changes reset the selection.
   useEffect(() => {
     clearSelection();
-  }, [clearSelection, debouncedQuery]);
+  }, [clearSelection, debouncedQuery, groupFilter]);
 
   // Auto-select the first employee after page 1 loads (and recover when the
   // selected employee disappears, e.g. bulk delete). The resolved active item
@@ -365,11 +401,21 @@ export function EmployeesModule(): React.JSX.Element {
     <ListPane
       title={t("Employees")}
       search={
-        <SearchInput
-          value={query}
-          onValueChange={setQuery}
-          placeholder={t("Filter by name or role")}
-        />
+        <div className="imb-employee-search-stack">
+          <SearchInput
+            value={query}
+            onValueChange={setQuery}
+            placeholder={t("Filter by name or role")}
+          />
+          <GroupSelect
+            className="imb-employee-group-filter"
+            value={groupFilter}
+            options={allGroups}
+            allowUngrouped
+            placeholder={t("Filter by groups")}
+            onChange={setGroupFilter}
+          />
+        </div>
       }
       footer={
         // The Recruit button opens a small menu: create a new employee (the
@@ -418,6 +464,17 @@ export function EmployeesModule(): React.JSX.Element {
           <ListRow
             active={employee.id === selectedId}
             selected={isSelectedRow}
+            footer={
+              <GroupSelect
+                className="imb-employee-group-select"
+                value={employee.groups ?? []}
+                options={allGroups}
+                allowCreate
+                noClear
+                placeholder={t("Groups")}
+                onChange={(next) => void patch(employee.id, { groups: next })}
+              />
+            }
             avatar={<EmployeeAvatar employeeId={employee.id} alt />}
             name={employee.name || t("Unnamed")}
             meta={`#${employee.id}`}
@@ -472,6 +529,7 @@ export function EmployeesModule(): React.JSX.Element {
         value: s.name,
         label: s.name,
       }))}
+      groupOptions={allGroups}
       models={models}
       defaultModel={defaultModel}
       onPatch={(input) => patch(selected.id, input)}
@@ -513,6 +571,7 @@ export function EmployeesModule(): React.JSX.Element {
           value: s.name,
           label: s.name,
         }))}
+        groupOptions={allGroups}
         models={models}
         defaultModel={defaultModel}
         onCreate={create}

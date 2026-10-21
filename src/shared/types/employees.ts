@@ -10,6 +10,8 @@ export interface Employee {
    *  carry built-in opt-in markers (see `BUILTIN_*_MARKER` in constants). */
   mcp: string[];
   skills: string[];
+  /** Group / department tags assigned to this employee (e.g. "信息检索", "开发功能"). */
+  groups: string[];
   modelId: string | null;
   /** Per-employee thinking strength; null = follow the global default. */
   thinkingLevel: ThinkingLevel | null;
@@ -38,6 +40,7 @@ export interface EmployeeInput {
   systemPrompt?: string;
   mcp?: string[];
   skills?: string[];
+  groups?: string[];
   modelId?: string | null;
   thinkingLevel?: ThinkingLevel | null;
 }
@@ -49,6 +52,7 @@ export interface EmployeeRow {
   system_prompt: string;
   mcp: string;
   skills: string;
+  groups?: string;
   model_id: string | null;
   thinking_level: string | null;
   avatar: string | null;

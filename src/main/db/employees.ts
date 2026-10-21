@@ -103,7 +103,7 @@ export function getAssistant(): Employee | null {
 export function createEmployee(input: EmployeeInput): Employee {
   const result = getDB()
     .prepare(
-      "INSERT INTO employees (name, role, system_prompt, mcp, skills, model_id, thinking_level) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO employees (name, role, system_prompt, mcp, skills, groups, model_id, thinking_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
       validateName(input.name) ?? "",
@@ -111,6 +111,7 @@ export function createEmployee(input: EmployeeInput): Employee {
       validatePrompt(input.systemPrompt) ?? "",
       stringifyArray(validateRefList(input.mcp, "mcp") ?? []),
       stringifyArray(validateRefList(input.skills, "skills") ?? []),
+      stringifyArray(validateRefList(input.groups, "groups") ?? []),
       validateModelId(input.modelId),
       validateThinkingLevel(input.thinkingLevel),
     );
@@ -142,9 +143,13 @@ export function updateEmployee(
       input.skills !== undefined
         ? (validateRefList(input.skills, "skills") ?? [])
         : current.skills;
+    const groups =
+      input.groups !== undefined
+        ? (validateRefList(input.groups, "groups") ?? [])
+        : current.groups;
     getDB()
       .prepare(
-        "UPDATE employees SET name = ?, system_prompt = ?, skills = ?, model_id = ?, thinking_level = ? WHERE id = ?",
+        "UPDATE employees SET name = ?, system_prompt = ?, skills = ?, groups = ?, model_id = ?, thinking_level = ? WHERE id = ?",
       )
       .run(
         input.name !== undefined ? validateName(input.name) : current.name,
@@ -152,6 +157,7 @@ export function updateEmployee(
           ? validatePrompt(input.systemPrompt)
           : current.systemPrompt,
         stringifyArray(skills),
+        stringifyArray(groups),
         input.modelId !== undefined
           ? validateModelId(input.modelId)
           : current.modelId,
@@ -170,10 +176,14 @@ export function updateEmployee(
     input.skills !== undefined
       ? validateRefList(input.skills, "skills")
       : current.skills;
+  const groups =
+    input.groups !== undefined
+      ? validateRefList(input.groups, "groups")
+      : current.groups;
 
   getDB()
     .prepare(
-      "UPDATE employees SET name = ?, role = ?, system_prompt = ?, mcp = ?, skills = ?, model_id = ?, thinking_level = ? WHERE id = ?",
+      "UPDATE employees SET name = ?, role = ?, system_prompt = ?, mcp = ?, skills = ?, groups = ?, model_id = ?, thinking_level = ? WHERE id = ?",
     )
     .run(
       input.name !== undefined ? validateName(input.name) : current.name,
@@ -183,6 +193,7 @@ export function updateEmployee(
         : current.systemPrompt,
       stringifyArray(mcp ?? []),
       stringifyArray(skills ?? []),
+      stringifyArray(groups ?? []),
       input.modelId !== undefined
         ? validateModelId(input.modelId)
         : current.modelId,
@@ -312,6 +323,7 @@ function toEmployee(row: EmployeeRow): Employee {
     systemPrompt: row.system_prompt ?? "",
     mcp: parseStringArray(row.mcp),
     skills: parseStringArray(row.skills),
+    groups: parseStringArray(row.groups),
     modelId: row.model_id,
     thinkingLevel: isThinkingLevel(row.thinking_level)
       ? row.thinking_level
@@ -356,7 +368,7 @@ function validatePrompt(prompt: string | undefined): string | undefined {
  */
 function validateRefList(
   values: string[] | undefined,
-  field: "mcp" | "skills",
+  field: "mcp" | "skills" | "groups",
 ): string[] | undefined {
   if (values === undefined) return undefined;
   if (!Array.isArray(values)) throw new Error(`${field} must be an array.`);

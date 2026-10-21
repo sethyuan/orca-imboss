@@ -183,6 +183,13 @@ const MIGRATIONS: Array<(db: Database) => void> = [
       ALTER TABLE messages ADD COLUMN image_model TEXT;
     `);
   },
+  // 6 — employee groups: array of group tags assigned to the employee
+  // (e.g. "信息检索", "开发功能").
+  (db) => {
+    db.exec(`
+      ALTER TABLE employees ADD COLUMN groups TEXT NOT NULL DEFAULT '[]';
+    `);
+  },
 ];
 
 export function migrate(db: Database): void {
