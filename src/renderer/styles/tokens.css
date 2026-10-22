@@ -31,6 +31,13 @@
    ========================================================================== */
 
 :root {
+  /* Which scheme the UA may paint *native* chrome in: scrollbars, form
+     controls, dropdowns, the text caret. Left at the initial `normal`, the UA
+     is allowed light only, so every one of those stayed light while the
+     palette went dark (a dark window with a white scrollbar strip). It is a
+     theme property, so each dark entry point below re-declares it. */
+  color-scheme: light;
+
   /* -- 1a. palette primitives (light) ------------------------------------- */
 
   /* Backdrops and fills, darkest to lightest role. */
@@ -326,6 +333,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme-mode="light"]) {
+    color-scheme: dark;
     --imb-p-window: #1a1a1a;
     --imb-p-grouped: #3e3e3e;
     --imb-p-raised: #2c2c2c;
@@ -347,6 +355,7 @@
 /* Explicit dark (same palette; kept as a separate entry point because the media
    query above has to exclude it). */
 :root[data-theme-mode="dark"] {
+  color-scheme: dark;
   --imb-p-window: #1a1a1a;
   --imb-p-grouped: #3e3e3e;
   --imb-p-raised: #2c2c2c;
