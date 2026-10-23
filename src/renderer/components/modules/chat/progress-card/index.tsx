@@ -27,6 +27,11 @@ export interface ProgressCardProps {
   groupChatId: number | null;
   /** Exact send time, revealed on hover at the card's bottom-right corner. */
   timeLabel?: string | null;
+  /**
+   * False on an earlier card of a collapsed run. The latest card keeps the
+   * halt control; every hand stops the whole task group, so one is enough.
+   */
+  showHalt?: boolean;
 }
 
 export function ProgressCard({
@@ -34,6 +39,7 @@ export function ProgressCard({
   steps,
   groupChatId,
   timeLabel,
+  showHalt = true,
 }: ProgressCardProps): React.JSX.Element {
   // Summary resolution (shared cache + delete invalidation) is the same as the
   // `chat` card's: `undefined` loading, `null` missing/deleted.
@@ -121,8 +127,9 @@ export function ProgressCard({
         <MessageTime label={timeLabel} />
       </div>
       {/* Row sibling of the bubble, gated on the link id so it is present from
-          the first render (no width jump while the summary loads). */}
-      {groupChatId !== null && <HaltButton chatId={groupChatId} />}
+          the first render (no width jump while the summary loads). A run shows
+          it only on the latest card. */}
+      {showHalt && groupChatId !== null && <HaltButton chatId={groupChatId} />}
     </>
   );
 }

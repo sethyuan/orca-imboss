@@ -48,6 +48,8 @@ import { pairAskAnswers } from "../ask-answer";
 import { ChatInputBar } from "../chat-input-bar";
 import { CHAT_MUTE_ENABLED, chatMuteMenuItem, MuteGlyph } from "../chat-mute";
 import { MessageItem } from "../message-item";
+import { groupProgressRuns } from "../progress-run/group";
+import { ProgressRun } from "../progress-run";
 import {
   MY_JUMP_TOP_GAP,
   MyMessageJump,
@@ -71,6 +73,9 @@ import { TimeSeparator } from "../time-separator";
 import "./index.css";
 
 const PAGE_SIZE = 50;
+
+/** Runs the user has not opened. Shared so a chat switch compares by identity. */
+const EMPTY_EXPANDED_RUNS: ReadonlySet<number> = new Set();
 
 /**
  * Initial row-height guess for the chat list. A chat row is ~91px (avatar +
@@ -713,6 +718,64 @@ export function ChatModule(): React.JSX.Element {
       messages.filter((message) => !pairing.foldedAnswerIds.has(message.id)),
     [messages, pairing],
   );
+  // Contiguous progress cards for one task group collapse onto the latest.
+  // The entries still list every card; the run view hides the earlier ones
+  // without unmounting them, so in-chat find keeps their text.
+  const threadEntries = useMemo(
+    () => groupProgressRuns(visibleMessages),
+    [visibleMessages],
+  );
+  // Open runs, keyed by the first card's id. A new card keeps that id, so the
+  // choice survives the next update. Switching chats drops it.
+  const [runExpand, setRunExpand] = useState<{
+    chatId: number | null;
+    ids: ReadonlySet<number>;
+  }>({ chatId: null, ids: EMPTY_EXPANDED_RUNS });
+  const expandedRunIds =
+    runExpand.chatId === selectedId ? runExpand.ids : EMPTY_EXPANDED_RUNS;
+  const expandedRunIdsRef = useRef(expandedRunIds);
+  expandedRunIdsRef.current = expandedRunIds;
+  // Leaving the chat and coming back starts collapsed. The render above already
+  // ignores another chat's open runs; this drops them so they do not return.
+  useEffect(() => {
+    setRunExpand({ chatId: selectedId, ids: EMPTY_EXPANDED_RUNS });
+  }, [selectedId]);
+
+  const toggleRun = useCallback((firstId: number): void => {
+    const chatId = selectedIdRef.current;
+    setRunExpand((prev) => {
+      const ids = new Set(prev.chatId === chatId ? prev.ids : undefined);
+      if (ids.has(firstId)) ids.delete(firstId);
+      else ids.add(firstId);
+      return { chatId, ids };
+    });
+  }, []);
+
+  // True when this row sits in a collapsed run and that run will open. Find
+  // then waits one layout before scrolling: a hidden card has no position.
+  const revealCollapsedRun = useCallback(
+    (row: HTMLElement): boolean => {
+      const host = row.closest<HTMLElement>("[data-progress-run][hidden]");
+      if (host === null) return false;
+      const firstId = Number(host.dataset.progressRun);
+      if (!Number.isSafeInteger(firstId) || firstId < 1) return false;
+      const chatId = selectedIdRef.current;
+      if (
+        runExpand.chatId === chatId &&
+        expandedRunIdsRef.current.has(firstId)
+      ) {
+        return false;
+      }
+      setRunExpand((prev) => {
+        const ids = new Set(prev.chatId === chatId ? prev.ids : undefined);
+        if (ids.has(firstId)) return prev;
+        ids.add(firstId);
+        return { chatId, ids };
+      });
+      return true;
+    },
+    [runExpand.chatId],
+  );
 
   // Messages the boss herself wrote, **oldest first** (the order they were said
   // in — the list reads top-down like the transcript): a plain text bubble with
@@ -855,7 +918,8 @@ export function ChatModule(): React.JSX.Element {
 
   // In-thread find (⌘F). It searches exactly what the thread renders, so it is
   // handed the same list the thread maps over (a folded answer is not rendered
-  // and therefore not searchable).
+  // and therefore not searchable). Earlier progress cards stay mounted while
+  // collapsed, so their text remains searchable; a hit opens that run first.
   const threadFind = useThreadFind({
     chatId: selectedId,
     messages: visibleMessages,
@@ -863,6 +927,7 @@ export function ChatModule(): React.JSX.Element {
     // The delete dialog owns the keyboard while it is open.
     hotkeysEnabled: !deleteOpen,
     onBeforeJump: handleFindJump,
+    onRevealMatch: revealCollapsedRun,
   });
 
   const handleSend = useCallback(
@@ -1258,18 +1323,29 @@ export function ChatModule(): React.JSX.Element {
           tabIndex={-1}
           onScroll={handleThreadScroll}
         >
-          {visibleMessages.map((message, index) => (
-            <Fragment key={`${message.chatId}-${message.id}`}>
-              {shouldShowTimeSeparator(visibleMessages[index - 1], message) && (
-                <TimeSeparator secs={message.createdAt} />
-              )}
-              <MessageItem
-                message={message}
+          {threadEntries.map((entry) =>
+            entry.kind === "progress-run" ? (
+              <ProgressRun
+                key={`run-${entry.messages[0]?.id ?? 0}`}
+                messages={entry.messages}
+                previous={entry.previous}
+                expanded={expandedRunIds.has(entry.messages[0]?.id ?? 0)}
+                onToggle={toggleRun}
                 onAnswered={handleAnswered}
-                askAnswer={pairing.answerByAskId.get(message.id)}
               />
-            </Fragment>
-          ))}
+            ) : (
+              <Fragment key={`${entry.message.chatId}-${entry.message.id}`}>
+                {shouldShowTimeSeparator(entry.previous, entry.message) && (
+                  <TimeSeparator secs={entry.message.createdAt} />
+                )}
+                <MessageItem
+                  message={entry.message}
+                  onAnswered={handleAnswered}
+                  askAnswer={pairing.answerByAskId.get(entry.message.id)}
+                />
+              </Fragment>
+            ),
+          )}
           {selectedRunStatus !== undefined && (
             // Reserved, fixed-height slot: it is present for the whole run, so
             // toggling the compaction text never shifts the messages above it.

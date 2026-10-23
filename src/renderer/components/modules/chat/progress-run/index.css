@@ -1,0 +1,49 @@
+/* The run is not a box. Its children sit in the thread's own column so the
+   gap between a card and the rows around it stays the thread gap. */
+.imb-progress-run {
+  display: contents;
+}
+
+.imb-progress-run-earlier {
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-4);
+}
+
+/* Author `display: flex` would otherwise beat the UA rule for `[hidden]`. */
+.imb-progress-run-earlier[hidden] {
+  display: none !important;
+}
+
+/* Latest card plus the toggle. The toggle sits just under the card, in the
+   text column, instead of taking a full thread gap of its own. */
+.imb-progress-run-tail {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--imb-space-2);
+}
+
+.imb-progress-run-toggle {
+  align-self: flex-start;
+  margin: 0 0 0 calc(34px + var(--imb-space-2));
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--imb-muted);
+  font: inherit;
+  font-size: var(--imb-text-xs);
+  line-height: var(--imb-leading-body);
+  cursor: pointer;
+}
+
+.imb-progress-run-toggle:hover {
+  color: var(--imb-accent);
+}
+
+.imb-progress-run-toggle:focus-visible {
+  outline: none;
+  color: var(--imb-accent);
+  border-radius: var(--imb-radius-sm);
+  box-shadow: var(--imb-focus-ring);
+}

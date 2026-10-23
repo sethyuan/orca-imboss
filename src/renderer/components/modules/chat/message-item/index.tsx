@@ -26,6 +26,11 @@ export interface MessageItemProps {
   onAnswered?: (chatId: number) => void;
   /** The answer message folded into this ask card, when one exists. */
   askAnswer?: Message;
+  /**
+   * Progress cards only. False hides the halt control on an earlier card of a
+   * run. Omitted elsewhere, and on a progress card that stands alone.
+   */
+  showHalt?: boolean;
 }
 
 /**
@@ -45,6 +50,7 @@ export const MessageItem = memo(function MessageItem({
   readonly = false,
   onAnswered,
   askAnswer,
+  showHalt = true,
 }: MessageItemProps): React.JSX.Element {
   // `@<id>` mentions in chat bubbles render as clickable employee names that
   // open the same agent session as the avatar for this chat.
@@ -97,6 +103,7 @@ export const MessageItem = memo(function MessageItem({
             steps={message.steps ?? []}
             groupChatId={message.groupChatId}
             timeLabel={timeLabel}
+            showHalt={showHalt}
           />
         </div>
       );

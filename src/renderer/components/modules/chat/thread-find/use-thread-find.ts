@@ -134,6 +134,12 @@ export interface ThreadFindOptions {
    * must not yank the view back to the tail while reading a match).
    */
   onBeforeJump?: (targetTop: number) => void;
+  /**
+   * A match whose row is inside a collapsed progress run. Return true when the
+   * caller will expand that run: the row has no box until the next layout, so
+   * the jump waits and retries once the card is visible.
+   */
+  onRevealMatch?: (row: HTMLElement) => boolean;
 }
 
 export interface ThreadFind {
@@ -289,6 +295,9 @@ function nearestIndex(thread: HTMLElement, matches: ThreadMatch[]): number {
 
 /** True when `rect` is already fully inside the thread's viewport. */
 function isFullyVisible(thread: HTMLElement, rect: DOMRect): boolean {
+  // A hidden progress card reports an empty box. That is not "already on
+  // screen": the jump has to open the run and bring the row in.
+  if (rect.width === 0 && rect.height === 0) return false;
   const view = thread.getBoundingClientRect();
   return rect.top >= view.top && rect.bottom <= view.bottom;
 }
@@ -299,6 +308,7 @@ export function useThreadFind({
   threadRef,
   hotkeysEnabled = true,
   onBeforeJump,
+  onRevealMatch,
 }: ThreadFindOptions): ThreadFind {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -332,15 +342,37 @@ export function useThreadFind({
   // Latest jump hook, read without re-creating `jumpTo`.
   const onBeforeJumpRef = useRef(onBeforeJump);
   onBeforeJumpRef.current = onBeforeJump;
+  const onRevealMatchRef = useRef(onRevealMatch);
+  onRevealMatchRef.current = onRevealMatch;
+  // Jump index waiting for a collapsed progress run to open. Set when a match
+  // lands inside a hidden card; the layout effect below scrolls once the card
+  // has a box.
+  const pendingRevealJumpRef = useRef<number | null>(null);
+  // Bumps when a jump waits for a run to expand, so the retry layout effect
+  // runs on that render (the jump callback itself is stable).
+  const [revealTick, setRevealTick] = useState(0);
   // Timestamp of the previous jump, for burst detection (see `JUMP_BURST_MS`).
   const lastJumpAtRef = useRef(0);
 
   /** Scroll to one match: its own rect when it is still in the DOM. */
   const jumpTo = useCallback(
-    (index: number): void => {
+    (index: number, fromRetry = false): void => {
       const thread = threadRef.current;
       const match = matchesRef.current[index];
       if (thread === null || match === undefined) return;
+      // A hidden card has an empty rect, and scrolling to it lands nowhere.
+      // The caller expands the run; this jump retries after that layout.
+      // The retry itself must not schedule another one: if the card is still
+      // hidden, fall through and scroll the row we have.
+      if (
+        !fromRetry &&
+        match.row !== null &&
+        onRevealMatchRef.current?.(match.row) === true
+      ) {
+        pendingRevealJumpRef.current = index;
+        setRevealTick((tick) => tick + 1);
+        return;
+      }
       const now = performance.now();
       const burst = now - lastJumpAtRef.current < JUMP_BURST_MS;
       lastJumpAtRef.current = now;
@@ -365,6 +397,16 @@ export function useThreadFind({
     },
     [threadRef],
   );
+
+  // Retry a jump that waited for a collapsed run to open. Clearing the pending
+  // index first keeps a reveal that is already open from scheduling itself
+  // again.
+  useLayoutEffect(() => {
+    const index = pendingRevealJumpRef.current;
+    if (index === null) return;
+    pendingRevealJumpRef.current = null;
+    jumpTo(index, true);
+  }, [revealTick, jumpTo]);
 
   /** Move the cursor by `delta` occurrences, wrapping around both ends. */
   const step = useCallback(
@@ -398,6 +440,7 @@ export function useThreadFind({
       scannedQueryRef.current = null;
       activeIndexRef.current = -1;
       lastJumpAtRef.current = 0;
+      pendingRevealJumpRef.current = null;
       clearHighlights();
       setComposing(false);
       setOpen(false);
