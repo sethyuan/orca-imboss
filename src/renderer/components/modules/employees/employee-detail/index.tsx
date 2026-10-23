@@ -6,7 +6,7 @@ import { cls } from "reactutils";
 import {
   defaultModelSelectNote,
   defaultThinkingSelectNote,
-  modelRef,
+  groupedModelSelectOptions,
   thinkingLevelsFor,
   thinkingSelectOptions,
 } from "../../../../thinking-options";
@@ -348,17 +348,11 @@ export function EmployeeDetail({
         <Field label={t("Model")}>
           <Select
             value={form.modelId ?? ""}
-            options={[
-              {
-                value: "",
-                label: t("Default"),
-                note: defaultModelSelectNote(defaultModel, models),
-              },
-              ...models.map((model) => ({
-                value: modelRef(model),
-                label: modelRef(model),
-              })),
-            ]}
+            options={groupedModelSelectOptions(models, {
+              value: "",
+              label: t("Default"),
+              note: defaultModelSelectNote(defaultModel, models),
+            })}
             placeholder={t("Default")}
             onChange={(modelId) =>
               scheduleSave({ ...form, modelId: modelId || null })
