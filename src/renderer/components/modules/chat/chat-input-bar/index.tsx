@@ -40,16 +40,37 @@ import { displayTitle } from "../relative-time";
 import "./index.css";
 import { MentionPopup } from "./mention-popup";
 
+/**
+ * One-shot "reset this composer" request, minted by the chat module right after
+ * it created a new chat. It is deliberately not a bare counter: the `chatId`
+ * pins which conversation the reset belongs to, and `seq` makes the reset a
+ * single event the composer applies **at most once** and then acknowledges
+ * (`onComposerResetApplied`), so an ordinary chat switch or a remount can never
+ * replay it.
+ */
+export interface ComposerResetRequest {
+  /** Chat the reset is for; applied only while that chat is the edited one. */
+  chatId: number;
+  /** Monotonic id of the request (`newChat()` bumps it per creation). */
+  seq: number;
+}
+
 export interface ChatInputBarProps {
   disabled?: boolean;
   /** Chat whose draft this composer edits (drafts are per chat, on appStore). */
   chatId: number;
   /**
-   * Bumped by the parent when a new chat is created. A non-zero change resets
-   * the composer and focuses the textarea; `0` (the initial value) never
-   * steals focus on mount.
+   * Pending "a new chat was just created" request: resets the composer's
+   * transient UI and focuses the textarea. `null` (the default) leaves the
+   * composer alone — switching chats must never reset anything.
    */
-  focusToken?: number;
+  composerReset?: ComposerResetRequest | null;
+  /**
+   * Called once the request in `composerReset` was applied (or dropped because
+   * its chat is no longer the edited one), so the parent can clear it and a
+   * later remount cannot replay it.
+   */
+  onComposerResetApplied?: (seq: number) => void;
   onSend: (text: string, attachments: MessageAttachment[]) => void;
   /**
    * Called after the composer wrote tags to the conversation (a common-project
@@ -61,7 +82,8 @@ export interface ChatInputBarProps {
 export function ChatInputBar({
   disabled = false,
   chatId,
-  focusToken = 0,
+  composerReset = null,
+  onComposerResetApplied,
   onSend,
   onTagsApplied,
 }: ChatInputBarProps): React.JSX.Element {
@@ -108,18 +130,35 @@ export function ChatInputBar({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // A new chat resets the composer (draft/attachments) and lands the caret in
-  // the input. `focusToken` starts at `0`, so mounting with an existing chat
-  // never steals focus.
+  // A brand-new chat resets the composer's transient UI and lands the caret in
+  // the input. Only an explicit request does this: a plain `chatId` change (a
+  // chat switch) must never reset anything, because the draft — text *and*
+  // attachments — lives on appStore precisely so it survives switching chats.
+  // The request is acknowledged after applying it, so remounting the composer
+  // later in the same module mount cannot replay the focus/reset.
+  const appliedResetSeqRef = useRef(0);
   useEffect(() => {
-    if (focusToken === 0) return;
-    appStore.clearChatDraft(chatId);
+    if (!composerReset) return;
+    if (composerReset.seq === appliedResetSeqRef.current) return;
+    if (composerReset.chatId !== chatId) {
+      // The selection already moved on: drop the request instead of applying it
+      // to a chat the boss did not create (and never clear another chat's
+      // draft on the way).
+      onComposerResetApplied?.(composerReset.seq);
+      return;
+    }
+    appliedResetSeqRef.current = composerReset.seq;
     setNotice(null);
     setPopupOpen(false);
     setDropActive(false);
-    if (textareaRef.current) textareaRef.current.value = "";
+    if (textareaRef.current) {
+      // A fresh chat has no draft (its parent cleared it defensively); read the
+      // store anyway so this stays correct if that ever changes.
+      textareaRef.current.value = appStore.chatDrafts[chatId]?.text ?? "";
+    }
     textareaRef.current?.focus();
-  }, [focusToken, chatId]);
+    onComposerResetApplied?.(composerReset.seq);
+  }, [composerReset, chatId, onComposerResetApplied]);
 
   // Per-chat drafts: reset transient UI when the edited chat changes so a
   // notice or an open attach menu never carries over to another chat's draft.

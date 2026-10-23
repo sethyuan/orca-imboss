@@ -167,9 +167,18 @@ export function ChatModule(): React.JSX.Element {
   // component state: the candidates come from the `chat_tags` table and must be
   // re-read on every mount so a tag deleted meanwhile cannot linger.
   const [tagOptions, setTagOptions] = useState<string[]>([]);
-  // Bumped on chat creation so the composer resets and focuses (see
-  // `ChatInputBar`). Starts at 0 so ordinary selections never steal focus.
-  const [focusToken, setFocusToken] = useState(0);
+  // Pending "a new chat was just created" request for the composer (see
+  // `ChatInputBar.composerReset`). `null` after the composer applied it, so a
+  // chat switch can never replay the reset; ordinary selections never touch it.
+  const [composerReset, setComposerReset] = useState<{
+    chatId: number;
+    seq: number;
+  } | null>(null);
+  const composerResetSeqRef = useRef(0);
+  /** Drop the request the composer just applied (or discarded as stale). */
+  const applyComposerReset = useCallback((seq: number): void => {
+    setComposerReset((current) => (current?.seq === seq ? null : current));
+  }, []);
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteIds, setDeleteIds] = useState<number[]>([]);
@@ -1062,8 +1071,13 @@ export function ChatModule(): React.JSX.Element {
       // A brand-new chat has no unread, but run the same idempotent clear so
       // every "selected ⇒ read" rendezvous goes through one path.
       clearSelectedUnread(chat.id);
-      // Reset the composer and focus the new chat's input.
-      setFocusToken((token) => token + 1);
+      // Reset the composer and focus the new chat's input. The new chat has no
+      // draft yet; clearing it is defensive only (a recycled id must never leak
+      // an old draft into a fresh composer). The previous chat's draft is
+      // deliberately kept — switching chats / creating one never drops drafts.
+      appStore.clearChatDraft(chat.id);
+      composerResetSeqRef.current += 1;
+      setComposerReset({ chatId: chat.id, seq: composerResetSeqRef.current });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -1465,7 +1479,8 @@ export function ChatModule(): React.JSX.Element {
       </div>
       <ChatInputBar
         chatId={selected.id}
-        focusToken={focusToken}
+        composerReset={composerReset}
+        onComposerResetApplied={applyComposerReset}
         onSend={handleSend}
         onTagsApplied={handleTagsApplied}
       />
