@@ -34,6 +34,7 @@ import { Modal } from "../../../modal";
 import "../../../modules/module-common.css";
 import type { MultiSelectOption } from "../../../multi-select";
 import { SearchInput } from "../../../search-input";
+import { useFavoriteModels } from "../../../../use-favorite-models";
 import { EmployeeDetail } from "../employee-detail";
 import { EmployeeImportModal } from "../employee-import-modal";
 import { EmployeeRecruitModal } from "../employee-recruit-modal";
@@ -107,6 +108,7 @@ export function EmployeesModule(): React.JSX.Element {
   const [defaultModel, setDefaultModel] = useState("");
   // App default thinking level: named beside the employee's "Default" choice.
   const [defaultThinking, setDefaultThinking] = useState("");
+  const favorites = useFavoriteModels();
   useEffect(() => {
     void Promise.all([
       imb.models.list(),
@@ -502,6 +504,8 @@ export function EmployeesModule(): React.JSX.Element {
       models={models}
       defaultModel={defaultModel}
       defaultThinking={defaultThinking}
+      favoriteModels={favorites.refs}
+      onToggleFavorite={favorites.toggle}
       onPatch={(input) => patch(selected.id, input)}
       onRemove={() => void remove(selected.id)}
       onAvatarUpdated={(employee) => appStore.replaceEmployee(employee)}
@@ -541,6 +545,8 @@ export function EmployeesModule(): React.JSX.Element {
         models={models}
         defaultModel={defaultModel}
         defaultThinking={defaultThinking}
+        favoriteModels={favorites.refs}
+        onToggleFavorite={favorites.toggle}
         onCreate={create}
       />
       <EmployeeImportModal

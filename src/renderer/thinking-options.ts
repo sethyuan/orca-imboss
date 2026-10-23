@@ -1,3 +1,4 @@
+import { CURATED_PROVIDERS_LABELS } from "@shared/constants/providers";
 import {
   isThinkingLevel,
   THINKING_LEVELS,
@@ -10,6 +11,108 @@ import type { SelectOption } from "./components/select";
 
 export function modelRef(model: ModelOption): string {
   return `${model.provider}/${model.id}`;
+}
+
+function providerMenuLabel(provider: string): string {
+  if (
+    Object.prototype.hasOwnProperty.call(CURATED_PROVIDERS_LABELS, provider)
+  ) {
+    return CURATED_PROVIDERS_LABELS[
+      provider as keyof typeof CURATED_PROVIDERS_LABELS
+    ];
+  }
+  return provider;
+}
+
+/** Stored favorite list: `provider/id`, oldest first. Drops blanks and dupes. */
+export function parseFavoriteModels(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const seen = new Set<string>();
+  const refs: string[] = [];
+  for (const item of parsed) {
+    if (typeof item !== "string") continue;
+    const ref = item.trim();
+    if (!ref || seen.has(ref)) continue;
+    seen.add(ref);
+    refs.push(ref);
+  }
+  return refs;
+}
+
+/** Star adds `ref` at the end. Star again removes it and leaves the rest put. */
+export function toggleFavoriteModel(
+  refs: readonly string[],
+  ref: string,
+): string[] {
+  const index = refs.indexOf(ref);
+  if (index >= 0) return refs.filter((_, i) => i !== index);
+  return [...refs, ref];
+}
+
+function modelMenuRow(
+  model: ModelOption,
+  group: string,
+  starred: boolean,
+): SelectOption {
+  return {
+    value: modelRef(model),
+    label: modelRef(model),
+    menuLabel: model.id,
+    group,
+    starable: true,
+    starred,
+    starLabel: starred ? t("Remove from favorites") : t("Add to favorites"),
+  };
+}
+
+/**
+ * One model menu. `leading` stays a normal row (Default, None). Favorites
+ * that are in `models` come next, oldest first, under a Favorites heading,
+ * and are not repeated under their provider. A divider sits before the
+ * provider groups only when that favorites block is shown. The closed
+ * control keeps `provider/id` via `label`.
+ */
+export function groupedModelSelectOptions(
+  models: readonly ModelOption[],
+  leading: SelectOption,
+  favoriteRefs: readonly string[] = [],
+): SelectOption[] {
+  const byRef = new Map(models.map((model) => [modelRef(model), model]));
+  const pinned = new Set<string>();
+  const favorites: ModelOption[] = [];
+  for (const ref of favoriteRefs) {
+    const model = byRef.get(ref);
+    if (!model || pinned.has(ref)) continue;
+    pinned.add(ref);
+    favorites.push(model);
+  }
+  const rest = models
+    .filter((model) => !pinned.has(modelRef(model)))
+    .sort(
+      (a, b) =>
+        providerMenuLabel(a.provider).localeCompare(
+          providerMenuLabel(b.provider),
+        ) || a.id.localeCompare(b.id),
+    );
+  const favoriteHeading = t("Favorites");
+  const rows: SelectOption[] = [
+    leading,
+    ...favorites.map((model) => modelMenuRow(model, favoriteHeading, true)),
+  ];
+  rest.forEach((model, index) => {
+    rows.push({
+      ...modelMenuRow(model, providerMenuLabel(model.provider), false),
+      dividerBefore: favorites.length > 0 && index === 0,
+    });
+  });
+  return rows;
 }
 
 /**

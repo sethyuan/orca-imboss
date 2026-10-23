@@ -210,6 +210,23 @@ export function IconTrash(props: IconProps): React.JSX.Element {
   );
 }
 
+export function IconStar({
+  filled = false,
+  ...props
+}: IconProps & { filled?: boolean }): React.JSX.Element {
+  return (
+    <svg
+      {...base({
+        ...props,
+        fill: filled ? "currentColor" : "none",
+        strokeWidth: filled ? 1 : 1.7,
+      })}
+    >
+      <path d="M12 3.2 14.7 8.7 20.7 9.6 16.3 13.9 17.4 19.9 12 17 6.6 19.9 7.7 13.9 3.3 9.6 9.3 8.7 Z" />
+    </svg>
+  );
+}
+
 export function IconCheck(props: IconProps): React.JSX.Element {
   return (
     <svg {...base(props)} strokeWidth={2}>
