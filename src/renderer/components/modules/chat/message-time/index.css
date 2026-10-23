@@ -1,14 +1,33 @@
 /*
- * Exact send time: a small tag straddling the host bubble/card's bottom-right
- * corner, so it covers only the host's own padding (never the last line of
- * text) and needs no reserved space. Hidden until the row is hovered or holds
- * keyboard focus; it stays in the DOM either way, so assistive tech reads it.
- * The host (bubble or card container) must be `position: relative`.
+ * Bottom-right meta row of a message: [copy-as-Markdown button] [exact send
+ * time]. The row itself only positions the two chips: it straddles the host
+ * bubble/card's bottom-right corner, so it covers just the host's own padding
+ * (never the last line of text) and needs no reserved space. The host (bubble or
+ * card container) must be `position: relative`.
+ *
+ * Right-anchored with the time tag as the last child keeps the time tag exactly
+ * where it has always been; the copy button grows leftwards, i.e. it sits
+ * "next to" the time label without any measuring or width math.
+ *
+ * No `z-index` here: it would silently change stamping for every host. The one
+ * place that needs to be lifted (the progress-group deck) does so explicitly in
+ * `progress-group/index.css`.
  */
-.imb-msg-time {
+.imb-msg-meta {
   position: absolute;
   right: 8px;
   bottom: -7px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--imb-space-1);
+  user-select: none;
+}
+
+/*
+ * Exact send time: a small tag. Hidden until the row is hovered or holds
+ * keyboard focus; it stays in the DOM either way, so assistive tech reads it.
+ */
+.imb-msg-time {
   padding: 0 6px;
   border: 1px solid var(--imb-border);
   border-radius: var(--imb-radius-sm);
@@ -24,7 +43,69 @@
   transition: opacity var(--imb-motion-fast) var(--imb-ease-standard);
 }
 
+/*
+ * Copy-as-Markdown: same reveal trigger as the time tag (row hover or any focus
+ * inside the row, so keyboard users get it too). It is a real `<button>`, kept
+ * in the DOM and focusable, and hidden with opacity only — never `display` or
+ * `visibility` — so tabbing to it reveals it via `:focus-within`.
+ *
+ * No visible chrome at rest: the button sits on the bubble's own fill, and light
+ * chrome there would read as a third chip competing with the time tag.
+ */
+.imb-msg-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--imb-radius-chip);
+  background: transparent;
+  color: var(--imb-fg-muted);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--imb-dur-1) var(--imb-ease-standard),
+    background var(--imb-dur-1) var(--imb-ease-standard),
+    color var(--imb-dur-1) var(--imb-ease-standard);
+}
+
 .imb-msg:hover .imb-msg-time,
 .imb-msg:focus-within .imb-msg-time {
   opacity: 1;
+}
+
+.imb-msg:hover .imb-msg-copy,
+.imb-msg:focus-within .imb-msg-copy {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.imb-msg-copy:hover {
+  background: var(--imb-row-hover);
+  color: var(--imb-fg);
+}
+
+.imb-msg-copy:focus-visible {
+  outline: none;
+  box-shadow: var(--imb-focus-ring);
+}
+
+/*
+ * Touch / no-hover platforms have no row hover to reveal anything, so the copy
+ * action would be unreachable. It stays visible at the reduced opacity the code
+ * blocks use for their own copy button; the time tag keeps its hover-only
+ * behaviour (it is information, not an action).
+ */
+@media (hover: none) {
+  .imb-msg-copy {
+    opacity: 0.55;
+    pointer-events: auto;
+  }
+
+  .imb-msg-copy:active {
+    opacity: 1;
+  }
 }

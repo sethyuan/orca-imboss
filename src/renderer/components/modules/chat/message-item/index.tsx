@@ -7,6 +7,7 @@ import { AckIndicator } from "../ack-indicator";
 import { AnswerCard } from "../answer-card";
 import { AskCard } from "../ask-card";
 import { ChatCard } from "../chat-card";
+import { markdownCopySource } from "../copy-markdown";
 import { ImageMessage } from "../image-gen";
 import { InterruptedNotice } from "../interrupted-notice";
 import { MessageBubble } from "../message-bubble";
@@ -154,6 +155,9 @@ export const MessageItem = memo(function MessageItem({
           resolveMention={mentions.resolveMention}
           onMentionClick={mentions.onMentionClick}
           timeLabel={timeLabel}
+          // Copy-as-Markdown: assistant prose in the interactive (root) chat
+          // only — see `chat/copy-markdown.ts` for the rule.
+          copyMarkdown={markdownCopySource(message, readonly)}
           avatar={
             <EmployeeAvatar
               employeeId={message.senderEmployeeId}

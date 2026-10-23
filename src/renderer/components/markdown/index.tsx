@@ -20,6 +20,7 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math-extended";
 import type { PluggableList } from "unified";
+import { copyToClipboard } from "../../clipboard";
 import { IconCheck, IconCopy } from "../icons";
 import { MENTION_TAG, mentionPlugin } from "./mention";
 import "./index.css";
@@ -95,35 +96,6 @@ function extractText(node: ReactNode): string {
     return extractText((node.props as { children?: ReactNode }).children);
   }
   return "";
-}
-
-/**
- * Copy plain text to the clipboard. `navigator.clipboard` needs a focused,
- * secure document; fall back to the legacy `<textarea>` trick so the button
- * still works if that path is unavailable or rejects.
- */
-async function copyToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard !== undefined) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return;
-    } catch {
-      // Fall through to the legacy path.
-    }
-  }
-  const area = document.createElement("textarea");
-  area.value = text;
-  area.setAttribute("readonly", "");
-  area.style.position = "fixed";
-  area.style.top = "-1000px";
-  area.style.opacity = "0";
-  document.body.appendChild(area);
-  area.select();
-  try {
-    document.execCommand("copy");
-  } finally {
-    document.body.removeChild(area);
-  }
 }
 
 /**

@@ -39,6 +39,12 @@ export interface MessageBubbleProps {
    * this is where the precise time stays reachable. `null` hides it.
    */
   timeLabel?: string | null;
+  /**
+   * Raw Markdown source to offer behind the "Copy as Markdown" button beside
+   * the time tag. `null`/undefined/blank renders no button. Deciding *whether*
+   * a row qualifies lives in `message-item` (`chat/copy-markdown.ts`).
+   */
+  copyMarkdown?: string | null;
 }
 
 /**
@@ -57,6 +63,7 @@ export function MessageBubble({
   resolveMention,
   onMentionClick,
   timeLabel,
+  copyMarkdown,
 }: MessageBubbleProps): React.JSX.Element {
   const attachmentView = useMessageAttachments({
     messageId,
@@ -86,7 +93,7 @@ export function MessageBubble({
           ) : (
             <span className="imb-bubble-text">{content}</span>
           ))}
-        <MessageTime label={timeLabel} />
+        <MessageTime label={timeLabel} copyMarkdown={copyMarkdown} />
       </div>
     </div>
   );

@@ -60,10 +60,11 @@
   transition: height var(--imb-motion-base) var(--imb-ease-standard);
 }
 
-/* The hover time tag is rendered beside the clipping stage (so paging can never
-   crop it) — but the stage owns `z-index: 1`, so the tag needs a higher one to
-   paint above the card instead of behind it. */
-.imb-msg.imb-progress-group > .imb-msg-time {
+/* The hover time tag (and the copy-as-Markdown button beside it) is rendered
+   beside the clipping stage (so paging can never crop it) — but the stage owns
+   `z-index: 1`, so the meta row needs a higher one to paint above the card
+   instead of behind it. */
+.imb-msg.imb-progress-group > .imb-msg-meta {
   z-index: 2;
 }
 
