@@ -129,11 +129,26 @@ function resolveModelRef(
  * Best-effort: a failed refresh is logged and never rejects, so callers must
  * not fail their own action (provider add/update/remove, app startup) just
  * because the store refresh failed.
+ *
+ * The runtime reports per-provider failures in `errors` instead of rejecting,
+ * so those are logged explicitly: a silently dropped provider failure leaves
+ * the previous catalog (`models-store.json`) in place with no trace, which is
+ * how a frozen catalog stayed unnoticed.
  */
 export async function refreshModelStore(signal?: AbortSignal): Promise<void> {
   try {
     const runtime = await getModelRuntime();
-    await runtime.refresh({ allowNetwork: true, force: true, signal });
+    const result = await runtime.refresh({
+      allowNetwork: true,
+      force: true,
+      signal,
+    });
+    for (const [providerId, error] of result.errors) {
+      console.warn(
+        `[model-runtime] catalog refresh failed for ${providerId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
   } catch (error) {
     console.error("[model-runtime] refresh failed", error);
   }
