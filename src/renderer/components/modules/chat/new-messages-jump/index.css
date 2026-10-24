@@ -1,0 +1,90 @@
+/* Floating "new messages" pill over the transcript's bottom-right corner.
+
+   Positioned in `.imb-chat-thread-wrap` (the positioning context its parent
+   provides — an absolutely positioned child of the scroller would scroll away
+   with the messages) and placed in the inner ladder's floating-control slot
+   (31): above every transcript decoration (image cards 10–14, the `+N` badge
+   20) and just above the in-thread find bar (30), so a picture scrolled under
+   the pill can never swallow it — while the header, which lives in the outer
+   context, still covers both. See the ladder in `../thread.css`.
+
+   The control is transient: it only exists while messages the boss has not seen
+   yet sit below the fold, so it never reserves layout space (no `has-*` padding
+   rule — the boss chose the smaller footprint over permanently reserved room).
+   Text only, no direction glyph: a batch can sit above or below the reading
+   position, so an arrow would point the wrong way half the time. */
+.imb-new-messages {
+  position: absolute;
+  right: var(--imb-space-5);
+  bottom: var(--imb-space-5);
+  z-index: 31;
+  display: flex;
+  /* Enter with a short rise + fade so the pill does not just pop into a corner
+     the eye is already reading. Exit is immediate (unmounting while the boss is
+     already scrolling / clicking keeps the interaction feeling instant). */
+  animation: imb-new-messages-in var(--imb-dur-3) var(--imb-ease-standard);
+}
+
+@keyframes imb-new-messages-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--imb-space-1));
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.imb-new-messages-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--imb-control-h);
+  /* Symmetric horizontal padding: the pill is text only now, so an uneven inset
+     (the old leading-icon slot) would read as text pushed against one edge. */
+  padding: 0 var(--imb-space-3);
+  border: 1px solid var(--imb-border);
+  border-radius: var(--imb-radius-pill);
+  /* Opaque on purpose: the pill floats over scrolling text, so a translucent
+     fill would show the message through it. */
+  background: var(--imb-surface);
+  color: var(--imb-fg);
+  box-shadow: var(--imb-elev-raised);
+  font: inherit;
+  font-size: var(--imb-fs-small);
+  font-weight: var(--imb-fw-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--imb-motion-fast) var(--imb-ease-standard),
+    color var(--imb-motion-fast) var(--imb-ease-standard),
+    transform var(--imb-dur-1) var(--imb-ease-standard);
+}
+
+/* Same opaque hover tint as `.imb-thread-jump` (which floats over the transcript
+   too): `--imb-fg-soft` is translucent and would let the text underneath show. */
+.imb-new-messages-btn:hover {
+  background: color-mix(in oklch, var(--imb-fg) 8%, var(--imb-surface));
+}
+
+.imb-new-messages-btn:active {
+  transform: scale(var(--imb-press-scale));
+}
+
+.imb-new-messages-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--imb-focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imb-new-messages {
+    animation: none;
+  }
+
+  .imb-new-messages-btn:active {
+    transform: none;
+  }
+}

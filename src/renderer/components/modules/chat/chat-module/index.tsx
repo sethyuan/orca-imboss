@@ -14,6 +14,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -53,6 +54,7 @@ import {
   MyMessageJump,
   type MyMessageEntry,
 } from "../my-message-jump";
+import { NewMessagesJump } from "../new-messages-jump";
 import { formatChatPreview } from "../preview-text";
 import { ProgressGroup } from "../progress-group";
 import { groupProgressRuns, type ProgressRun } from "../progress-runs";
@@ -68,8 +70,10 @@ import {
   PIN_THRESHOLD,
   prefersReducedMotion,
   scrollThreadToRow,
+  type ThreadAlign,
 } from "../thread-scroll";
 import { TimeSeparator } from "../time-separator";
+import { buildUnseenBatch, type UnseenBatch } from "../unseen-batch";
 import "./index.css";
 
 const PAGE_SIZE = 50;
@@ -139,8 +143,39 @@ function collapseWhitespace(text: string): string {
 interface ChatScroll {
   scrollTop: number;
   pinned: boolean;
+  /**
+   * Id of the newest rendered message the boss had already been shown when the
+   * thread was last pinned to the bottom — i.e. how far she has read. Used to
+   * rebuild the "new messages" marker after a chat or module switch: anything
+   * newer than this is unseen. `null` until the chat has been seen at the tail
+   * in this session.
+   */
+  seenUpToId: number | null;
 }
 const chatScrollStore = new Map<number, ChatScroll>();
+
+/**
+ * Merge one patch into a chat's scroll record. Each writer only owns part of the
+ * record (the scroll position, or the read position), so a plain `set` would
+ * silently drop the fields its caller knows nothing about.
+ */
+function patchChatScroll(chatId: number, patch: Partial<ChatScroll>): void {
+  const current = chatScrollStore.get(chatId);
+  chatScrollStore.set(chatId, {
+    scrollTop: patch.scrollTop ?? current?.scrollTop ?? 0,
+    pinned: patch.pinned ?? current?.pinned ?? true,
+    seenUpToId: patch.seenUpToId ?? current?.seenUpToId ?? null,
+  });
+}
+
+/**
+ * Is the window actually on screen? A hidden / minimized / occluded window means
+ * "the boss is not looking": messages that arrive then must not count as read,
+ * and the view must not creep forward behind her back.
+ */
+function isDocumentVisible(): boolean {
+  return document.visibilityState !== "hidden";
+}
 
 export function ChatModule(): React.JSX.Element {
   const { data, focusChatId } = useApp();
@@ -210,6 +245,30 @@ export function ChatModule(): React.JSX.Element {
   const restoreScrollRef = useRef<{ chatId: number; scrollTop: number } | null>(
     null,
   );
+  // The batch of messages behind the floating "new messages" pill (see
+  // `../new-messages-jump`). The state drives the pill; the ref mirrors it for
+  // the scroll handler and the visibility pass, which are stable callbacks.
+  const [unseen, setUnseen] = useState<UnseenBatch | null>(null);
+  const unseenRef = useRef<UnseenBatch | null>(null);
+  unseenRef.current = unseen;
+  // Id of the newest rendered message: the read baseline is advanced from it.
+  const newestVisibleIdRef = useRef<number | null>(null);
+  // Read position of the open chat, mirrored from `ChatScroll.seenUpToId`.
+  const seenUpToIdRef = useRef<number | null>(null);
+  // Coalesces the scroll-driven visibility pass to one per frame.
+  const unseenCheckRef = useRef(0);
+  // Latest scroll handler, for the window-visibility listener (which is
+  // registered before the handler is defined and must not re-subscribe).
+  const handleThreadScrollRef = useRef<() => void>(() => undefined);
+  // Set by the restore path in the follow effect, consumed by the marker pass:
+  // a batch that came back from a restore is *announced*, not "already on
+  // screen", even when its first row happens to be visible.
+  const restoreBatchPendingRef = useRef(false);
+  // Whether the batch currently on screen is *announced* — it arrived while she
+  // was not looking (a restore, or a hidden window). Announced batches are not
+  // auto-dismissed just because their first row happens to be on screen: the
+  // pill is what tells her, and it stays until she reaches the tail or jumps.
+  const batchAnnouncedRef = useRef(false);
   const locale = getLocale();
   // Chat-list previews show `@名字` for `@<id>` mentions (plain text, so no
   // theme color or click target there).
@@ -580,17 +639,29 @@ export function ChatModule(): React.JSX.Element {
     if (selectedId === null) {
       restoreScrollRef.current = null;
       pinnedRef.current = true;
+      seenUpToIdRef.current = null;
+      unseenRef.current = null;
+      setUnseen(null);
       setMessages([]);
       return;
     }
-    // Restore this chat's previous scroll unless it was pinned to the bottom
-    // (a fresh selection with no saved position also starts pinned).
+    // Restore this chat's previous scroll position — whatever `pinned` says.
+    // `pinned` records that she *left* at the tail, not that she has read what
+    // arrived since: when a batch is pending the effect below keeps the old
+    // position (instead of following the tail) so the pill can offer the start
+    // of the batch. A fresh selection has no saved position and starts pinned.
     const saved = chatScrollStore.get(selectedId);
     pinnedRef.current = saved ? saved.pinned : true;
-    restoreScrollRef.current =
-      saved && !saved.pinned
-        ? { chatId: selectedId, scrollTop: saved.scrollTop }
-        : null;
+    restoreScrollRef.current = saved
+      ? { chatId: selectedId, scrollTop: saved.scrollTop }
+      : null;
+    // The read baseline comes with the scroll record: re-entering a chat that
+    // was left mid-history while messages arrived must show the marker again
+    // (the detection effect compares the fresh `messages` against this).
+    seenUpToIdRef.current = saved?.seenUpToId ?? null;
+    // A batch belongs to the conversation it was built in.
+    unseenRef.current = null;
+    setUnseen(null);
     void loadMessages(selectedId);
     clearSelectedUnread(selectedId);
   }, [selectedId, loadMessages, clearSelectedUnread]);
@@ -739,6 +810,14 @@ export function ChatModule(): React.JSX.Element {
     [messages, pairing],
   );
 
+  // Newest rendered message, for the read baseline the new-messages marker
+  // advances. Read from a ref: the scroll handler is stable and must not
+  // re-create on every reload.
+  newestVisibleIdRef.current =
+    visibleMessages.length > 0
+      ? visibleMessages[visibleMessages.length - 1].id
+      : null;
+
   // Every rendered message by id (progress runs are stored as ids only, so the
   // thread can resolve a run's cards without re-walking the list per group).
   const messageById = useMemo(() => {
@@ -829,21 +908,262 @@ export function ChatModule(): React.JSX.Element {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  /**
+   * Are there rendered messages newer than the read baseline? Asked at restore
+   * time, before the marker state exists, to decide whether landing on the tail
+   * would skip content the boss has not seen yet.
+   */
+  const hasPendingBatch = useCallback((): boolean => {
+    const seen = seenUpToIdRef.current;
+    const newest = newestVisibleIdRef.current;
+    if (seen === null || newest === null || newest <= seen) return false;
+    return (
+      buildUnseenBatch(
+        visibleMessages,
+        seen,
+        progressRuns.runByMessageId,
+        null,
+      ) !== null
+    );
+  }, [visibleMessages, progressRuns]);
+
   // Auto-scroll to the newest message, but only while the user is pinned to
   // the bottom. Incoming messages/run events must not yank a user who scrolled
-  // up to read history. A restored (non-pinned) position wins once, after that
-  // chat's messages have rendered.
-  useEffect(() => {
+  // up to read history. A restored position wins once, after that chat's
+  // messages have rendered.
+  //
+  // Two things never count as "following the live tail":
+  //  1. A **restore** while a batch is pending. Re-entering a conversation the
+  //     boss left at the bottom used to jump her straight to the newest message,
+  //     which silently skipped everything that arrived while she was away. She
+  //     asked to land back where she left off instead, with the "new messages"
+  //     pill offering the start of the batch.
+  //  2. A **hidden window**. Nothing she could have read happened while the
+  //     window was not on screen, so the view must not creep forward (and
+  //     `markSeen` must not advance either).
+  //
+  // A **layout** effect (not a passive one): the marker pass below is a layout
+  // effect too, and it must judge the position this effect just produced. A
+  // passive follow would run *after* the marker pass, so on return the marker
+  // would see the stale "pinned" flag from before the leave and swallow the
+  // batch. It also keeps the landing position out of the first paint.
+  useLayoutEffect(() => {
     const el = threadRef.current;
     if (!el) return;
     const restore = restoreScrollRef.current;
-    if (restore && loadedChatIdRef.current === restore.chatId) {
-      el.scrollTop = restore.scrollTop;
+    if (restore !== null) {
+      // A restore is pending: do **nothing** until this chat's own rows are the
+      // ones on screen. Scrolling the previously rendered chat here would move
+      // the thread for nothing, and its `scroll` event is handled *after* the
+      // new rows land — it would report the incoming chat as read (this is
+      // exactly how a batch used to be swallowed on the way back).
+      if (loadedChatIdRef.current !== restore.chatId) return;
       restoreScrollRef.current = null;
+      if (pinnedRef.current && hasPendingBatch()) {
+        el.scrollTop = restore.scrollTop;
+        // The `scroll` event that follows re-syncs this, but the marker logic in
+        // this same commit must already see the truth.
+        pinnedRef.current = false;
+        // She was away: the marker is what tells her about the batch (and what
+        // takes her to its start), so it is announced even if the first new row
+        // already sits in the viewport.
+        restoreBatchPendingRef.current = true;
+        return;
+      }
+      el.scrollTop = pinnedRef.current ? el.scrollHeight : restore.scrollTop;
       return;
     }
-    if (pinnedRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages, selectedRunStatus]);
+    if (pinnedRef.current && isDocumentVisible())
+      el.scrollTop = el.scrollHeight;
+  }, [messages, selectedRunStatus, hasPendingBatch]);
+
+  /**
+   * Advance the read baseline to the newest rendered message. Called whenever
+   * the boss has reached the tail (or the start of a batch) — the marker must
+   * not resurrect after she scrolls back up.
+   */
+  const markSeen = useCallback((): void => {
+    const chatId = selectedIdRef.current;
+    const newest = newestVisibleIdRef.current;
+    if (chatId === null || newest === null) return;
+    // `messages` can still hold the previous chat's rows for a frame after a
+    // switch: never record those as this chat's read position.
+    if (loadedChatIdRef.current !== chatId) return;
+    // A hidden window is not a reader: the baseline only moves while the tail
+    // is on screen for a looking boss.
+    if (!isDocumentVisible()) return;
+    seenUpToIdRef.current = newest;
+    patchChatScroll(chatId, { seenUpToId: newest });
+  }, []);
+
+  /** Hide the marker: the batch behind it has been dealt with. */
+  const dropUnseen = useCallback((): void => {
+    unseenRef.current = null;
+    restoreBatchPendingRef.current = false;
+    batchAnnouncedRef.current = false;
+    setUnseen(null);
+    markSeen();
+  }, [markSeen]);
+
+  /** The rendered row a batch's jump lands on (a message row or a run's row). */
+  const findBatchRow = useCallback((batch: UnseenBatch): HTMLElement | null => {
+    const el = threadRef.current;
+    if (el === null) return null;
+    return el.querySelector<HTMLElement>(
+      batch.isRun
+        ? `[data-progress-run="${batch.targetId}"]`
+        : `[data-message-id="${batch.targetId}"]`,
+    );
+  }, []);
+
+  /**
+   * Is the *start* of the batch on screen? Its top edge being inside the
+   * viewport is the test (not "fully visible"): a first message taller than the
+   * thread is at its start as soon as its top shows, which is exactly the
+   * position the pill would scroll to.
+   */
+  const isBatchStartVisible = useCallback((row: HTMLElement): boolean => {
+    const el = threadRef.current;
+    if (el === null) return false;
+    const viewport = el.getBoundingClientRect();
+    const rect = row.getBoundingClientRect();
+    return rect.top >= viewport.top - 1 && rect.top < viewport.bottom - 1;
+  }, []);
+
+  /**
+   * Re-evaluate the marker after the thread moved: it stays only while the boss
+   * cannot see the start of the batch. Reaching the tail, or bringing the start
+   * into view by hand, means she has arrived — the marker goes and the baseline
+   * advances so it does not come back.
+   */
+  const checkUnseenVisibility = useCallback((): void => {
+    if (unseenRef.current === null) return;
+    if (pinnedRef.current) {
+      dropUnseen();
+      return;
+    }
+    // A batch she was not looking at is read forwards from wherever she is: it
+    // stays until she reaches the tail or takes the jump below. (A live arrival
+    // she was watching is different: if its first row is already on screen
+    // there is nothing to jump to.)
+    if (batchAnnouncedRef.current) return;
+    const row = findBatchRow(unseenRef.current);
+    // A row that is gone (mid-reload) is not evidence of anything: keep the
+    // marker, the next pass re-checks.
+    if (row === null) return;
+    if (isBatchStartVisible(row)) dropUnseen();
+  }, [dropUnseen, findBatchRow, isBatchStartVisible]);
+
+  /** One visibility pass per frame, however fast the thread scrolls. */
+  const scheduleUnseenCheck = useCallback((): void => {
+    if (unseenCheckRef.current !== 0) return;
+    unseenCheckRef.current = window.requestAnimationFrame(() => {
+      unseenCheckRef.current = 0;
+      checkUnseenVisibility();
+    });
+  }, [checkUnseenVisibility]);
+
+  /**
+   * The window came back. While it was hidden the thread deliberately stopped
+   * following the tail, so the pinned flag is stale: re-read it from the DOM and
+   * let the marker pass run again (that is what reveals the pill after "hide the
+   * window while the assistant is answering").
+   */
+  useEffect(() => {
+    const onVisibilityChange = (): void => {
+      if (!isDocumentVisible()) return;
+      handleThreadScrollRef.current();
+      if (unseenRef.current !== null) scheduleUnseenCheck();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [scheduleUnseenCheck]);
+
+  // A pending frame must not outlive the module (it would run against a dead
+  // thread ref).
+  useEffect(() => {
+    return () => {
+      if (unseenCheckRef.current !== 0) {
+        window.cancelAnimationFrame(unseenCheckRef.current);
+        unseenCheckRef.current = 0;
+      }
+    };
+  }, []);
+
+  /**
+   * Detect messages that arrived while the boss was reading history.
+   *
+   * Declared **after** the auto-scroll effect on purpose: that effect is what
+   * keeps a pinned view on the tail, so by the time this runs the position it
+   * should judge is already in place. Layout (not passive) effect: the thread
+   * DOM is committed, so a batch that is already on screen is dropped before
+   * the pill is ever painted.
+   *
+   * The unit is a rendered row (`visibleMessages`, ids are globally monotonic)
+   * and the count is "jump targets": a progress run renders once, so its N
+   * snapshots are one target. All of that lives in `../unseen-batch` (pure, so
+   * the batch rules can be exercised without a DOM).
+   */
+  useLayoutEffect(() => {
+    const chatId = selectedIdRef.current;
+    const newest = newestVisibleIdRef.current;
+    // Nothing to judge yet (no chat, or the previous chat's rows are still on
+    // screen while this one loads).
+    if (chatId === null || newest === null) return;
+    if (loadedChatIdRef.current !== chatId) return;
+    const seen = seenUpToIdRef.current;
+    if (seen === null) {
+      // First sighting in this session: the boss is being shown the tail, so
+      // everything in it counts as read.
+      markSeen();
+      return;
+    }
+    if (newest <= seen) return;
+    if (pinnedRef.current && isDocumentVisible()) {
+      // The auto-scroll effect just kept the tail on screen, and the boss was
+      // looking at it.
+      dropUnseen();
+      return;
+    }
+    const fromRestore = restoreBatchPendingRef.current;
+    restoreBatchPendingRef.current = false;
+    const previous = unseenRef.current;
+    // A batch that came back with her from a restore, or that landed while the
+    // window was hidden, is *announced* (see `batchAnnouncedRef`). Once a batch
+    // exists, its character never changes: later messages just join it.
+    const announced =
+      previous !== null
+        ? batchAnnouncedRef.current
+        : fromRestore || !isDocumentVisible();
+    const next = buildUnseenBatch(
+      visibleMessages,
+      seen,
+      progressRuns.runByMessageId,
+      previous,
+    );
+    // Nothing newer than the baseline, or an identical batch: leave the marker
+    // (and the thread) alone.
+    if (next === null || next === previous) return;
+    // A message that landed just below the reading position is already visible
+    // and she was watching: there is nothing to jump to. An *announced* batch is
+    // the exception — see `checkUnseenVisibility`.
+    const row = findBatchRow(next);
+    if (!announced && row !== null && isBatchStartVisible(row)) {
+      dropUnseen();
+      return;
+    }
+    batchAnnouncedRef.current = announced;
+    unseenRef.current = next;
+    setUnseen(next);
+  }, [
+    visibleMessages,
+    progressRuns,
+    dropUnseen,
+    findBatchRow,
+    isBatchStartVisible,
+    markSeen,
+  ]);
 
   const handleThreadScroll = useCallback((): void => {
     const el = threadRef.current;
@@ -852,12 +1172,27 @@ export function ChatModule(): React.JSX.Element {
       el.scrollHeight - el.scrollTop - el.clientHeight <= PIN_THRESHOLD;
     pinnedRef.current = pinned;
     if (selectedIdRef.current !== null) {
-      chatScrollStore.set(selectedIdRef.current, {
+      const chatId = selectedIdRef.current;
+      // Sitting at the tail keeps the read baseline current, so re-entering the
+      // chat later does not report already-read messages as new. Guarded by
+      // `markSeen`'s rule: never record another chat's rows, and never advance
+      // while the window is hidden.
+      const newest =
+        loadedChatIdRef.current === chatId && isDocumentVisible()
+          ? newestVisibleIdRef.current
+          : null;
+      if (pinned && newest !== null) seenUpToIdRef.current = newest;
+      patchChatScroll(chatId, {
         scrollTop: el.scrollTop,
         pinned,
+        ...(pinned && newest !== null ? { seenUpToId: newest } : null),
       });
     }
-  }, []);
+    // Only while a batch is waiting: one rect read per frame, nothing while the
+    // boss is simply reading (the common case).
+    if (unseenRef.current !== null) scheduleUnseenCheck();
+  }, [scheduleUnseenCheck]);
+  handleThreadScrollRef.current = handleThreadScroll;
 
   /**
    * Scroll the thread to one message row. One rect read for the row (no
@@ -865,58 +1200,82 @@ export function ChatModule(): React.JSX.Element {
    * smooth scroll settles; the scroll itself (and the "my messages" jump) share
    * `../thread-scroll` with the other thread views.
    */
-  const scrollToMessageRow = useCallback((messageId: number): void => {
-    const el = threadRef.current;
-    if (!el) return;
-    const row = el.querySelector<HTMLElement>(
-      `[data-message-id="${messageId}"]`,
-    );
-    if (!row) return;
-    scrollThreadToRow(el, row, {
-      topGap: MY_JUMP_TOP_GAP,
-      // Following the live tail must not fight the jump: the follow effect
-      // re-pins on every `messages` change, so `pinned` is cleared *before*
-      // scrolling (a programmatic scroll emits `scroll`, which re-syncs it from
-      // the position).
-      beforeScroll: (target) => {
-        pinnedRef.current = false;
-        if (selectedIdRef.current !== null) {
-          chatScrollStore.set(selectedIdRef.current, {
-            scrollTop: target,
-            pinned: false,
-          });
-        }
-      },
-      flash: row,
-    });
-  }, []);
+  const scrollToMessageRow = useCallback(
+    (messageId: number, align: ThreadAlign = "top"): void => {
+      const el = threadRef.current;
+      if (!el) return;
+      const row = el.querySelector<HTMLElement>(
+        `[data-message-id="${messageId}"]`,
+      );
+      if (!row) return;
+      scrollThreadToRow(el, row, {
+        topGap: MY_JUMP_TOP_GAP,
+        align,
+        // Following the live tail must not fight the jump: the follow effect
+        // re-pins on every `messages` change, so `pinned` is cleared *before*
+        // scrolling (a programmatic scroll emits `scroll`, which re-syncs it
+        // from the position).
+        beforeScroll: (target) => {
+          pinnedRef.current = false;
+          if (selectedIdRef.current !== null) {
+            patchChatScroll(selectedIdRef.current, {
+              scrollTop: target,
+              pinned: false,
+            });
+          }
+        },
+        flash: row,
+      });
+    },
+    [],
+  );
 
   /**
    * Scroll to a folded progress run's row. Its `data-message-id` changes with
    * the card on screen, so the run anchor is what a jump can address before the
    * run has paged to the target card.
    */
-  const scrollToRunRow = useCallback((anchorId: number): void => {
-    const el = threadRef.current;
-    if (!el) return;
-    const row = el.querySelector<HTMLElement>(
-      `[data-progress-run="${anchorId}"]`,
-    );
-    if (!row) return;
-    scrollThreadToRow(el, row, {
-      topGap: MY_JUMP_TOP_GAP,
-      beforeScroll: (target) => {
-        pinnedRef.current = false;
-        if (selectedIdRef.current !== null) {
-          chatScrollStore.set(selectedIdRef.current, {
-            scrollTop: target,
-            pinned: false,
-          });
-        }
-      },
-      // The group flashes the revealed card itself once it is mounted.
-    });
-  }, []);
+  const scrollToRunRow = useCallback(
+    (anchorId: number, align: ThreadAlign = "top"): void => {
+      const el = threadRef.current;
+      if (!el) return;
+      const row = el.querySelector<HTMLElement>(
+        `[data-progress-run="${anchorId}"]`,
+      );
+      if (!row) return;
+      scrollThreadToRow(el, row, {
+        topGap: MY_JUMP_TOP_GAP,
+        align,
+        beforeScroll: (target) => {
+          pinnedRef.current = false;
+          if (selectedIdRef.current !== null) {
+            patchChatScroll(selectedIdRef.current, {
+              scrollTop: target,
+              pinned: false,
+            });
+          }
+        },
+        // The group flashes the revealed card itself once it is mounted, but
+        // the row flash covers a run that stays on its own card.
+        flash: row,
+      });
+    },
+    [],
+  );
+
+  /**
+   * Reveal the start of the new-message batch: vertically centered, so a slice
+   * of the older context stays visible above it and the boss reads forwards
+   * from there. The marker is dropped first — it has done its job, and a batch
+   * that arrives afterwards starts from the new tail.
+   */
+  const jumpToUnseen = useCallback((): void => {
+    const batch = unseenRef.current;
+    if (batch === null) return;
+    dropUnseen();
+    if (batch.isRun) scrollToRunRow(batch.targetId, "center");
+    else scrollToMessageRow(batch.targetId, "center");
+  }, [dropUnseen, scrollToMessageRow, scrollToRunRow]);
 
   /**
    * Jump to the newest message and resume following it (the 「Latest message」
@@ -930,8 +1289,11 @@ export function ChatModule(): React.JSX.Element {
     if (!el) return;
     pinnedRef.current = true;
     restoreScrollRef.current = null;
+    // "Go to bottom" is the same arrival as clicking the new-messages pill: the
+    // batch is on screen now, so it is read.
+    dropUnseen();
     if (selectedIdRef.current !== null) {
-      chatScrollStore.set(selectedIdRef.current, {
+      patchChatScroll(selectedIdRef.current, {
         scrollTop: Math.max(0, el.scrollHeight - el.clientHeight),
         pinned: true,
       });
@@ -940,7 +1302,7 @@ export function ChatModule(): React.JSX.Element {
       top: el.scrollHeight,
       behavior: prefersReducedMotion() ? "auto" : "smooth",
     });
-  }, []);
+  }, [dropUnseen]);
 
   /**
    * A find-bar jump cleared the "pinned to the bottom" state (new messages must
@@ -950,7 +1312,7 @@ export function ChatModule(): React.JSX.Element {
   const handleFindJump = useCallback((target: number): void => {
     pinnedRef.current = false;
     if (selectedIdRef.current !== null) {
-      chatScrollStore.set(selectedIdRef.current, {
+      patchChatScroll(selectedIdRef.current, {
         scrollTop: target,
         pinned: false,
       });
@@ -1039,6 +1401,9 @@ export function ChatModule(): React.JSX.Element {
       // Sending always jumps to the bottom, even if the user had scrolled up.
       pinnedRef.current = true;
       restoreScrollRef.current = null;
+      // A message the boss herself is sending is not something to be told
+      // about; the follow effect will show the tail (and its replies).
+      dropUnseen();
       try {
         await imb.chat.send(chatId, text, attachments);
         void loadMessages(chatId);
@@ -1046,7 +1411,7 @@ export function ChatModule(): React.JSX.Element {
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [selectedId, loadMessages],
+    [selectedId, loadMessages, dropUnseen],
   );
 
   const newChat = useCallback(async (): Promise<void> => {
@@ -1476,6 +1841,13 @@ export function ChatModule(): React.JSX.Element {
           )}
         </div>
         {threadFind.open && <ThreadFindBar find={threadFind} />}
+        {/* Messages that arrived while the boss was reading history: floating
+            pill over the bottom-right corner of the transcript, above the
+            composer. Centering the start of the batch keeps a slice of the
+            older context visible, so the batch can be read forwards. */}
+        {unseen !== null && (
+          <NewMessagesJump count={unseen.count} onReveal={jumpToUnseen} />
+        )}
       </div>
       <ChatInputBar
         chatId={selected.id}

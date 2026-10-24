@@ -7,6 +7,7 @@
   "${count} file(s) of skill “${name}” have names that cannot be exported and were skipped.": "技能「${name}」有 ${count} 个文件的名称无法导出，已跳过。",
   "${count} messages": "共 ${count} 条消息",
   "${count} mini apps": "共 ${count} 个微应用",
+  "${count} new messages": "${count} 条新消息",
   "${count} skills": "共 ${count} 个技能",
   "${count} warning(s) were recorded for this import.": "本次导入记录了 ${count} 条提示。",
   "${done}/${total} done": "已完成 ${done}/${total}",

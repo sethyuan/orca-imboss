@@ -46,9 +46,32 @@ export function flashRow(row: HTMLElement): void {
   timer = window.setTimeout(clear, FLASH_MS + 300);
 }
 
+/**
+ * Where a jump lands: the target's top line under `topGap`, or the target
+ * vertically centered in the thread.
+ */
+export type ThreadAlign = "top" | "center";
+
+/** A viewport rect to land on: a row's, or a text range's. */
+export interface ThreadRect {
+  top: number;
+  height: number;
+}
+
 export interface ThreadScrollOptions {
-  /** Distance (px) between the thread's top edge and the landing line. */
-  topGap: number;
+  /**
+   * Distance (px) between the thread's top edge and the landing line. Only used
+   * by `align: "top"` (the default); centering ignores it.
+   */
+  topGap?: number;
+  /**
+   * Landing line (default `"top"`). `"center"` puts the target's middle on the
+   * thread's middle, so a slice of the older context above it stays visible —
+   * used by the new-messages jump, which is meant to be read forwards from
+   * there. A target taller than the thread degrades to `"top"`: centering it
+   * would push its beginning above the fold.
+   */
+  align?: ThreadAlign;
   /**
    * Called with the computed `scrollTop` right before scrolling, so the owning
    * module can drop its "pinned to the bottom" state and record the position.
@@ -67,30 +90,30 @@ export interface ThreadScrollOptions {
 }
 
 /**
- * Scroll the thread so `rect`'s top line lands `topGap` px below the thread's
- * own top edge (clamped to the scrollable range). `rect` is a viewport rect —
- * a row's or a text range's, so a match inside a very long message still lands
- * on the right line.
+ * Scroll the thread so `rect` lands on the landing line — `topGap` px below the
+ * thread's own top edge, or (with `align: "center"`) vertically centered
+ * (clamped to the scrollable range). `rect` is a viewport rect — a row's or a
+ * text range's, so a match inside a very long message still lands on the right
+ * line.
  *
  * The thread itself is scrolled (`scrollTo`, never `scrollIntoView`, which can
  * scroll ancestors as well).
  */
 export function scrollThreadToRect(
   thread: HTMLElement,
-  rect: { top: number },
+  rect: ThreadRect,
   options: ThreadScrollOptions,
 ): void {
   const maxScroll = Math.max(thread.scrollHeight - thread.clientHeight, 0);
-  const target = Math.min(
-    Math.max(
-      rect.top -
-        thread.getBoundingClientRect().top +
-        thread.scrollTop -
-        options.topGap,
-      0,
-    ),
-    maxScroll,
-  );
+  // Target's top edge in scroll coordinates.
+  const rowTop =
+    rect.top - thread.getBoundingClientRect().top + thread.scrollTop;
+  const topGap = options.topGap ?? 0;
+  const desired =
+    options.align === "center" && rect.height < thread.clientHeight
+      ? rowTop - (thread.clientHeight - rect.height) / 2
+      : rowTop - topGap;
+  const target = Math.min(Math.max(desired, 0), maxScroll);
 
   if (Math.abs(target - thread.scrollTop) <= 1) {
     // Nothing to scroll (already there): still show where it is.
