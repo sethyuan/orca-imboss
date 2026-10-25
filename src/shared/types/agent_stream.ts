@@ -1,4 +1,7 @@
-import type { AgentSessionViewEntry } from "./agent_session";
+import type {
+  AgentSessionSteerState,
+  AgentSessionViewEntry,
+} from "./agent_session";
 
 /** Reason a session compaction was triggered (mirrors the Pi session event). */
 export type CompactionReason = "manual" | "threshold" | "overflow";
@@ -67,6 +70,17 @@ export type AgentStreamEvent =
    * streamed would otherwise only ever see its tail.
    */
   | { type: "live_seed"; blocks: AgentSessionLiveBlock[] }
+  /**
+   * Lifecycle of one interjection of this session.
+   *
+   * The view owns one placeholder row per interjection (the text is nowhere else:
+   * it is not written to the chat, and Pi persists it only at the next turn
+   * boundary). `injected` means the transcript now holds it (drop the row),
+   * `revoked` that the boss took it back, `lost`/`unknown` that it may never
+   * arrive. A withdrawal is decided main-side; this event is the answer, never a
+   * request.
+   */
+  | { type: "steer_state"; steer: AgentSessionSteerState }
   | { type: "turn_start" }
   | { type: "turn_end" }
   | { type: "compaction_start"; reason: CompactionReason }

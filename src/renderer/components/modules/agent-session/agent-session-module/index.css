@@ -478,7 +478,6 @@ button.imb-session-tool-head:hover {
 }
 
 @keyframes imb-session-pulse {
-
   0%,
   100% {
     opacity: 1;
@@ -605,13 +604,48 @@ button.imb-session-tool-head:hover {
   box-shadow: var(--imb-focus-ring);
 }
 
+/* 「撤回」— the row's only real action (an interjection that is still queued).
+   A verb, not an icon: it changes something in the agent, so it must read as an
+   action. Quiet at rest (the row is already muted), accent on hover, and the
+   shared focus ring for keyboard users. */
+.imb-session-pending-action {
+  flex: none;
+  padding: 1px var(--imb-space-2);
+  border: 0;
+  border-radius: var(--imb-radius-pill);
+  background: transparent;
+  color: var(--imb-fg-2);
+  font: inherit;
+  font-size: var(--imb-text-sm);
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.imb-session-pending-action:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--imb-fg) 8%, transparent);
+  color: var(--imb-fg);
+}
+
+.imb-session-pending-action:focus-visible {
+  outline: none;
+  box-shadow: var(--imb-focus-ring);
+}
+
+/* In flight: the withdrawal is a queue rewrite on the main side, so a second
+   click must be impossible until it answers. */
+.imb-session-pending-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Load/run error: in flow above the composer. The shared `.imb-chat-error` is a
    fixed toast, which would sit on top of the composer in this view. */
 .imb-session-error {
   flex: none;
   margin: 0;
   padding: var(--imb-space-2) var(--imb-space-5);
-  border-top: 1px solid color-mix(in oklch, var(--imb-danger) 40%, var(--imb-border));
+  border-top: 1px solid
+    color-mix(in oklch, var(--imb-danger) 40%, var(--imb-border));
   background: color-mix(in oklch, var(--imb-danger) 12%, var(--imb-surface));
   color: var(--imb-danger);
   font-size: var(--imb-text-sm);

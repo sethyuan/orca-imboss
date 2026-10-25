@@ -45,6 +45,7 @@ import { buildEmployeeSystemPrompt } from "./employee-prompt";
 import { INTERRUPT_MARKER } from "./interrupt-marker";
 import { toMcpServerEntries } from "./mcp";
 import { getModelRuntime, resolveModel } from "./model-runtime";
+import { planQueueRevoke, planSteerRevoke } from "./steer-records";
 import { loadPiSdk, type PiSdk } from "./pi-sdk";
 import { listSkills } from "./skills";
 import { createShellToolDefinitions } from "./tools";
@@ -239,17 +240,86 @@ export class AgentSession {
    * complete, before the next LLM call — so a user who types mid-turn is seen
    * at the next turn boundary instead of waiting for the whole run to settle.
    *
+   * Returns the text that Pi actually queued: `steer()` expands `/skill:`
+   * commands and prompt templates first, so the queued text is not necessarily
+   * `message`. Withdrawal addresses a queue entry, so the caller must remember
+   * this value rather than the original text (see `steer-records.ts`). Falls back
+   * to `message` when the queue could not be observed (the hand-over may then
+   * have been consumed by an extension command instead of being queued).
+   *
    * Only valid while the underlying session is streaming; callers must gate on
    * `isStreaming` (the queue does).
    */
-  async steer(message: string): Promise<void> {
+  async steer(message: string): Promise<string> {
     if (this._disposed) {
       throw new Error("AgentSession has been disposed.");
     }
     if (!this._piSession) {
       throw new Error("Agent session was not prepared.");
     }
+    // The queue only ever grows here (one entry, appended): comparing lengths
+    // tells us whether this hand-over really landed and what its queued form is.
+    const before = this._piSession.getSteeringMessages().length;
     await this._piSession.steer(message);
+    const after = this._piSession?.getSteeringMessages() ?? [];
+    if (after.length === before + 1) return after[after.length - 1];
+    return message;
+  }
+
+  /**
+   * Texts currently sitting in Pi's steering queue (read-only snapshot, in
+   * delivery order) — i.e. the interjections the model has **not** seen yet.
+   */
+  getSteeringTexts(): readonly string[] {
+    return this._piSession?.getSteeringMessages() ?? [];
+  }
+
+  /**
+   * Withdraw one interjection: remove the `occurrence`-th queue entry equal to
+   * `text` while keeping every other pending message, in its original order.
+   *
+   * Pi exposes no per-entry removal — only `clearQueue()`, which empties both
+   * queues — so this is "snapshot → clear → re-queue the rest". The remaining
+   * texts are re-handed one by one, in their original order, which preserves what
+   * the model sees next (`steeringMode` is `one-at-a-time`, so they are injected
+   * one turn boundary at a time either way).
+   *
+   * Returns `false` (and changes nothing) when the queue no longer holds that
+   * entry — a withdrawal must never touch the wrong message: the shared queue may
+   * also hold employee @-mention wakes and IM bridge texts, which this app must
+   * not swallow.
+   *
+   * The clear→re-queue window is a handful of microtasks. If a turn boundary
+   * lands inside it, the re-queued messages arrive one turn later — they are
+   * never lost and never reordered relative to each other.
+   */
+  async removeQueuedSteer(text: string, occurrence: number): Promise<boolean> {
+    if (this._disposed) {
+      throw new Error("AgentSession has been disposed.");
+    }
+    const session = this._piSession;
+    if (!session) return false;
+    // Nothing to do when the entry is gone: never clear a queue we cannot put
+    // back exactly as it was.
+    if (
+      planSteerRevoke(session.getSteeringMessages(), text, occurrence) === null
+    ) {
+      return false;
+    }
+    // Snapshot and clear with **no await in between**, so the entries that are
+    // restored are exactly the ones that were cleared.
+    const cleared = session.clearQueue();
+    const plan = planQueueRevoke(cleared, text, occurrence);
+    // Restore everything else (or all of it, in the unreachable case where the
+    // entry vanished together with the clear), so Pi's queue is never left
+    // emptier than it was.
+    for (const queued of plan.steering) {
+      await this._piSession?.steer(queued);
+    }
+    for (const queued of plan.followUp) {
+      await this._piSession?.followUp(queued);
+    }
+    return plan.removed;
   }
 
   /**

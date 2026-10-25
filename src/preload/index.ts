@@ -2,6 +2,7 @@ import { DEFAULT_LOCALE } from "@shared/constants/locales";
 import type {
   AgentSessionRunState,
   AgentSessionSendResult,
+  AgentSessionSteerRevokeResult,
   AgentSessionViewEntry,
   AgentStreamPayload,
   BackupInfo,
@@ -462,7 +463,9 @@ const api = {
     /**
      * Send a message into exactly one `(employee, chat)` agent session (the
      * session view's composer). The main process decides between steering the
-     * live run and queueing; nothing is written to the conversation.
+     * live run and queueing; nothing is written to the conversation. A steered
+     * text also comes back with a `steerId`, which is what
+     * `revokeSteer` addresses.
      */
     send: (employeeId: number, chatId: number, text: string) =>
       ipcRenderer.invoke(
@@ -471,6 +474,18 @@ const api = {
         chatId,
         text,
       ) as Promise<AgentSessionSendResult>,
+    /**
+     * Withdraw one interjection of one session (its text never reaches the
+     * model). `withdrawn: false` is a normal answer with a `reason` — the text
+     * may already be part of the transcript, or no longer queued.
+     */
+    revokeSteer: (employeeId: number, chatId: number, steerId: string) =>
+      ipcRenderer.invoke(
+        "agentSession:revokeSteer",
+        employeeId,
+        chatId,
+        steerId,
+      ) as Promise<AgentSessionSteerRevokeResult>,
     /**
      * Cosmetic run state of one session (labels + the interrupt chip's enabled
      * state). Not authoritative for routing: `send` re-checks it main-side.

@@ -3,8 +3,10 @@ import { ASSISTANT_ID } from "@shared/constants/employees";
 import { readChatPrompt } from "@shared/constants/prompts";
 import type {
   AgentProgressKind,
-  AgentSessionDeliveryMode,
   AgentSessionRunState,
+  AgentSessionSendResult,
+  AgentSessionSteerPhase,
+  AgentSessionSteerRevokeResult,
 } from "@shared/types";
 import type { WebContents } from "electron";
 import * as dbChats from "../db/chats";
@@ -23,6 +25,14 @@ import {
 } from "./session-stat";
 import { extractTextContent, projectLiveAssistant } from "./session-view";
 import { takeUndelivered, userMessageText } from "./steer-ledger";
+import {
+  claimInjected,
+  losePendingSteers,
+  pendingOccurrenceOf,
+  pendingSteerTexts,
+  steerStateOf,
+  type SteerRecord,
+} from "./steer-records";
 
 /**
  * App-level serialized queue per `{employeeId}/{chatId}`.
@@ -41,7 +51,10 @@ import { takeUndelivered, userMessageText } from "./steer-ledger";
  * A human message that arrives while the key's run is streaming can be handed
  * to that live run as a Pi **steering** message (`deliver(..., { mode:
  * "steer" })`) so it is seen after the current assistant turn instead of
- * waiting for the run to settle.
+ * waiting for the run to settle. Each such hand-over is tracked as a
+ * `SteerRecord` (see `steer-records.ts`) so the boss can withdraw one specific
+ * interjection while it is still queued —
+ * `revokeSteer()` is the other half of `deliver()`.
  *
  * This module also owns the session bindings: a renderer window "binds" a
  * `(employee, chat)` key to receive that session's streamed events.
@@ -69,14 +82,25 @@ interface QueueState {
   /** Windows that bound this key (receive its streamed events). */
   boundSenders: Set<WebContents>;
   /**
-   * Texts this app successfully handed to the **current** run as steering
-   * messages, in hand-over order. Reset at the start of every run, so it only
-   * ever describes the in-flight one. See `steer-ledger.ts` for why it exists.
+   * Interjections this app successfully handed to the **current** run, in
+   * hand-over order. Reset at the start of every run, so it only ever describes
+   * the in-flight one. See `steer-records.ts` for why it exists (withdrawal
+   * needs a per-copy handle, the interrupt ledger needs the pending texts).
    */
-  pendingSteers: string[];
+  steers: SteerRecord[];
+  /** Monotonic source of `SteerRecord.id` (never reused within a state). */
+  steerSeq: number;
+  /**
+   * Serializes the operations that mutate Pi's steering queue as a whole —
+   * `revokeSteer()` (clear + re-queue) and the two interrupt flavors (clear +
+   * abort). Interleaving them would clear a queue the other side is rebuilding
+   * and silently drop the boss's messages; the hand-over in `deliver()` takes
+   * the same lock so a steer can never land inside someone else's clear window.
+   */
+  ops: Promise<void>;
   /**
    * Texts of the current run's `user` messages that Pi actually persisted
-   * (observed through `message_end`). Reset with `pendingSteers`; the difference
+   * (observed through `message_end`). Reset with `steers`; the difference
    * between the two is what an interrupt re-queues.
    */
   deliveredSteers: string[];
@@ -161,8 +185,9 @@ export interface DeliverOptions {
  * Schedule a message for an agent session, serialized per (employee, chat).
  *
  * Returns once the routing decision is made (never waits for the run): the
- * returned mode tells the caller how the text was handed over — `"steer"` when
- * it went into the live Pi run, `"queued"` when it joined the serialized queue.
+ * result tells the caller how the text was handed over — `mode: "steer"` when
+ * it went into the live Pi run (with the interjection's `steerId`, so the caller
+ * can withdraw it), `mode: "queued"` when it joined the serialized queue.
  * With `opts.mode === "steer"` a message that arrives while the run is actively
  * streaming is injected into that run instead of queued.
  */
@@ -171,43 +196,192 @@ export async function deliver(
   chatId: number,
   text: string,
   opts?: DeliverOptions,
-): Promise<AgentSessionDeliveryMode> {
+): Promise<AgentSessionSendResult> {
   const state = getOrCreateState(employeeId, chatId);
   clearIdleTimer(state);
   // Mid-run user message: steer the live Pi run so it is seen at the next turn
   // boundary rather than after the whole run settles. `isStreaming` (not just
   // `busy`) gates this: `busy` also covers the between-turns gap inside one
   // awaited `prompt()`, where a steer has no active run to be delivered into.
-  if (opts?.mode === "steer" && state.busy && state.session?.isStreaming) {
+  //
+  // The hand-over runs under the queue lock: it must not land inside a
+  // withdrawal's clear→re-queue window or an interrupt's clear→abort window,
+  // where Pi would drop it without the app noticing. The decision is re-made
+  // inside the lock for the same reason.
+  if (opts?.mode === "steer") {
+    let steered: string | null = null;
     try {
-      await state.session.steer(text);
-      // The hand-over succeeded: record it so an interrupt can tell whether this
-      // text ever reached the transcript (see `steer-ledger.ts`).
-      state.pendingSteers.push(text);
-      return "steer";
+      steered = await runExclusive(state, async (): Promise<string | null> => {
+        if (state.disposed) return null;
+        clearIdleTimer(state);
+        if (!state.busy || !state.session?.isStreaming) return null;
+        try {
+          // `steer()` reports the text Pi actually queued (skill/template
+          // expansion happens inside Pi), which is the only safe withdrawal
+          // key.
+          const effectiveText = await state.session.steer(text);
+          state.steerSeq += 1;
+          const record: SteerRecord = {
+            id: `st${state.steerSeq}`,
+            text,
+            effectiveText,
+            phase: "pending",
+          };
+          // Recorded *before* returning so an interrupt or a withdrawal that
+          // starts next always sees it, and so an interrupt can re-queue
+          // exactly the texts that were still pending (see
+          // `steer-ledger.ts`).
+          state.steers.push(record);
+          emitSteerState(state, record);
+          return record.id;
+        } catch (err) {
+          // A rejected steer must never lose the already-persisted message:
+          // fall back to the serialized queue.
+          console.error(
+            `[session-queue] failed to steer ${employeeId} in chat ${chatId}; queueing instead:`,
+            err instanceof Error ? err.message : err,
+          );
+          return null;
+        }
+      });
     } catch (err) {
-      // A rejected steer must never lose the already-persisted message: fall
-      // back to the serialized queue.
+      // The lock itself failed (a bug, not a delivery outcome): the text must
+      // still reach the agent, so fall back to the serialized queue.
       console.error(
-        `[session-queue] failed to steer ${employeeId} in chat ${chatId}; queueing instead:`,
+        `[session-queue] failed to run the steer hand-over for ${employeeId} in chat ${chatId}; queueing instead:`,
         err instanceof Error ? err.message : err,
       );
+      steered = null;
     }
+    if (steered !== null) return { mode: "steer", steerId: steered };
   }
   state.queue.push(text);
-  if (state.busy) return "queued";
+  if (state.busy) return { mode: "queued" };
   state.busy = true;
   void drain(state);
-  return "queued";
+  return { mode: "queued" };
+}
+
+/**
+ * Withdraw one interjection — remove the text from Pi's steering queue so the
+ * model never sees it.
+ *
+ * Only a **pending** interjection can be withdrawn (Pi has not turned it into a
+ * transcript user message yet). Everything else is a normal, non-exceptional
+ * outcome, reported through `AgentSessionSteerRevokeResult.reason`:
+ *
+ * - `delivered`: already injected — the model has read it, and taking it back
+ *   would mean rolling back the turn, not withdrawing a queue entry;
+ * - `gone`: no longer pending (run ended, session disposed, queue cleared);
+ * - `unknown`: the attempt failed, the queue state could not be determined.
+ *
+ * Correctness rules (see `steer-records.ts` and `AgentSession.removeQueuedSteer`):
+ * - the target is addressed by its **queued** text plus its ordinal among equal
+ *   pending copies — two identical interjections are two records, and Pi's
+ *   queue holds texts only;
+ * - a text that cannot be located is **not** touched: the same Pi queue also
+ *   carries employee @-mention wakes and IM bridge texts, which must survive;
+ * - whatever happens, the record leaves the interrupt ledger, so an interrupt
+ *   can never re-deliver a message the boss already took back.
+ */
+export async function revokeSteer(
+  employeeId: number,
+  chatId: number,
+  steerId: string,
+): Promise<AgentSessionSteerRevokeResult> {
+  const state = states.get(keyFor(employeeId, chatId));
+  if (!state || state.disposed) return { withdrawn: false, reason: "gone" };
+  const record = state.steers.find((candidate) => candidate.id === steerId);
+  if (!record) return { withdrawn: false, reason: "gone" };
+  if (record.phase === "revoked") return { withdrawn: true };
+  if (record.phase === "injected")
+    return { withdrawn: false, reason: "delivered" };
+  if (record.phase !== "pending") return { withdrawn: false, reason: "gone" };
+
+  return runExclusive(
+    state,
+    async (): Promise<AgentSessionSteerRevokeResult> => {
+      const session = state.session;
+      // No live run means no queue entry can still be pending: Pi only keeps
+      // steering messages for a run in flight, and the state is torn down with it.
+      if (state.disposed || !session || !session.isStreaming) {
+        settleSteer(state, record, "lost");
+        return { withdrawn: false, reason: "gone" };
+      }
+      try {
+        const removed = await session.removeQueuedSteer(
+          record.effectiveText,
+          pendingOccurrenceOf(state.steers, record),
+        );
+        if (!removed) {
+          // Still streaming but the text is no longer queued: Pi injected it while
+          // the withdrawal was on its way. Decide conservatively — report it as
+          // delivered rather than pretend the boss got his way.
+          settleSteer(state, record, "injected");
+          return { withdrawn: false, reason: "delivered" };
+        }
+        settleSteer(state, record, "revoked");
+        return { withdrawn: true };
+      } catch (err) {
+        console.error(
+          `[session-queue] failed to withdraw the interjection ${steerId} of ${employeeId} in chat ${chatId}:`,
+          err instanceof Error ? err.message : err,
+        );
+        // The queue may hold half of the old contents: report the state as
+        // undetermined and keep the text out of the interrupt ledger (a message the
+        // boss wanted back must never be re-delivered by an interrupt).
+        settleSteer(state, record, "unknown");
+        return { withdrawn: false, reason: "unknown" };
+      }
+    },
+  );
+}
+
+/**
+ * Serialize one queue-wide mutation per session state (see `QueueState.ops`).
+ *
+ * A failure of one operation never blocks the next: the chain is reset to a
+ * resolved promise either way, and the caller gets its own rejection.
+ */
+async function runExclusive<T>(
+  state: QueueState,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const run = state.ops.then(operation, operation);
+  state.ops = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/** Set one record's phase and tell the bound windows about it. */
+function settleSteer(
+  state: QueueState,
+  record: SteerRecord,
+  phase: AgentSessionSteerPhase,
+): void {
+  record.phase = phase;
+  emitSteerState(state, record);
+}
+
+/** Push one record's new phase to this key's bound windows (same channel as the stream). */
+function emitSteerState(state: QueueState, record: SteerRecord): void {
+  sendEventTo(state.boundSenders, state.employeeId, state.chatId, {
+    type: "steer_state",
+    steer: steerStateOf(record),
+  });
 }
 
 /**
  * Snapshot of one session's run state for the agent-session view's labels
- * (`Send` vs `Interject`, interrupt chip enabled/disabled).
+ * (`Send` vs `Interject`, interrupt chip enabled/disabled) and for restoring its
+ * interjection placeholders after a remount.
  *
  * Read-only and side-effect free: it never creates a queue state or a Pi
  * session, because opening/labelling the view must not build anything. Purely
- * cosmetic — `deliver()` re-checks the live session before steering, and
+ * cosmetic — `deliver()` re-checks the live session before steering,
+ * `revokeSteer()` re-validates the record before touching the queue, and
  * `interruptTurn()` has the exact same `isStreaming` gate.
  */
 export function readRunState(
@@ -216,7 +390,11 @@ export function readRunState(
 ): AgentSessionRunState {
   const state = states.get(keyFor(employeeId, chatId));
   if (!state || state.disposed) return { streaming: false };
-  return { streaming: state.session?.isStreaming ?? false };
+  return {
+    streaming: state.session?.isStreaming ?? false,
+    // Copied into plain DTOs: the renderer must never hold a live record.
+    steers: state.steers.map(steerStateOf),
+  };
 }
 
 /**
@@ -459,7 +637,9 @@ export async function interruptChat(chatId: number): Promise<number> {
   }
 
   const results = await Promise.all(
-    [...targets.values()].map((state) => interruptState(state)),
+    [...targets.values()].map((state) =>
+      runExclusive(state, () => interruptState(state)),
+    ),
   );
   const interrupted = results.filter(Boolean).length;
   if (interrupted > 0) recordInterruption(chatId);
@@ -550,7 +730,9 @@ export async function interruptTurn(
 ): Promise<boolean> {
   const state = states.get(keyFor(employeeId, chatId));
   if (!state || state.disposed) return false;
-  return interruptSession(state, { dropQueue: false });
+  return runExclusive(state, () =>
+    interruptSession(state, { dropQueue: false }),
+  );
 }
 
 /**
@@ -570,7 +752,9 @@ export async function interruptTurnDiscardingQueue(
 ): Promise<boolean> {
   const state = states.get(keyFor(employeeId, chatId));
   if (!state || state.disposed) return false;
-  return interruptSession(state, { dropQueue: true });
+  return runExclusive(state, () =>
+    interruptSession(state, { dropQueue: true }),
+  );
 }
 
 /**
@@ -602,7 +786,10 @@ async function interruptSession(
       // stale text there is exactly what this mode promises not to run.
       const cleared = session?.clearQueue() ?? { steering: [], followUp: [] };
       droppedSteers = cleared.steering.length + cleared.followUp.length;
-      state.pendingSteers.length = 0;
+      losePendingSteers(state.steers).forEach((record) =>
+        emitSteerState(state, record),
+      );
+      state.steers.length = 0;
       state.deliveredSteers.length = 0;
       console.log(
         `[session-queue] discarded the pending work of ${state.employeeId} in chat ${state.chatId} ` +
@@ -613,11 +800,11 @@ async function interruptSession(
     return false;
   }
 
-  // Hold the *arrays*, not copies: a steer handed over while the abort is still
+  // Hold the *array*, not a copy: a steer handed over while the abort is still
   // in flight would be dropped by the dying run, so it must be accounted for
-  // too. `drain()` replaces both arrays when a new run starts, which is exactly
-  // the point where a late steer stops belonging to this run.
-  const pending = state.pendingSteers;
+  // too. `drain()` replaces it when a new run starts, which is exactly the point
+  // where a late steer stops belonging to this run.
+  const records = state.steers;
   const delivered = state.deliveredSteers;
   try {
     const cleared = session.clearQueue();
@@ -626,12 +813,20 @@ async function interruptSession(
     state.abortRequested = true;
     await session.abort();
     await session.waitForRunSettled();
+    // Only the records still marked `pending` are handed over: a withdrawn one
+    // must never be re-delivered by the interrupt (see `steer-records.ts`).
     const requeue = takeUndelivered(
-      [pending, cleared.steering, cleared.followUp],
+      [pendingSteerTexts(records), cleared.steering, cleared.followUp],
       delivered,
     );
-    // This run is over; nothing may be counted twice for a later interrupt.
-    pending.length = 0;
+    // This run is over; nothing may be counted twice for a later interrupt. The
+    // records are settled before the array is dropped, so the view learns that
+    // these interjections are no longer withdrawable (and their text may be
+    // re-queued below, which no longer carries an interjection identity).
+    losePendingSteers(records).forEach((record) =>
+      emitSteerState(state, record),
+    );
+    records.length = 0;
     delivered.length = 0;
     // Marker last: it must sit at the exact cut point of the transcript.
     session.markInterrupted();
@@ -717,6 +912,12 @@ async function interruptState(state: QueueState): Promise<boolean> {
   // cannot pick up the next queued message.
   state.queue.length = 0;
   const session = state.session;
+  // A Halt throws the whole pending work away, interjections included: settle
+  // the records so the bound views stop offering a withdrawal for them.
+  losePendingSteers(state.steers).forEach((record) =>
+    emitSteerState(state, record),
+  );
+  state.steers.length = 0;
   if (!session?.isStreaming) return hadPending;
   try {
     // RPC semantics: clear Pi's internal queues before aborting, otherwise the
@@ -756,9 +957,9 @@ async function drain(state: QueueState): Promise<void> {
           await disposeSessionOf(state);
           break;
         }
-        // A new run starts: the steer ledger and the progress bookkeeping
+        // A new run starts: the steer records and the progress bookkeeping
         // describe exactly this run only.
-        state.pendingSteers = [];
+        state.steers = [];
         state.deliveredSteers = [];
         state.runStartedAt = Date.now();
         state.lastProgressAt = state.runStartedAt;
@@ -833,7 +1034,9 @@ function getOrCreateState(employeeId: number, chatId: number): QueueState {
       busy: false,
       queue: [],
       boundSenders: new Set(),
-      pendingSteers: [],
+      steers: [],
+      steerSeq: 0,
+      ops: Promise.resolve(),
       deliveredSteers: [],
       lastForwardedWasMessageEnd: false,
       openTools: new Map(),
@@ -899,6 +1102,12 @@ async function disposeState(
 async function disposeSessionOf(state: QueueState): Promise<void> {
   const session = state.session;
   state.session = undefined;
+  // The steering queue dies with the Pi session: whatever was still pending can
+  // never be delivered (and can never be withdrawn anymore).
+  losePendingSteers(state.steers).forEach((record) =>
+    emitSteerState(state, record),
+  );
+  state.steers.length = 0;
   if (!session) return;
   try {
     await session.dispose();
@@ -917,6 +1126,12 @@ async function disposeSessionOf(state: QueueState): Promise<void> {
  * `message_end` for a `user` message means that text is now part of the
  * transcript (and was therefore seen by the model). Recorded only while a run is
  * in flight — the ledger is per run.
+ *
+ * And the place where an interjection becomes irreversible: Pi removes the first
+ * queue entry matching a **starting user message**, so the same rule settles the
+ * corresponding `SteerRecord` as `injected` (see `steer-records.ts`). This is
+ * what makes the view's 「撤回」button disappear exactly when withdrawal stops
+ * being possible.
  */
 function forwardEvent(state: QueueState, event: AgentSessionEvent): void {
   if (event.type === "message_end") {
@@ -926,8 +1141,16 @@ function forwardEvent(state: QueueState, event: AgentSessionEvent): void {
       stopReason?: unknown;
       errorMessage?: unknown;
     };
-    if (message?.role === "user" && state.pendingSteers.length > 0) {
-      state.deliveredSteers.push(userMessageText(message.content));
+    if (message?.role === "user") {
+      const text = userMessageText(message.content);
+      if (state.steers.some((record) => record.phase === "pending")) {
+        state.deliveredSteers.push(text);
+        // Fallback for a hand-over whose queued form could not be observed: the
+        // text is in the transcript now, so it is no longer withdrawable either
+        // way. A record already claimed on `message_start` is simply not found.
+        const claimed = claimInjected(state.steers, text);
+        if (claimed) emitSteerState(state, claimed);
+      }
     }
     if (message?.role === "assistant") {
       // Remembered so `drain()` can tell a finished run from a failed one. The
@@ -950,6 +1173,23 @@ function forwardEvent(state: QueueState, event: AgentSessionEvent): void {
     event.type === "message_update"
   ) {
     state.lastForwardedWasMessageEnd = false;
+    if (event.type === "message_start") {
+      const message = event.message as { role?: unknown; content?: unknown };
+      if (message?.role === "user") {
+        const claimed = claimInjected(
+          state.steers,
+          userMessageText(message.content),
+        );
+        if (claimed) emitSteerState(state, claimed);
+      }
+    }
+  } else if (event.type === "agent_settled") {
+    // The run is fully over: nothing is queued anymore, and an interjection that
+    // is still `pending` here was never injected. It is not withdrawable
+    // anymore, so tell the view instead of leaving a dead 「撤回」button behind.
+    losePendingSteers(state.steers).forEach((record) =>
+      emitSteerState(state, record),
+    );
   }
   noteProgress(state, event);
   const dto = toStreamEvent(event);

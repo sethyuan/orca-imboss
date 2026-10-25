@@ -94,6 +94,60 @@ export type AgentSessionDeliveryMode = "steer" | "queued";
 export interface AgentSessionSendResult {
   /** Authoritative routing decided by the main process, for user feedback. */
   mode: AgentSessionDeliveryMode;
+  /**
+   * Handle of the interjection, present only when `mode === "steer"`.
+   *
+   * It addresses one *copy* of the text (two identical interjections are two
+   * records), which is what `agentSession:revokeSteer` and the `steer_state`
+   * stream use. A queued send has no id: it is a plain app-queue string.
+   */
+  steerId?: string;
+}
+
+/**
+ * Lifecycle of one interjection (a text this app handed to a live Pi run as a
+ * steering message).
+ *
+ * - `pending`: still in Pi's steering queue, never injected — **withdrawable**;
+ * - `injected`: Pi turned it into a transcript user message, the model has seen
+ *   it — **not withdrawable** (rolling that back is a turn rollback, not a
+ *   withdrawal);
+ * - `revoked`: this app removed it from the queue — the text will never run;
+ * - `unknown`: a withdrawal was attempted and failed (the queue state could not
+ *   be determined) — treated as not withdrawable;
+ * - `lost`: the run ended (or was interrupted) while it was still queued — it
+ *   may never have been delivered. Informational only, dismissable.
+ */
+export type AgentSessionSteerPhase =
+  "pending" | "injected" | "revoked" | "unknown" | "lost";
+
+/** One interjection as reported to a bound renderer (`steer_state`) or in a snapshot. */
+export interface AgentSessionSteerState {
+  /** Opaque handle; unique per app run of this session (`agentSession:send`). */
+  id: string;
+  /** What the boss typed — never the skill/template expanded text. */
+  text: string;
+  phase: AgentSessionSteerPhase;
+}
+
+/**
+ * Result of `agentSession:revokeSteer`.
+ *
+ * Withdrawal is a **normal business outcome**, not an error: a text that Pi
+ * already injected simply cannot be taken back, so the reasons are values the
+ * view renders instead of exceptions it has to catch.
+ */
+export interface AgentSessionSteerRevokeResult {
+  /** `true` only when the text was actually removed from Pi's queue. */
+  withdrawn: boolean;
+  /**
+   * Why nothing was withdrawn (`withdrawn: true` omits it):
+   * - `delivered`: Pi already injected it (the model has seen it);
+   * - `gone`: it is no longer pending (session disposed, run ended, queue
+   *   cleared) — nothing left to withdraw;
+   * - `unknown`: the attempt failed and the queue state is undetermined.
+   */
+  reason?: "delivered" | "gone" | "unknown";
 }
 
 /**
@@ -101,11 +155,21 @@ export interface AgentSessionSendResult {
  * can label its controls ("Send" vs "Interject") and enable the interrupt chip.
  *
  * Never used to decide delivery: `deliver()` re-checks the live session
- * (`busy && isStreaming`), so a stale snapshot only affects labels.
+ * (`busy && isStreaming`), so a stale snapshot only affects labels — and a
+ * withdrawal is re-validated main-side too.
  */
 export interface AgentSessionRunState {
   /** A Pi run is actively streaming — a steer or an interrupt can land now. */
   streaming: boolean;
+  /**
+   * Interjections of the **current** run (in hand-over order), so a view that
+   * mounts mid-run can restore its placeholders — including a still
+   * withdrawable one — instead of starting blank.
+   *
+   * Absent when the queue state does not exist at all (nothing was ever
+   * delivered here), which is the same reason `streaming` would be `false`.
+   */
+  steers?: AgentSessionSteerState[];
 }
 
 /**

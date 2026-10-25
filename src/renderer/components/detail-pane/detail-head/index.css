@@ -48,6 +48,7 @@
   font-weight: 600;
   margin-top: 4px;
   overflow-wrap: anywhere;
+  user-select: text;
 }
 
 .imb-detail-head .imb-sub {

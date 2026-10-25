@@ -2,6 +2,7 @@ import { ASSISTANT_ID } from "@shared/constants/employees";
 import type {
   AgentSessionRunState,
   AgentSessionSendResult,
+  AgentSessionSteerRevokeResult,
 } from "@shared/types";
 import { ipcMain } from "electron";
 import {
@@ -10,6 +11,7 @@ import {
   interruptChat,
   interruptTurn,
   readRunState,
+  revokeSteer,
   unbind,
 } from "../agent/session-queue";
 import { getChat, getRootChatId } from "../db/chats";
@@ -21,6 +23,12 @@ import { assertInteger, assertString } from "./helpers";
  * but one bound keeps an unbounded string from ever reaching the model.
  */
 const MAX_MESSAGE_LENGTH = 100_000;
+
+/**
+ * Mirrors the app-generated interjection ids (`st<N>`): a bound keeps an
+ * arbitrary renderer string from reaching the queue lookup.
+ */
+const MAX_STEER_ID_LENGTH = 64;
 
 /**
  * Renderer ↔ main binding for live agent sessions.
@@ -147,11 +155,36 @@ export function registerAgentSessionHandlers(): void {
         );
       }
 
-      return {
-        mode: await deliver(safeEmployee, safeChat, safeText, {
-          mode: "steer",
-        }),
-      };
+      return await deliver(safeEmployee, safeChat, safeText, {
+        mode: "steer",
+      });
+    },
+  );
+
+  /**
+   * Withdraw one interjection of exactly one `(employee, chat)` session — the
+   * reverse of `agentSession:send` for the text that has not been injected yet.
+   *
+   * `withdrawn: false` is a normal answer, not a failure: a text Pi already
+   * turned into a transcript user message cannot be taken back (`delivered`),
+   * and a text that is no longer pending cannot either (`gone`). Only invalid
+   * parameters throw, mirroring `agentSession:send`.
+   */
+  ipcMain.handle(
+    "agentSession:revokeSteer",
+    async (
+      _event,
+      employeeId: unknown,
+      chatId: unknown,
+      steerId: unknown,
+    ): Promise<AgentSessionSteerRevokeResult> => {
+      const safeEmployee = assertInteger(employeeId, "employee id");
+      const safeChat = assertInteger(chatId, "chat id");
+      const safeSteerId = assertString(steerId, "interjection id");
+      if (safeSteerId.length > MAX_STEER_ID_LENGTH) {
+        throw new Error("Interjection id is too long.");
+      }
+      return revokeSteer(safeEmployee, safeChat, safeSteerId);
     },
   );
 }

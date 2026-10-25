@@ -1,6 +1,6 @@
 import { t } from "@shared/l10n";
-import type { AgentSessionDeliveryMode } from "@shared/types";
-import { useCallback, useRef, useState } from "react";
+import type { AgentSessionSendResult } from "@shared/types";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { appStore, sessionKey, useAppSync } from "../../../../app-store";
 import { IconSend } from "../../../icons";
 import { Textarea } from "../../../textarea";
@@ -22,8 +22,15 @@ export interface SessionComposerProps {
    * Routing is decided main-side; this only changes the copy.
    */
   streaming: boolean;
+  /**
+   * Text a withdrawn interjection hands back to the composer, as a one-shot
+   * `{ text, token }` value: withdrawing is "take that sentence back", so the
+   * boss can fix and re-send it instead of retyping. `token` makes a repeated
+   * withdrawal of equal text a fresh request.
+   */
+  refill: { text: string; token: number } | null;
   /** Called after the main process accepted the text (cleared from the draft). */
-  onSent: (text: string, mode: AgentSessionDeliveryMode) => void;
+  onSent: (text: string, result: AgentSessionSendResult) => void;
 }
 
 /**
@@ -43,6 +50,7 @@ export function SessionComposer({
   chatId,
   employeeName,
   streaming,
+  refill,
   onSent,
 }: SessionComposerProps): React.JSX.Element {
   const snap = useAppSync();
@@ -71,7 +79,7 @@ export function SessionComposer({
       // would resurrect text that is already on its way to the agent.
       if (textarea) textarea.value = "";
       appStore.clearSessionDraft(draftKey);
-      onSent(value, result.mode);
+      onSent(value, result);
       textarea?.focus();
     } catch (err) {
       // Keep the text (nothing typed may be lost) and surface the reason: only
@@ -94,6 +102,21 @@ export function SessionComposer({
 
   const actionLabel = streaming ? t("Interject") : t("Send");
   const disabled = sending || text.trim().length === 0;
+
+  // A withdrawn interjection comes back here. The textarea is uncontrolled (its
+  // DOM value is the source of truth), so the value is written imperatively and
+  // mirrored into the store — exactly like a paste would. Done in an effect so
+  // the write happens after React commits, and guarded by `token` so a re-render
+  // never repeats it.
+  const refillTokenRef = useRef(0);
+  useEffect(() => {
+    if (!refill || refill.token === refillTokenRef.current) return;
+    refillTokenRef.current = refill.token;
+    const textarea = textareaRef.current;
+    if (textarea) textarea.value = refill.text;
+    appStore.setSessionDraftText(draftKey, refill.text);
+    textarea?.focus();
+  }, [refill, draftKey]);
 
   return (
     <div className="imb-chat-input-wrap imb-session-composer">

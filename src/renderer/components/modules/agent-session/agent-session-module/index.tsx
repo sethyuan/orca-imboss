@@ -1,7 +1,8 @@
 import { t } from "@shared/l10n";
 import type {
-  AgentSessionDeliveryMode,
   AgentSessionLiveBlock,
+  AgentSessionSendResult,
+  AgentSessionSteerState,
   AgentSessionViewEntry,
   AgentStreamEvent,
   AgentStreamPayload,
@@ -16,7 +17,7 @@ import {
   useState,
 } from "react";
 import { cls } from "reactutils";
-import { appStore, useApp } from "../../../../app-store";
+import { appStore, sessionKey, useApp } from "../../../../app-store";
 import { ModuleView } from "../../../app-shell";
 import { EmployeeAvatar } from "../../../employee-avatar";
 import { HaltButton } from "../../../halt-button";
@@ -26,6 +27,16 @@ import { Markdown } from "../../../markdown";
 import { useMentionResolver } from "../../../markdown/use-mention";
 import { Tooltip } from "../../../tooltip";
 import "../../chat/thread.css";
+import {
+  addSentRow,
+  applySteerStateRow,
+  markRowBusy,
+  reconcilePending,
+  removeRow,
+  settleWithdrawFailure,
+  type PendingFeedback,
+  type PendingSend,
+} from "./pending-sends";
 import { SessionComposer } from "../session-composer";
 import "./index.css";
 
@@ -59,16 +70,6 @@ interface LiveState {
  * Delay (ms) before re-reading the persisted session after a change event.
  */
 const REFRESH_DELAY = 150;
-/**
- * Text prefix length used to match a pending send against the projection.
- *
- * Not a truncation of anything the view displays: both sides are compared on a
- * bounded prefix so a very long prompt is neither copied in full nor compared
- * character by character. (It used to mirror the projection's former 32 000-char
- * text cap, which no longer exists — the comparison is still correct because it
- * is derived from the same text on both sides.)
- */
-const PENDING_MATCH_LENGTH = 32_000;
 /** Distance from the bottom (px) still considered "pinned" for auto-scroll. */
 const PIN_THRESHOLD = 32;
 /** Gap (px) kept between the viewport top and a divider a jump lands on. */
@@ -86,29 +87,6 @@ interface SessionScroll {
 }
 const sessionScrollStore = new Map<string, SessionScroll>();
 
-/**
- * A message this composer sent into the session that the transcript does not
- * show yet.
- *
- * A steer is only persisted by Pi at the next turn boundary, and (by the boss's
- * decision) nothing is written to the conversation either — so this row is the
- * only feedback that the text exists. It is dropped once the projection
- * contains it, and marked `unconfirmed` when a run ends after it was sent
- * without it ever appearing (Pi persists a steer before its next LLM call, so
- * that combination means the hand-over was lost).
- */
-interface PendingSend {
-  /** Stable React key. */
-  id: number;
-  text: string;
-  /** How the main process routed it (copy only). */
-  mode: AgentSessionDeliveryMode;
-  /** `runEndSeq` when it was sent; a later run end without a match = lost. */
-  runEndSeqAtSend: number;
-  /** No longer expected to arrive: shown as unconfirmed, dismissable. */
-  unconfirmed?: boolean;
-}
-
 /** Measured jump anchors (one per rendered wake divider). */
 interface JumpAnchors {
   /** `scrollHeight` the measurement belongs to; the cache key. */
@@ -124,60 +102,31 @@ interface JumpAvailability {
 }
 const NO_JUMPS: JumpAvailability = { prev: false, next: false };
 
-/** Comparison key for matching a sent text against a projected user entry. */
-function pendingKey(text: string): string {
-  return text.trim().slice(0, PENDING_MATCH_LENGTH);
+/**
+ * Wording of a row's one-shot report (see `PendingFeedback`).
+ *
+ * Withdrawal is a normal outcome, not an error: Pi may already have injected the
+ * text, or the queue may no longer hold it. The row says which, and then removes
+ * itself (`FEEDBACK_MS`) — the one thing that must never happen is the boss
+ * believing a message was taken back when the model has already read it.
+ */
+function pendingFeedbackLabel(feedback: PendingFeedback): string {
+  switch (feedback) {
+    case "delivered":
+      return t("Delivered — cannot withdraw");
+    case "gone":
+      return t("No longer pending — cannot withdraw");
+    case "lost":
+      // Not a withdrawal: the run ended / was interrupted / the session was torn
+      // down while the text was still queued, so it may never arrive.
+      return t("Not confirmed — the agent may not have received this");
+    default:
+      return t("Withdrawal status unknown");
+  }
 }
 
-/**
- * Reconcile the "sent, not yet visible" rows against a freshly loaded
- * projection.
- *
- * Matching is by trimmed text and **count-based**: sending the same text twice
- * is legitimately two entries, so each pending copy consumes one projection
- * entry (and copies beyond the available count stay pending). A **steered** row
- * that never matches is marked `unconfirmed` once a run has ended after it was
- * sent; it is never auto-removed, so a genuinely lost message cannot silently
- * look delivered. A **queued** row is exempt: it sits in the app queue behind
- * the current run, so an earlier run ending says nothing about it (it keeps
- * showing "queued" until it is persisted, e.g. right after an interrupt).
- */
-function reconcilePending(
-  pending: PendingSend[],
-  entries: AgentSessionViewEntry[],
-  runEndSeq: number,
-): PendingSend[] {
-  if (pending.length === 0) return pending;
-  const counts = new Map<string, number>();
-  for (const entry of entries) {
-    if (entry.kind !== "user") continue;
-    const key = pendingKey(entry.text);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  let changed = false;
-  const next: PendingSend[] = [];
-  for (const item of pending) {
-    const key = pendingKey(item.text);
-    const seen = counts.get(key) ?? 0;
-    if (seen > 0) {
-      // This copy is in the transcript now: drop the placeholder.
-      counts.set(key, seen - 1);
-      changed = true;
-      continue;
-    }
-    if (
-      item.mode === "steer" &&
-      item.unconfirmed !== true &&
-      runEndSeq > item.runEndSeqAtSend
-    ) {
-      changed = true;
-      next.push({ ...item, unconfirmed: true });
-      continue;
-    }
-    next.push(item);
-  }
-  return changed ? next : pending;
-}
+/** How long a one-shot feedback line stays before the row removes itself. */
+const FEEDBACK_MS = 4000;
 
 /**
  * Read-only view of one `(employee, chat)` agent session.
@@ -216,6 +165,17 @@ export function AgentSessionModule({
   /** Texts sent from the composer that the transcript does not show yet. */
   const [pending, setPending] = useState<PendingSend[]>([]);
   const pendingSeqRef = useRef(0);
+  /**
+   * Text a successful withdrawal hands back to the composer (one-shot).
+   *
+   * It carries a `token` so that withdrawing the same text twice still triggers
+   * exactly one refill, and it is only ever filled when the draft is empty (a
+   * withdrawal must never swallow what the boss is typing).
+   */
+  const [refill, setRefill] = useState<{ text: string; token: number } | null>(
+    null,
+  );
+  const refillSeqRef = useRef(0);
   /**
    * Bumped on every run end. A pending send that is older than this and still
    * absent from the projection can no longer arrive (see `reconcilePending`).
@@ -479,6 +439,26 @@ export function AgentSessionModule({
     bump();
   }, []);
 
+  /**
+   * Apply one `steer_state` update to this view's interjection rows.
+   *
+   * The main process owns the phase (it is the only side that can see Pi's
+   * steering queue), so the view never infers one:
+   * - `pending`: the row exists and offers 「撤回」 (created here too, so a second
+   *   window and a late mount converge on the same list);
+   * - `injected` / `revoked`: the row is done — the transcript holds it, or it
+   *   will never run;
+   * - `lost` / `unknown`: not withdrawable and possibly never delivered — a
+   *   one-shot line says so and the row removes itself.
+   */
+  const applySteerState = useCallback((steer: AgentSessionSteerState): void => {
+    pendingSeqRef.current += 1;
+    const rowId = pendingSeqRef.current;
+    // One interjection, one row: the reducer upserts on `steerId`, so this can
+    // never add a second bubble for a text the composer already showed.
+    setPending((prev) => applySteerStateRow(prev, steer, rowId));
+  }, []);
+
   const handleEvent = useCallback(
     (payload: AgentStreamPayload): void => {
       if (payload.employeeId !== employeeId || payload.chatId !== chatId)
@@ -487,6 +467,9 @@ export function AgentSessionModule({
       switch (event.type) {
         case "live_seed":
           applyLiveSeed(event.blocks);
+          break;
+        case "steer_state":
+          applySteerState(event.steer);
           break;
         case "message_update":
           applyMessageUpdate(event);
@@ -553,6 +536,7 @@ export function AgentSessionModule({
       employeeId,
       chatId,
       applyLiveSeed,
+      applySteerState,
       applyMessageUpdate,
       applyToolStatus,
       scheduleRefresh,
@@ -580,12 +564,38 @@ export function AgentSessionModule({
   // an `agent_start` for this window, so without this snapshot the composer
   // would claim "Send" and the interrupt chip would be disabled. Cosmetic only
   // (routing is decided main-side), so a failure is ignored.
+  //
+  // The same snapshot restores the interjection placeholders that are still
+  // withdrawable (`pending`): the row is the only place the text exists, so
+  // without it a withdrawal would be impossible after a module switch. Settled
+  // rows (`injected`/`revoked`/`lost`) are deliberately not restored — they are
+  // history, and re-showing a stale row would be noise.
   useEffect(() => {
     let cancelled = false;
     void imb.agentSession
       .state(employeeId, chatId)
       .then((state) => {
-        if (!cancelled) setStreaming(state.streaming);
+        if (cancelled) return;
+        setStreaming(state.streaming);
+        const pendingSteers = (state.steers ?? []).filter(
+          (steer) => steer.phase === "pending",
+        );
+        if (pendingSteers.length === 0) return;
+        setPending((prev) =>
+          // `addSentRow` upserts on `steerId`, so a row created by a
+          // `steer_state` event (or by a send) while this read was in flight is
+          // refreshed instead of duplicated.
+          pendingSteers.reduce((rows, steer) => {
+            pendingSeqRef.current += 1;
+            return addSentRow(rows, {
+              id: pendingSeqRef.current,
+              text: steer.text,
+              mode: "steer",
+              steerId: steer.id,
+              runEndSeq: runEndSeqRef.current,
+            });
+          }, prev),
+        );
       })
       .catch(() => {
         // Labels only — never surface this.
@@ -599,17 +609,26 @@ export function AgentSessionModule({
    * Record a send that the transcript cannot show yet (nothing is written to
    * the conversation and Pi persists a steer only at the next turn boundary),
    * and pin the thread so the placeholder is visible.
+   *
+   * An interjection arrives with a `steerId` and starts out `pending`: the main
+   * process owns its phase from here on (withdrawable until Pi injects it).
    */
   const handleSent = useCallback(
-    (text: string, mode: AgentSessionDeliveryMode): void => {
+    (text: string, result: AgentSessionSendResult): void => {
       pendingSeqRef.current += 1;
-      const item: PendingSend = {
-        id: pendingSeqRef.current,
-        text,
-        mode,
-        runEndSeqAtSend: runEndSeqRef.current,
-      };
-      setPending((prev) => [...prev, item]);
+      const id = pendingSeqRef.current;
+      // An interjection **upserts on its `steerId`**: the main process pushed
+      // `steer_state` before this reply arrived, so its row may already exist —
+      // appending here would render the same interjection twice.
+      setPending((prev) =>
+        addSentRow(prev, {
+          id,
+          text,
+          mode: result.mode,
+          runEndSeq: runEndSeqRef.current,
+          ...(result.steerId !== undefined ? { steerId: result.steerId } : {}),
+        }),
+      );
       // A new send supersedes the previous run failure (there is exactly one
       // banner and no dismiss affordance, matching the chat module's error).
       setRunError(null);
@@ -620,8 +639,59 @@ export function AgentSessionModule({
 
   /** Drop one placeholder (the boss decided it is not coming back). */
   const dismissPending = useCallback((id: number): void => {
-    setPending((prev) => prev.filter((item) => item.id !== id));
+    setPending((prev) => removeRow(prev, id));
   }, []);
+
+  /** Replace an interjection row's affordance with a one-shot reason. */
+  const showWithdrawFeedback = useCallback(
+    (steerId: string, reason: PendingFeedback): void => {
+      setPending((prev) => settleWithdrawFailure(prev, steerId, reason));
+    },
+    [],
+  );
+
+  /**
+   * Withdraw one interjection (its text never reaches the model).
+   *
+   * Only the row's `phase` decides whether this is offered, and the main process
+   * re-validates it anyway: a text Pi already injected cannot be taken back, and
+   * the row then says so instead of disappearing as if it had worked.
+   */
+  const withdrawPending = useCallback(
+    async (item: PendingSend): Promise<void> => {
+      const steerId = item.steerId;
+      if (steerId === undefined || item.busy === true) return;
+      setPending((prev) => markRowBusy(prev, item.id));
+      try {
+        const result = await imb.agentSession.revokeSteer(
+          employeeId,
+          chatId,
+          steerId,
+        );
+        if (disposedRef.current) return;
+        if (!result.withdrawn) {
+          showWithdrawFeedback(steerId, result.reason ?? "unknown");
+          return;
+        }
+        setPending((prev) => removeRow(prev, item.id));
+        // Hand the text back to the composer, so it can be edited and sent again
+        // — but never overwrite a draft the boss is typing into.
+        const draftKey = sessionKey(employeeId, chatId);
+        if ((appStore.sessionDrafts[draftKey] ?? "").length === 0) {
+          refillSeqRef.current += 1;
+          setRefill({ text: item.text, token: refillSeqRef.current });
+        }
+      } catch (err) {
+        if (disposedRef.current) return;
+        console.error(
+          "[agent-session] failed to withdraw an interjection:",
+          err instanceof Error ? err.message : err,
+        );
+        showWithdrawFeedback(steerId, "unknown");
+      }
+    },
+    [chatId, employeeId, showWithdrawFeedback],
+  );
 
   /**
    * Jump to the conversation this session belongs to (the chat title in the
@@ -928,6 +998,7 @@ export function AgentSessionModule({
               key={item.id}
               item={item}
               onDismiss={dismissPending}
+              onWithdraw={withdrawPending}
             />
           ))}
         </div>
@@ -949,6 +1020,7 @@ export function AgentSessionModule({
         chatId={chatId}
         employeeName={employeeName}
         streaming={streaming}
+        refill={refill}
         onSent={handleSent}
       />
     </>
@@ -1009,50 +1081,95 @@ function SessionEntry({
  * a steer only at the next turn boundary, so without this row a successful send
  * would look like nothing happened.
  *
- * Styled as the boss's own bubble but dimmed, with a status line below it:
- * routed-as-interjection, queued, or unconfirmed (dismissable only — the app
- * never silently pretends a lost steer was delivered).
+ * Styled as the boss's own bubble but dimmed. What sits next to it depends on
+ * what the row actually is:
+ * - **interjection** (`steerId` set, still `pending`): one 「撤回」 button. The
+ *   text has not reached the model, so it can still be taken back; the button
+ *   itself is the state — no explanatory line (boss's call).
+ * - **interjection, settled** (`lost` / `unknown`): a one-shot reason line and no
+ *   button. The row removes itself after `FEEDBACK_MS`.
+ * - **queued** send (v1 cannot withdraw those) or a legacy steer with no handle:
+ *   the old status line plus a `×` that only dismisses the placeholder.
  */
 function PendingSendRow({
   item,
   onDismiss,
+  onWithdraw,
 }: {
   item: PendingSend;
   onDismiss: (id: number) => void;
+  onWithdraw: (item: PendingSend) => void;
 }): React.JSX.Element {
-  const label = item.unconfirmed
-    ? t("Not confirmed — the agent may not have received this")
-    : item.mode === "steer"
-      ? t("Interjected — handled after the current turn")
-      : t("Queued — handled as soon as the agent is free");
+  const feedback = item.feedback;
+  // A one-shot line must not stay forever: the row is only there to report one
+  // outcome, and leaving it behind would suggest a live state that is gone.
+  useEffect(() => {
+    if (feedback === undefined) return;
+    const timer = window.setTimeout(() => onDismiss(item.id), FEEDBACK_MS);
+    return () => window.clearTimeout(timer);
+  }, [feedback, item.id, onDismiss]);
+
+  const withdrawable =
+    item.steerId !== undefined && item.phase === "pending" && !feedback;
+  const label = withdrawable
+    ? null
+    : feedback !== undefined
+      ? pendingFeedbackLabel(feedback)
+      : item.unconfirmed
+        ? t("Not confirmed — the agent may not have received this")
+        : item.mode === "steer"
+          ? t("Interjected — handled after the current turn")
+          : t("Queued — handled as soon as the agent is free");
+  const withdrawLabel = t("Withdraw");
   const dismissLabel = t("Dismiss");
   return (
     <div className="imb-session-pending">
       <div
         className={cls(
           "imb-session-user imb-session-pending-bubble",
-          item.unconfirmed && "imb-is-unconfirmed",
+          (item.unconfirmed || feedback !== undefined) && "imb-is-unconfirmed",
         )}
       >
         {item.text}
       </div>
-      <div
-        className={cls(
-          "imb-session-pending-hint",
-          item.unconfirmed && "imb-is-unconfirmed",
-        )}
-      >
-        <span>{label}</span>
-        <button
-          type="button"
-          className="imb-session-pending-dismiss"
-          aria-label={dismissLabel}
-          title={dismissLabel}
-          onClick={() => onDismiss(item.id)}
+      {withdrawable ? (
+        <div className="imb-session-pending-hint">
+          <button
+            type="button"
+            className="imb-session-pending-action"
+            aria-label={withdrawLabel}
+            disabled={item.busy === true}
+            onClick={() => onWithdraw(item)}
+          >
+            {withdrawLabel}
+          </button>
+        </div>
+      ) : (
+        <div
+          className={cls(
+            "imb-session-pending-hint",
+            (item.unconfirmed || feedback !== undefined) &&
+              "imb-is-unconfirmed",
+          )}
+          role={feedback !== undefined ? "alert" : undefined}
         >
-          ×
-        </button>
-      </div>
+          <span>{label}</span>
+          {/* A settled interjection has nothing left to dismiss: it reports an
+              outcome and removes itself. Only the queued/legacy rows keep an
+              explicit "I don't care anymore". */}
+          {feedback === undefined && item.steerId === undefined && (
+            <button
+              type="button"
+              className="imb-session-pending-dismiss"
+              aria-label={dismissLabel}
+              title={dismissLabel}
+              onClick={() => onDismiss(item.id)}
+            >
+              ×
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
