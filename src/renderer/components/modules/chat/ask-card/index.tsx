@@ -432,7 +432,11 @@ export function AskCard({
   };
 
   return (
-    <div className={cls("imb-msg", self ? "imb-self" : "imb-other")}>
+    <div
+      className={cls("imb-msg", self ? "imb-self" : "imb-other")}
+      // Row anchor for jumps (the row-anchoring contract, see `../message-item`).
+      data-message-id={message.id}
+    >
       <EmployeeAvatar
         employeeId={message.senderEmployeeId}
         size={34}

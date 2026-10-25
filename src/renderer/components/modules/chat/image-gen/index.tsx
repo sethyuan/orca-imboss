@@ -94,6 +94,8 @@ export function ImageMessage({
         "imb-image-gen",
         self ? "imb-image-gen-self" : "imb-image-gen-other",
       )}
+      // Row anchor for jumps (the row-anchoring contract, see `../message-item`).
+      data-message-id={message.id}
     >
       {/* Keyed by the newest generation, so a fresh deck is built each time one
           arrives (its front card starts at the new picture) and the arrival

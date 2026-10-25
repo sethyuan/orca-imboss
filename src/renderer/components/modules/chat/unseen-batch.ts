@@ -13,15 +13,12 @@ import type { ProgressRun } from "./progress-runs";
  * card that is already on screen.
  */
 export interface UnseenBatch {
-  /** Message id the jump lands on, and the id the landing row carries. */
-  targetId: number;
   /**
-   * Whether the target is a progress run's row (anchored by
-   * `data-progress-run`) rather than a single message row. A run renders one
-   * row for all of its snapshots, so the row has to be addressed by the run's
-   * anchor rather than by whichever card is currently shown.
+   * Message id the jump lands on. It is a run's *anchor* for a folded run (which
+   * renders once, at its anchor) and the message's own id otherwise; the thread
+   * resolves either form from the DOM (see `chat-module`'s `findThreadRow`).
    */
-  isRun: boolean;
+  targetId: number;
   /** Jump targets in the batch (a run counts once — it is a single row). */
   count: number;
 }
@@ -55,7 +52,7 @@ export function buildUnseenBatch(
   // Defensive: a non-finite baseline would make every comparison false and
   // silently hide an entire batch.
   if (!Number.isFinite(seenId)) return null;
-  const targets: { id: number; isRun: boolean }[] = [];
+  const targets: number[] = [];
   const targetIds = new Set<number>();
   for (const message of rows) {
     if (!Number.isSafeInteger(message.id) || message.id <= seenId) continue;
@@ -65,22 +62,20 @@ export function buildUnseenBatch(
     const id = run === undefined ? message.id : run.anchorId;
     if (targetIds.has(id)) continue;
     targetIds.add(id);
-    targets.push({ id, isRun: run !== undefined });
+    targets.push(id);
   }
   if (targets.length === 0) return null;
   // Keep the place already promised, as long as it is still part of the batch.
   const start =
     previous !== null && targetIds.has(previous.targetId)
-      ? { id: previous.targetId, isRun: previous.isRun }
+      ? previous.targetId
       : targets[0];
   const count = targets.length;
   if (
     previous !== null &&
-    previous.targetId === start.id &&
-    previous.isRun === start.isRun &&
+    previous.targetId === start &&
     previous.count === count
-  ) {
+  )
     return previous;
-  }
-  return { targetId: start.id, isRun: start.isRun, count };
+  return { targetId: start, count };
 }

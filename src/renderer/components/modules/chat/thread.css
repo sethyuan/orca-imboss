@@ -155,10 +155,7 @@
   padding-bottom: calc(var(--imb-space-5) + 72px + var(--imb-space-4));
 }
 
-/* Landing flash of a jump (a match, one of the boss's messages): `flashRow`
-   tags the row with `data-quote-target` and removes it on `animationend`, so no
-   React state is involved. Reduced motion is handled in JS (no tag is set at
-   all); this rule is a belt. */
+/** The landing-flash keyframe (see the rule below). */
 @keyframes imb-quote-flash {
   from {
     box-shadow: 0 0 0 3px
@@ -170,20 +167,28 @@
   }
 }
 
-.imb-msg[data-quote-target] .imb-bubble {
-  animation: imb-quote-flash 700ms var(--imb-ease-standard);
-}
+/* Landing flash of a jump (a match, one of the boss's messages): `flashRow`
+   tags the row with `data-quote-target` and removes it on `animationend`, so no
+   React state is involved. Reduced motion is handled in JS (no tag is set at
+   all); this rule is a belt.
 
-/* A progress card has no `.imb-bubble`: flash the card surface the jump landed
-   on, so a match in a progress card (or in a run's shown snapshot) reads the
-   same as a match in a bubble. */
-.imb-msg[data-quote-target] .imb-progress-card {
+   A text bubble flashes its `.imb-bubble`; a progress card, an ask card, a link
+   card and an image deck have no bubble, so each flashes its own surface — every
+   rendered row is a jump target (see the row contract in `message-item`). */
+.imb-msg[data-quote-target] .imb-bubble,
+.imb-msg[data-quote-target] .imb-progress-card,
+.imb-msg[data-quote-target] .imb-ask-card,
+.imb-msg[data-quote-target] .imb-chat-card,
+.imb-msg[data-quote-target] .imb-image-gen-deck {
   animation: imb-quote-flash 700ms var(--imb-ease-standard);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .imb-msg[data-quote-target] .imb-bubble,
-  .imb-msg[data-quote-target] .imb-progress-card {
+  .imb-msg[data-quote-target] .imb-progress-card,
+  .imb-msg[data-quote-target] .imb-ask-card,
+  .imb-msg[data-quote-target] .imb-chat-card,
+  .imb-msg[data-quote-target] .imb-image-gen-deck {
     animation: none;
   }
 }

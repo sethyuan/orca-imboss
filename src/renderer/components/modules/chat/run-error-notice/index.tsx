@@ -9,6 +9,11 @@ export interface RunErrorNoticeProps {
    * shown verbatim behind the toggle while the label stays localized.
    */
   content: string;
+  /**
+   * The notice's message id, set as `data-message-id` on the root so a jump can
+   * land on this row (the row-anchoring contract, see `../message-item`).
+   */
+  messageId?: number;
 }
 
 /**
@@ -22,10 +27,11 @@ export interface RunErrorNoticeProps {
  */
 export function RunErrorNotice({
   content,
+  messageId,
 }: RunErrorNoticeProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
   return (
-    <div className="imb-run-error" role="note">
+    <div className="imb-run-error" role="note" data-message-id={messageId}>
       <span className="imb-run-error-label">{t("Agent run failed")}</span>
       <button
         type="button"

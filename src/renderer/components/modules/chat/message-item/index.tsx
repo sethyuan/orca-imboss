@@ -33,6 +33,16 @@ export interface MessageItemProps {
  * Renders one message according to its `kind`, shared by the interactive chat
  * module and the read-only group-chat module so the two views never drift.
  *
+ * **Row anchoring (a contract every kind must honour):** each row's outermost
+ * element carries `data-message-id={message.id}`, so a jump can address any
+ * rendered row in the thread without knowing which kind it is — the new-messages
+ * jump, the find bar and the "my messages" list all look rows up that way. A
+ * folded progress run additionally carries `data-progress-run={anchorId}` and
+ * its `data-message-id` is the *shown* card (see `../progress-group`), because
+ * the run's other cards are not in the DOM at all. A new kind that forgets the
+ * attribute is silently unjumpable, so add it to every branch below (and to the
+ * card components this function delegates to).
+ *
  * Memoized: a thread module re-renders on every keystroke in the in-thread find
  * bar and on every scan result (the find engine keeps its state in the module),
  * and re-rendering hundreds of already-rendered rows for that is pure waste.
@@ -86,8 +96,10 @@ export const MessageItem = memo(function MessageItem({
         />
       );
     case "progress":
+      // A run of a single card renders here (not through `ProgressGroup`'s paged
+      // row), so this element *is* the run's row: it needs the anchor.
       return (
-        <div className="imb-msg imb-other">
+        <div className="imb-msg imb-other" data-message-id={message.id}>
           <EmployeeAvatar
             employeeId={message.senderEmployeeId ?? 0}
             size={34}
@@ -112,12 +124,19 @@ export const MessageItem = memo(function MessageItem({
     case "interrupted":
       // App-generated notice (the boss halted the linked task group). Rendered
       // as a centered system hint, not a bubble; no sender/avatar row.
-      return <InterruptedNotice groupChatId={message.groupChatId} />;
+      return (
+        <InterruptedNotice
+          groupChatId={message.groupChatId}
+          messageId={message.id}
+        />
+      );
     case "error":
       // App-generated notice (an agent run failed and was recorded). Also a
       // centered system hint: nobody sent it, and its raw technical detail sits
       // behind a toggle.
-      return <RunErrorNotice content={message.content} />;
+      return (
+        <RunErrorNotice content={message.content} messageId={message.id} />
+      );
     case "image":
       // Image generation: one row carries the whole lifecycle (a placeholder
       // while the model runs, then the picture) — see `../image-gen`.

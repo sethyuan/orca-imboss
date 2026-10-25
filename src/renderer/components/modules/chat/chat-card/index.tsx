@@ -33,7 +33,11 @@ export function ChatCard({
   const summary = useChatSummary(chatId);
 
   return (
-    <div className="imb-msg imb-other">
+    <div
+      className="imb-msg imb-other"
+      // Row anchor for jumps (the row-anchoring contract, see `../message-item`).
+      data-message-id={message.id}
+    >
       <EmployeeAvatar
         employeeId={message.senderEmployeeId}
         size={34}

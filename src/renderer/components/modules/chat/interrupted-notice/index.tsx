@@ -7,6 +7,11 @@ import "./index.css";
 export interface InterruptedNoticeProps {
   /** Task group whose sessions the boss halted (`null` for legacy/unknown links). */
   groupChatId: number | null;
+  /**
+   * The notice's message id, set as `data-message-id` on the root so a jump can
+   * land on this row (the row-anchoring contract, see `../message-item`).
+   */
+  messageId?: number;
 }
 
 /**
@@ -18,10 +23,11 @@ export interface InterruptedNoticeProps {
  */
 export function InterruptedNotice({
   groupChatId,
+  messageId,
 }: InterruptedNoticeProps): React.JSX.Element {
   const summary = useChatSummary(groupChatId);
   return (
-    <div className="imb-interrupted" role="note">
+    <div className="imb-interrupted" role="note" data-message-id={messageId}>
       <span className="imb-interrupted-icon" aria-hidden="true">
         <IconHalt />
       </span>

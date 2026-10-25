@@ -1005,14 +1005,26 @@ export function ChatModule(): React.JSX.Element {
     markSeen();
   }, [markSeen]);
 
-  /** The rendered row a batch's jump lands on (a message row or a run's row). */
-  const findBatchRow = useCallback((batch: UnseenBatch): HTMLElement | null => {
+  /**
+   * The thread's row for a message id, whichever kind renders it.
+   *
+   * Two attributes address rows (the row-anchoring contract in
+   * `../message-item`): a folded progress run by `data-progress-run` (its
+   * `data-message-id` is the *shown* card, which a batch target — the run's
+   * anchor — need not be), every other row by `data-message-id`. A run of a
+   * **single** card renders as a plain message row, i.e. only the second
+   * attribute is there — hence the fallback. Without it such a row was silently
+   * unjumpable: the pill disappeared and nothing scrolled (the bug this
+   * addresses), and the "batch start came into view" pass could never see it.
+   */
+  const findThreadRow = useCallback((messageId: number): HTMLElement | null => {
     const el = threadRef.current;
-    if (el === null) return null;
-    return el.querySelector<HTMLElement>(
-      batch.isRun
-        ? `[data-progress-run="${batch.targetId}"]`
-        : `[data-message-id="${batch.targetId}"]`,
+    // The id is interpolated into a selector: anything but a safe integer would
+    // either throw or match nothing, and every stored id is one.
+    if (el === null || !Number.isSafeInteger(messageId)) return null;
+    return (
+      el.querySelector<HTMLElement>(`[data-progress-run="${messageId}"]`) ??
+      el.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`)
     );
   }, []);
 
@@ -1047,12 +1059,12 @@ export function ChatModule(): React.JSX.Element {
     // she was watching is different: if its first row is already on screen
     // there is nothing to jump to.)
     if (batchAnnouncedRef.current) return;
-    const row = findBatchRow(unseenRef.current);
+    const row = findThreadRow(unseenRef.current.targetId);
     // A row that is gone (mid-reload) is not evidence of anything: keep the
     // marker, the next pass re-checks.
     if (row === null) return;
     if (isBatchStartVisible(row)) dropUnseen();
-  }, [dropUnseen, findBatchRow, isBatchStartVisible]);
+  }, [dropUnseen, findThreadRow, isBatchStartVisible]);
 
   /** One visibility pass per frame, however fast the thread scrolls. */
   const scheduleUnseenCheck = useCallback((): void => {
@@ -1148,7 +1160,7 @@ export function ChatModule(): React.JSX.Element {
     // A message that landed just below the reading position is already visible
     // and she was watching: there is nothing to jump to. An *announced* batch is
     // the exception — see `checkUnseenVisibility`.
-    const row = findBatchRow(next);
+    const row = findThreadRow(next.targetId);
     if (!announced && row !== null && isBatchStartVisible(row)) {
       dropUnseen();
       return;
@@ -1160,7 +1172,7 @@ export function ChatModule(): React.JSX.Element {
     visibleMessages,
     progressRuns,
     dropUnseen,
-    findBatchRow,
+    findThreadRow,
     isBatchStartVisible,
     markSeen,
   ]);
@@ -1195,19 +1207,15 @@ export function ChatModule(): React.JSX.Element {
   handleThreadScrollRef.current = handleThreadScroll;
 
   /**
-   * Scroll the thread to one message row. One rect read for the row (no
-   * measuring while hovering / scrolling) and the landing row flashes once the
-   * smooth scroll settles; the scroll itself (and the "my messages" jump) share
-   * `../thread-scroll` with the other thread views.
+   * Scroll the thread so one row lands on the landing line. One rect read (no
+   * measuring while hovering / scrolling) and the row flashes once the smooth
+   * scroll settles; the scroll itself is shared with the other thread views
+   * through `../thread-scroll`.
    */
-  const scrollToMessageRow = useCallback(
-    (messageId: number, align: ThreadAlign = "top"): void => {
+  const scrollToRow = useCallback(
+    (row: HTMLElement, align: ThreadAlign): void => {
       const el = threadRef.current;
-      if (!el) return;
-      const row = el.querySelector<HTMLElement>(
-        `[data-message-id="${messageId}"]`,
-      );
-      if (!row) return;
+      if (el === null) return;
       scrollThreadToRow(el, row, {
         topGap: MY_JUMP_TOP_GAP,
         align,
@@ -1215,37 +1223,6 @@ export function ChatModule(): React.JSX.Element {
         // re-pins on every `messages` change, so `pinned` is cleared *before*
         // scrolling (a programmatic scroll emits `scroll`, which re-syncs it
         // from the position).
-        beforeScroll: (target) => {
-          pinnedRef.current = false;
-          if (selectedIdRef.current !== null) {
-            patchChatScroll(selectedIdRef.current, {
-              scrollTop: target,
-              pinned: false,
-            });
-          }
-        },
-        flash: row,
-      });
-    },
-    [],
-  );
-
-  /**
-   * Scroll to a folded progress run's row. Its `data-message-id` changes with
-   * the card on screen, so the run anchor is what a jump can address before the
-   * run has paged to the target card.
-   */
-  const scrollToRunRow = useCallback(
-    (anchorId: number, align: ThreadAlign = "top"): void => {
-      const el = threadRef.current;
-      if (!el) return;
-      const row = el.querySelector<HTMLElement>(
-        `[data-progress-run="${anchorId}"]`,
-      );
-      if (!row) return;
-      scrollThreadToRow(el, row, {
-        topGap: MY_JUMP_TOP_GAP,
-        align,
         beforeScroll: (target) => {
           pinnedRef.current = false;
           if (selectedIdRef.current !== null) {
@@ -1263,19 +1240,47 @@ export function ChatModule(): React.JSX.Element {
     [],
   );
 
+  /** Scroll the thread to one message row (whatever kind renders it). */
+  const scrollToMessageRow = useCallback(
+    (messageId: number, align: ThreadAlign = "top"): void => {
+      const row = findThreadRow(messageId);
+      if (row !== null) scrollToRow(row, align);
+    },
+    [findThreadRow, scrollToRow],
+  );
+
+  /**
+   * Scroll to a folded progress run's row. Its `data-message-id` changes with
+   * the card on screen, so the run anchor is what a jump can address before the
+   * run has paged to the target card.
+   */
+  const scrollToRunRow = useCallback(
+    (anchorId: number, align: ThreadAlign = "top"): void => {
+      const row = findThreadRow(anchorId);
+      if (row !== null) scrollToRow(row, align);
+    },
+    [findThreadRow, scrollToRow],
+  );
+
   /**
    * Reveal the start of the new-message batch: vertically centered, so a slice
    * of the older context stays visible above it and the boss reads forwards
-   * from there. The marker is dropped first — it has done its job, and a batch
-   * that arrives afterwards starts from the new tail.
+   * from there.
+   *
+   * The row is resolved **first**: a click that cannot land anywhere must leave
+   * the pill (and the read baseline) alone instead of swallowing the batch —
+   * the thread can be mid-reload, in which case a second click still works.
+   * Only once there is somewhere to go is the marker dropped (it has done its
+   * job, and a batch arriving afterwards starts from the new tail).
    */
   const jumpToUnseen = useCallback((): void => {
     const batch = unseenRef.current;
     if (batch === null) return;
+    const row = findThreadRow(batch.targetId);
+    if (row === null) return;
     dropUnseen();
-    if (batch.isRun) scrollToRunRow(batch.targetId, "center");
-    else scrollToMessageRow(batch.targetId, "center");
-  }, [dropUnseen, scrollToMessageRow, scrollToRunRow]);
+    scrollToRow(row, "center");
+  }, [dropUnseen, findThreadRow, scrollToRow]);
 
   /**
    * Jump to the newest message and resume following it (the 「Latest message」
