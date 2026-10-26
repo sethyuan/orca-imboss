@@ -1,11 +1,12 @@
 import { SettingKeys } from "@shared/constants/settings";
 import { t } from "@shared/l10n";
-import { ipcMain } from "electron";
 import { mkdirSync } from "fs";
 import { isAbsolute } from "path";
 import { getWorkDirState } from "../agent/workdir";
 import { setSetting } from "../db/settings";
 import { showOpenDialog } from "./dialog";
+import { assertString } from "./helpers";
+import type { Binder } from "../rpc/types";
 
 /**
  * Working directory IPC.
@@ -15,10 +16,28 @@ import { showOpenDialog } from "./dialog";
  * a bad path can never reach the database. Selection is exclusive to the native
  * dialog, which always yields an absolute path.
  */
-export function registerWorkdirHandlers(): void {
-  ipcMain.handle("workdir:get", () => getWorkDirState());
+export function registerWorkdirHandlers(bind: Binder): void {
+  bind("workdir:get", () => getWorkDirState());
 
-  ipcMain.handle("workdir:choose", async () => {
+  /**
+   * Set the working directory to an explicit absolute path — the remote
+   * counterpart of the native picker, where the folder was chosen with the
+   * backend's path browser (`files:listDir`).
+   *
+   * Validation, creation and persistence stay here (never in the renderer), so a
+   * bad path cannot reach the database through this door either.
+   */
+  bind("workdir:set", (_ctx, path: unknown) => {
+    const chosen = assertString(path, "working directory");
+    if (!isAbsolute(chosen)) {
+      throw new Error("Working directory must be an absolute path.");
+    }
+    mkdirSync(chosen, { recursive: true });
+    setSetting(SettingKeys.WorkDir, chosen);
+    return getWorkDirState();
+  });
+
+  bind("workdir:choose", async () => {
     const before = getWorkDirState();
     const paths = await showOpenDialog({
       title: t("Select working directory"),

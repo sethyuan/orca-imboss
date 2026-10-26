@@ -41,3 +41,22 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Non-blocking version-skew banner (remote mode only). */
+.imb-version-banner {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-2);
+  padding: var(--imb-space-2) var(--imb-space-4);
+  background: var(--imb-warning-surface, rgba(255, 176, 32, 0.16));
+  border-bottom: 1px solid var(--imb-warning-border, rgba(255, 176, 32, 0.4));
+  font-size: var(--imb-text-sm);
+  color: var(--imb-fg);
+}
+
+.imb-version-banner-text {
+  flex: 1;
+  min-width: 0;
+}

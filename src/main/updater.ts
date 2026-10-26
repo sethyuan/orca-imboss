@@ -4,6 +4,7 @@ import type { UpdaterState } from "@shared/types";
 import { app, Notification } from "electron";
 import electronUpdater from "electron-updater";
 import { basename } from "path";
+import { isDatabaseReady } from "./db";
 import { getSetting, setSetting } from "./db/settings";
 import { markQuitting, showMainWindow } from "./main-window";
 import { sendToRenderer } from "./notifications";
@@ -246,11 +247,16 @@ function setState(patch: Partial<UpdaterState>): void {
  */
 function notifyUpdateAvailable(version: string): void {
   if (!Notification.isSupported()) return;
-  if (getSetting(SettingKeys.UpdateNotifiedVersion) === version) return;
-  try {
-    setSetting(SettingKeys.UpdateNotifiedVersion, version);
-  } catch (error) {
-    console.error("[updater] failed to persist notified version:", error);
+  // The dedupe row lives in the app database. A remote desktop shell has no
+  // local data folder, so it cannot remember the version and always notifies —
+  // correct, just noisier.
+  if (isDatabaseReady()) {
+    if (getSetting(SettingKeys.UpdateNotifiedVersion) === version) return;
+    try {
+      setSetting(SettingKeys.UpdateNotifiedVersion, version);
+    } catch (error) {
+      console.error("[updater] failed to persist notified version:", error);
+    }
   }
 
   const notification = new Notification({

@@ -263,12 +263,13 @@ export function AskCard({
    * absolute path only — the agent reads the directory in place — and a folder
    * without a resolvable path is reported instead of becoming a dead chip.
    */
-  const addEntries = (entries: readonly FileEntry[]): void => {
+  const addEntries = async (entries: readonly FileEntry[]): Promise<void> => {
     if (entries.length === 0) return;
     setAttachNotice(null);
-    const { items, failedFolders } = pendingFromEntries(
+    const { items, failedFolders } = await pendingFromEntries(
       entries,
       capCount(entries.length),
+      message.chatId,
     );
     if (failedFolders > 0) {
       setAttachNotice(
@@ -285,7 +286,7 @@ export function AskCard({
   /** Attach files chosen in the native picker. */
   const addFiles = (files: readonly File[]): void => {
     if (files.length === 0) return;
-    addEntries(files.map((file) => ({ file, kind: "file" as const })));
+    void addEntries(files.map((file) => ({ file, kind: "file" as const })));
   };
 
   /**
@@ -318,7 +319,16 @@ export function AskCard({
     let failed = 0;
     for (const file of files.slice(0, capCount(files.length))) {
       if (imb.files.getPath(file)) {
-        next.push(toPendingAttachment(file, fileAttachment(file)));
+        try {
+          next.push(
+            toPendingAttachment(
+              file,
+              await fileAttachment(file, message.chatId),
+            ),
+          );
+        } catch {
+          failed += 1;
+        }
         continue;
       }
       // Reject oversized payloads before reading their bytes into memory.
@@ -385,7 +395,7 @@ export function AskCard({
     event.preventDefault();
     // Files and folders alike: a folder is attached by path (the shared helper
     // tells them apart and rejects a folder whose path cannot be resolved).
-    addEntries(dropEntries(event.dataTransfer));
+    void addEntries(dropEntries(event.dataTransfer));
   };
 
   const handleSubmit = async (): Promise<void> => {

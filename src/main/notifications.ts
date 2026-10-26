@@ -1,21 +1,27 @@
-import { BrowserWindow, Notification } from "electron";
 import * as dbChats from "./db/chats";
-import { getMainWindow, showMainWindow } from "./main-window";
+import { getOsNotifier } from "./platform";
+import { sendToRenderer } from "./rpc/broadcast";
 
 /**
- * Send a payload to the main window (no-op before creation / after destruction).
- * `payload` is optional for channels that only signal "something changed"
- * (e.g. `skills:changed`), whose listeners take no argument.
+ * Unread bookkeeping and the "there is something new" nudge.
+ *
+ * Transport- and host-independent on purpose: the unread counter is persisted
+ * data (so this runs where the database is), while *showing* an OS notification
+ * is a host capability delegated to {@link getOsNotifier}. The desktop host
+ * installs a notifier backed by Electron's `Notification` (see
+ * `src/main/desktop/os-notifications.ts`); a remote backend installs nothing,
+ * and its clients still receive the `chats:unreadChanged` event below.
+ *
+ * Re-exported here because every existing caller imports `sendToRenderer` from
+ * this module; the implementation itself lives in `rpc/broadcast` so that
+ * Electron-free business modules can use it without the notifier.
  */
-export function sendToRenderer(channel: string, payload?: unknown): void {
-  const win = getMainWindow();
-  if (win) win.webContents.send(channel, payload);
-}
+export { sendToRenderer } from "./rpc/broadcast";
 
 /**
  * Bump a chat's unread counter by `delta` (clamped >= 0), mirror the new count
- * to the renderer, and — when the app window is not focused — show an OS
- * notification that, when clicked, focuses the app and jumps to the chat.
+ * to the renderer, and — when the host decides the user needs to be told — raise
+ * an OS notification that, when clicked, focuses the app and jumps to the chat.
  *
  * Root chats only: task group chats (fromChatId !== null) never record unread
  * (the badge is root-chat only and group chats track reads via read_cursors),
@@ -41,24 +47,13 @@ export function notifyUnread(
   // A muted conversation still counts unread, but never notifies.
   if (chat.muted) return newUnread;
 
-  const target = getMainWindow();
-  const focused = BrowserWindow.getFocusedWindow();
-  // Only send an OS notification when the app is genuinely in the foreground.
-  if (target && focused && focused === target) return newUnread;
-
-  if (target && Notification.isSupported()) {
-    const notification = new Notification({
-      title: chatTitle(chatId),
-      body: text,
-    });
-    notification.on("click", () => {
-      // The window may be hidden (or minimized) when the notification is
-      // clicked: `showMainWindow()` covers every state, plain `show()` does not.
-      showMainWindow();
-      getMainWindow()?.webContents.send("chat:focus", chatId);
-    });
-    notification.show();
-  }
+  // Whether the user is actually reachable is host knowledge (window focus, OS
+  // notification support); a headless backend has nobody to interrupt.
+  getOsNotifier().notify({
+    chatId,
+    title: chatTitle(chatId),
+    body: text,
+  });
   return newUnread;
 }
 

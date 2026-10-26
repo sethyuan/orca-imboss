@@ -1,4 +1,3 @@
-import { app } from "electron";
 import {
   existsSync,
   lstatSync,
@@ -29,6 +28,7 @@ import type {
 import { isValidSkillName } from "../agent/skills";
 import { getAgentSkillsDir } from "../data-dir";
 import { readMcpRawEntries } from "../mcp-store";
+import { getAppInfo } from "../platform";
 import { writeZipArchive, type ZipWriteEntry } from "./archive";
 import {
   avatarExtensionOf,
@@ -213,7 +213,7 @@ function buildExportPayload(employee: Employee): {
   const manifest: EmployeeExportManifest = {
     format: EMPLOYEE_EXPORT_FORMAT,
     formatVersion: EMPLOYEE_EXPORT_FORMAT_VERSION,
-    appVersion: app.getVersion(),
+    appVersion: getAppInfo().getVersion(),
     createdAt: Date.now(),
     platform: process.platform,
     sourceEmployeeId,

@@ -142,7 +142,7 @@ export function AgentSessionModule({
   employeeId,
   chatId,
 }: AgentSessionModuleProps): React.JSX.Element {
-  const { data, openedItems } = useApp();
+  const { data, openedItems, resyncEpoch } = useApp();
   const [entries, setEntries] = useState<AgentSessionViewEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -558,7 +558,10 @@ export function AgentSessionModule({
     return () => {
       void imb.agentSession.unbind(employeeId, chatId);
     };
-  }, [employeeId, chatId]);
+    // `resyncEpoch` re-binds after an unresumable event-stream gap: the server
+    // answers a bind with a `live_seed` of the in-flight message, which is how
+    // this view recovers the deltas it missed.
+  }, [employeeId, chatId, resyncEpoch]);
 
   // Seed the run state: a session opened *while* it is streaming never emitted
   // an `agent_start` for this window, so without this snapshot the composer

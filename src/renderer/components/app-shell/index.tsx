@@ -39,13 +39,14 @@ const LIST_DETAIL_MODULES: ReadonlySet<AppModule> = new Set([
  * into the matching pane(s) (see ModuleView below).
  */
 export function AppShell(): React.JSX.Element {
-  const { module } = useApp();
+  const { module, remote } = useApp();
   const layout = shellLayoutFor(module);
   const thinList = module === "settings";
 
   return (
     <div className="imb-app">
       <TitleBar />
+      {remote.incompatibility !== null ? <VersionMismatchBanner /> : null}
       <Nav />
       <div
         className={cls(
@@ -136,4 +137,25 @@ export function ModuleView(props: ModuleViewProps): React.JSX.Element | null {
 
 function shellLayoutFor(module: AppModule): ShellLayout {
   return LIST_DETAIL_MODULES.has(module) ? "list-detail" : "single";
+}
+
+/**
+ * "Your app and the backend disagree about the protocol."
+ *
+ * Deliberately a **banner, not a blocker**: read-only browsing (chats, history,
+ * settings) keeps working against a backend whose channel contract is newer or
+ * older — only the mismatched features fail, and they fail with their own
+ * message. Blocking the whole UI would turn a version skew into a dead app.
+ */
+function VersionMismatchBanner(): React.JSX.Element | null {
+  const { remote } = useApp();
+  const info = remote.incompatibility;
+  if (info === null) return null;
+  return (
+    <div className="imb-version-banner" role="status">
+      <span className="imb-version-banner-text">
+        {`The app (API v${info.shell}) and the remote backend (API v${info.backend}) use incompatible versions. Read-only browsing still works — please update the app and the backend so they match.`}
+      </span>
+    </div>
+  );
 }

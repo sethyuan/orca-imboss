@@ -1,6 +1,6 @@
 import { t } from "@shared/l10n";
+import { isAbsolute } from "path";
 import type { CapabilityUnlinkResult } from "@shared/types";
-import { ipcMain } from "electron";
 import {
   installSkillsFromFolders,
   listSkills,
@@ -12,6 +12,7 @@ import { notifyEmployeesChanged } from "../employee-events";
 import { sendToRenderer } from "../notifications";
 import { showOpenDialog } from "./dialog";
 import { assertString, parsePageQuery } from "./helpers";
+import type { Binder } from "../rpc/types";
 
 async function pickSkillFolders(): Promise<string[] | null> {
   return showOpenDialog({
@@ -20,15 +21,43 @@ async function pickSkillFolders(): Promise<string[] | null> {
   });
 }
 
-export function registerSkillHandlers(): void {
-  ipcMain.handle("skills:list", () => listSkills());
+/** Absolute-path list from a remote client (no traversal, bounded count). */
+function validateSkillPaths(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error("skills:install expects an array of folder paths.");
+  }
+  if (value.length === 0) {
+    throw new Error("At least one folder is required.");
+  }
+  if (value.length > 50) {
+    throw new Error("Too many folders.");
+  }
+  return value.map((entry) => {
+    const path = assertString(entry, "skill folder");
+    if (!isAbsolute(path)) {
+      throw new Error("Skill folders must be absolute paths.");
+    }
+    return path;
+  });
+}
 
-  ipcMain.handle("skills:listPage", (_event, page: unknown) =>
+export function registerSkillHandlers(bind: Binder): void {
+  bind("skills:list", () => listSkills());
+
+  bind("skills:listPage", (_ctx, page: unknown) =>
     listSkillsPage(parsePageQuery(page)),
   );
 
-  ipcMain.handle("skills:install", async () => {
-    const paths = await pickSkillFolders();
+  /**
+   * Install skill folders. With no argument the native picker runs (local mode);
+   * a remote client passes the folders it chose with the backend's path browser,
+   * because a dialog on a headless backend cannot be answered.
+   */
+  bind("skills:install", async (_ctx, chosen?: unknown) => {
+    const paths =
+      chosen === undefined
+        ? await pickSkillFolders()
+        : validateSkillPaths(chosen);
     if (paths === null) return null;
     const imported = await installSkillsFromFolders(paths);
     // Skills live on disk and can also change outside the app; the renderer
@@ -45,9 +74,9 @@ export function registerSkillHandlers(): void {
    * folder without this sweep would leave a reference the renderer can never
    * show or remove again. The ids come back so the UI can report the count.
    */
-  ipcMain.handle(
+  bind(
     "skills:uninstall",
-    async (_event, name: unknown): Promise<CapabilityUnlinkResult> => {
+    async (_ctx, name: unknown): Promise<CapabilityUnlinkResult> => {
       const safeName = assertString(name, "skill name");
       await uninstallSkill(safeName);
       const report = reconcileCapabilityRefs({

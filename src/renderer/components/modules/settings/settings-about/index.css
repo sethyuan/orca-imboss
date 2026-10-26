@@ -151,3 +151,14 @@
 .imb-error-text.imb-update-status {
   color: var(--imb-danger);
 }
+
+/* Remote-mode explanation (About). */
+.imb-about-note {
+  margin: var(--imb-space-2) 0 var(--imb-space-3);
+  padding: var(--imb-space-2) var(--imb-space-3);
+  border-radius: var(--imb-radius-control);
+  background: var(--imb-surface-raised);
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+  line-height: 1.5;
+}

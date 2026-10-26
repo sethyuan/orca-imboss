@@ -1,13 +1,17 @@
 import { SettingKeys } from "@shared/constants/settings";
 import type { ThemeMode, ThemeState } from "@shared/types";
-import { nativeTheme } from "electron";
 import { getSetting, setSetting } from "./db/settings";
+import { getThemeApplier } from "./platform";
 
 /**
  * Theme ownership (confirmed decision): the DB `settings` table owns the
- * persisted values (`theme.mode`, `theme.color`); Electron's `nativeTheme`
- * applies the mode so Chromium's `prefers-color-scheme` follows it, and the
+ * persisted values (`theme.mode`, `theme.color`); the *host* applies the mode so
+ * Chromium's `prefers-color-scheme` follows it (desktop: `nativeTheme`), and the
  * renderer injects the accent color as CSS variables (see renderer theme.ts).
+ *
+ * The value is read from the settings table rather than from the host, so the
+ * backend that owns the database is the single source of truth and a remote
+ * desktop shell can still report the stored mode.
  */
 
 const VALID_MODES: ThemeMode[] = ["light", "dark", "system"];
@@ -20,9 +24,9 @@ export function sanitizeMode(value: string | null | undefined): ThemeMode {
     : "system";
 }
 
-/** Effective mode (reflects the OS when mode is "system"). */
+/** Effective mode (`system` = follow the OS). */
 export function getThemeMode(): ThemeMode {
-  return nativeTheme.themeSource;
+  return sanitizeMode(getSetting(SettingKeys.ThemeMode));
 }
 
 export function getThemeColor(): string {
@@ -33,7 +37,7 @@ export function getThemeColor(): string {
 export function setThemeMode(mode: ThemeMode): void {
   const safe = sanitizeMode(mode);
   setSetting(SettingKeys.ThemeMode, safe);
-  nativeTheme.themeSource = safe;
+  getThemeApplier().applyMode(safe);
 }
 
 export function setThemeColor(color: string): void {
@@ -49,5 +53,5 @@ export function getThemeState(): ThemeState {
 
 /** Apply the persisted mode at startup (called after DB init). */
 export function initTheme(): void {
-  nativeTheme.themeSource = sanitizeMode(getSetting(SettingKeys.ThemeMode));
+  getThemeApplier().applyMode(getThemeMode());
 }

@@ -1,6 +1,6 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { AgentStreamEvent, AgentStreamPayload } from "@shared/types";
-import type { WebContents } from "electron";
+import type { Subscriber } from "../rpc/types";
 import { formatToolArgsDetail, summarizeToolArgs } from "./tool-args";
 
 /**
@@ -107,7 +107,7 @@ export function errorEvent(error: unknown): AgentStreamEvent {
  * a send failure must never break the queue.
  */
 export function sendEventTo(
-  senders: Iterable<WebContents>,
+  senders: Iterable<Subscriber>,
   employeeId: number,
   chatId: number,
   event: AgentStreamEvent,
@@ -115,7 +115,7 @@ export function sendEventTo(
   const payload: AgentStreamPayload = { employeeId, chatId, event };
   for (const sender of senders) {
     try {
-      if (!sender.isDestroyed()) {
+      if (sender.alive) {
         sender.send(AGENT_SESSION_EVENT_CHANNEL, payload);
       }
     } catch {

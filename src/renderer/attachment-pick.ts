@@ -14,8 +14,10 @@
  * builds those attachments itself.
  */
 import { MAX_ATTACHMENT_BYTES } from "@shared/constants/attachments";
+import { t } from "@shared/l10n";
 import type { MessageAttachment } from "@shared/types";
 import { nextAttachmentId, type PendingAttachment } from "./chat-draft";
+import { chooseRemoteDirectory, isRemoteMode } from "./remote-files";
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico|heic|heif)$/i;
 
@@ -74,14 +76,31 @@ export function pastedName(file: File): string {
 
 /**
  * Attachment metadata for a file the OS handed us (picker, drag, paste).
- * `webUtils.getPathForFile` (preload) yields `""` for JS-constructed files, so
- * only a real on-disk path is carried — that is what makes the chip revealable
- * and the file readable by an agent.
+ *
+ * Locally `webUtils.getPathForFile` (preload) yields the real on-disk path, and
+ * carrying it is what makes the chip revealable and the file readable by an
+ * agent. **Remotely that path is on the wrong machine**, so the bytes are
+ * uploaded first and the attachment carries the *backend* path instead — same
+ * shape, same consumers downstream.
+ *
+ * `chatId` is only needed for the remote upload (the backend stores per
+ * conversation); locally it is ignored.
  */
-export function fileAttachment(file: File): MessageAttachment {
+export async function fileAttachment(
+  file: File,
+  chatId?: number,
+): Promise<MessageAttachment> {
+  const name = file.name || pastedName(file);
+  if (isRemoteMode()) {
+    if (chatId === undefined) {
+      throw new Error(t("Could not attach the file."));
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return await imb.files.uploadAttachment(chatId, name, file.type, bytes);
+  }
   const path = imb.files.getPath(file);
   return {
-    name: file.name || pastedName(file),
+    name,
     size: file.size,
     type: file.type,
     ...(path ? { path } : {}),
@@ -153,14 +172,22 @@ export function dropEntries(dataTransfer: DataTransfer): FileEntry[] {
  * path cannot be resolved is counted in `failedFolders` instead of becoming a
  * dead chip. `webUtils.getPathForFile` yields `""` for JS-constructed files.
  */
-export function pendingFromEntries(
+export async function pendingFromEntries(
   entries: readonly FileEntry[],
   limit: number,
-): { items: PendingAttachment[]; failedFolders: number } {
+  chatId?: number,
+): Promise<{ items: PendingAttachment[]; failedFolders: number }> {
   const items: PendingAttachment[] = [];
   let failedFolders = 0;
   for (const { file, kind } of entries.slice(0, Math.max(limit, 0))) {
     if (kind === "folder") {
+      // A dropped folder is a *local* path. Remotely the agent cannot read it, so
+      // it is reported instead of becoming a dead chip — the folder button goes
+      // through the backend's browser (`chooseFolderAttachments`).
+      if (isRemoteMode()) {
+        failedFolders += 1;
+        continue;
+      }
       const path = imb.files.getPath(file);
       if (!path) {
         failedFolders += 1;
@@ -172,7 +199,12 @@ export function pendingFromEntries(
       });
       continue;
     }
-    items.push(toPendingAttachment(file, fileAttachment(file)));
+    try {
+      items.push(toPendingAttachment(file, await fileAttachment(file, chatId)));
+    } catch (err) {
+      console.error("[attachment] upload failed:", err);
+      failedFolders += 1;
+    }
   }
   return { items, failedFolders };
 }
@@ -183,6 +215,23 @@ export function pendingFromEntries(
  * the dialog itself fails, so the caller can show its own error.
  */
 export async function chooseFolderAttachments(): Promise<PendingAttachment[]> {
+  // Remote: the folder must be picked on the backend (the agent reads it there).
+  if (isRemoteMode()) {
+    const path = await chooseRemoteDirectory(
+      t("Choose a folder on the server"),
+    );
+    if (path === null) return [];
+    const name = path
+      .split(/[\\/]/)
+      .filter((part) => part.length > 0)
+      .pop();
+    return [
+      {
+        id: nextAttachmentId(),
+        attachment: folderAttachment(name ?? path, path),
+      },
+    ];
+  }
   const directories = await imb.files.chooseDirectories();
   if (!directories || directories.length === 0) return [];
   return directories.map((directory) => ({

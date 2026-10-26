@@ -2,6 +2,7 @@ import { t } from "@shared/l10n";
 import type { InstalledSkill } from "@shared/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appStore, useApp } from "../../../../app-store";
+import { chooseRemoteDirectory, isRemoteMode } from "../../../../remote-files";
 import { useDebouncedValue } from "../../../../hooks/use-debounced-value";
 import { useModuleFilter } from "../../../../hooks/use-module-filter";
 import { useMultiSelect } from "../../../../hooks/use-multi-select";
@@ -106,7 +107,11 @@ export function SettingsSkills(): React.JSX.Element {
   const importFromFolder = async (): Promise<void> => {
     setBusy(true);
     try {
-      const names = await imb.skills.install();
+      // Remote: pick the skill folder(s) on the backend, then install from those
+      // paths (the backend has no way to show a dialog).
+      const names = isRemoteMode()
+        ? await installRemoteSkillFolder()
+        : await imb.skills.install();
       // `null` = user cancelled; `[]` = nothing importable. Best-effort import:
       // keep any valid skills with no UI feedback beyond re-listing them.
       if (names !== null && names.length > 0) {
@@ -374,4 +379,17 @@ function DetailReadOnlyDescription({
       {description && description.length > 0 ? description : "—"}
     </p>
   );
+}
+
+/**
+ * Remote install: pick the skill folder on the backend, then let main install
+ * from that absolute path (the local flow's native dialog cannot run there).
+ * Returns the same shape as `imb.skills.install` — `null` = cancelled.
+ */
+async function installRemoteSkillFolder(): Promise<string[] | null> {
+  const path = await chooseRemoteDirectory(
+    t("Choose a skill folder on the server"),
+  );
+  if (path === null) return null;
+  return await imb.skills.installFrom([path]);
 }

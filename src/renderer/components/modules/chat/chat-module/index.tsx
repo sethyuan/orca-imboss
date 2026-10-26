@@ -178,7 +178,7 @@ function isDocumentVisible(): boolean {
 }
 
 export function ChatModule(): React.JSX.Element {
-  const { data, focusChatId } = useApp();
+  const { data, focusChatId, resyncEpoch } = useApp();
   const [selectedId, setSelectedId] = useState<number | null>(
     // Restore the chat selected before this module was unmounted.
     () => appStore.activeRootChatId,
@@ -664,7 +664,9 @@ export function ChatModule(): React.JSX.Element {
     setUnseen(null);
     void loadMessages(selectedId);
     clearSelectedUnread(selectedId);
-  }, [selectedId, loadMessages, clearSelectedUnread]);
+    // `resyncEpoch` changes when the remote event stream could not be resumed:
+    // the thread must be re-read from the backend rather than left stale.
+  }, [selectedId, loadMessages, clearSelectedUnread, resyncEpoch]);
 
   // Switching chats abandons any in-progress rename and drops the optimistic
   // title (the new chat's title comes from its own summary).

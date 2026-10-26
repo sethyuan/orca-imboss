@@ -8,3 +8,4 @@ AGENTS.md
 .pi
 .npmrc
 tsconfig.node.tsbuildinfo
+dist-remote

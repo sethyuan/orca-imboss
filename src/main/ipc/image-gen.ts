@@ -1,6 +1,6 @@
-import { ipcMain } from "electron";
 import { rerollImageMessage } from "../image-gen";
 import { assertInteger } from "./helpers";
+import type { Binder } from "../rpc/types";
 
 /**
  * Image generation — registered only while `IMAGE_GENERATION_ENABLED` is set
@@ -10,8 +10,8 @@ import { assertInteger } from "./helpers";
  * and the target conversation live on that row, so nothing about either crosses
  * IPC. The agent's own path is the `imb_generate_image` tool, not this channel.
  */
-export function registerImageGenHandlers(): void {
-  ipcMain.handle("imageGen:reroll", (_event, messageId: unknown) =>
+export function registerImageGenHandlers(bind: Binder): void {
+  bind("imageGen:reroll", (_ctx, messageId: unknown) =>
     rerollImageMessage(assertInteger(messageId, "message id")),
   );
 }

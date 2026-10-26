@@ -8,6 +8,7 @@ import { CronModule } from "./components/modules/cron/cron-module";
 import { EmployeesModule } from "./components/modules/employees/employees-module";
 import { GroupChatModule } from "./components/modules/group-chat/group-chat-module";
 import { MiniAppModule } from "./components/modules/miniapp/miniapp-module";
+import { PathBrowserModal } from "./components/path-browser";
 import { SettingsModule } from "./components/modules/settings/settings-module";
 import { SpendModule } from "./components/modules/spend/spend-module";
 
@@ -37,6 +38,9 @@ export default function App(): React.JSX.Element {
       <ActiveModule />
       {/* Always mounted so visited mini-app iframes survive module switches. */}
       <MiniAppModule />
+      {/* Remote-only: the backend's folder picker, driven by any flow that
+          needs a path on the server (see `remote-files.ts`). */}
+      <PathBrowserModal />
     </>
   );
 }

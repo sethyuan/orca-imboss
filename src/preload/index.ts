@@ -56,6 +56,28 @@ const initialLocale = readArg("locale") ?? DEFAULT_LOCALE;
 const api = {
   platform: process.platform,
 
+  /**
+   * Remote-transport notices (only ever fired when the app runs with
+   * `--remote`). `onResync` means the event stream could not be resumed, so
+   * whatever the UI holds may be stale and should be refetched — see
+   * `app-store.ts`.
+   */
+  remote: {
+    /**
+     * True when this window is driving a remote backend (`--remote=…`). The
+     * renderer uses it to pick the flow that can actually work: paths on the
+     * *backend* are browsed, local files are uploaded.
+     */
+    enabled: readArg("remote-mode") !== null,
+    /**
+     * Set when this shell and the backend disagree about the channel contract
+     * (`api_version`). The UI shows a banner and keeps read-only browsing usable.
+     */
+    incompatibility: readIncompatibility(),
+    onResync: (cb: (payload: { reason: string }) => void) =>
+      on<{ reason: string }>("remote:resync", cb),
+  },
+
   initialLocale,
   onLocaleChanged: (cb: (locale: string) => void) => on("locale:changed", cb),
 
@@ -82,6 +104,9 @@ const api = {
     get: () => ipcRenderer.invoke("workdir:get") as Promise<WorkDirState>,
     choose: () =>
       ipcRenderer.invoke("workdir:choose") as Promise<WorkDirState | null>,
+    /** Set it to a path chosen with the backend's browser (remote mode). */
+    set: (path: string) =>
+      ipcRenderer.invoke("workdir:set", path) as Promise<WorkDirState>,
   },
 
   files: {
@@ -132,6 +157,43 @@ const api = {
       ipcRenderer.invoke("files:chooseDirectories") as Promise<
         { name: string; path: string }[] | null
       >,
+    /**
+     * Store a file that only exists on *this* machine on the backend, and get
+     * back the attachment metadata with the backend path (what the agent reads
+     * and what a preview URL is built from). Remote mode only: locally the file
+     * already has a path the agent can read.
+     */
+    uploadAttachment: (
+      chatId: number,
+      name: string,
+      type: string,
+      data: Uint8Array,
+    ) =>
+      ipcRenderer.invoke(
+        "files:uploadAttachment",
+        chatId,
+        name,
+        type,
+        data,
+      ) as Promise<MessageAttachment>,
+    /**
+     * Browse the **backend's** directories (remote mode only). The result is a
+     * list of folder names + absolute backend paths, exactly like
+     * `chooseDirectories` returns for the native dialog.
+     */
+    listDir: (path?: string) =>
+      ipcRenderer.invoke("files:listDir", path) as Promise<{
+        path: string;
+        parent: string | null;
+        entries: { name: string; path: string }[];
+        roots: { name: string; path: string }[];
+      }>,
+    createDirectory: (parent: string, name: string) =>
+      ipcRenderer.invoke(
+        "files:createDirectory",
+        parent,
+        name,
+      ) as Promise<string>,
   },
 
   getVersion: () => ipcRenderer.invoke("app:getVersion") as Promise<string>,
@@ -616,6 +678,9 @@ const api = {
       >,
     install: () =>
       ipcRenderer.invoke("skills:install") as Promise<string[] | null>,
+    /** Install from folders chosen on the backend (remote mode). */
+    installFrom: (paths: string[]) =>
+      ipcRenderer.invoke("skills:install", paths) as Promise<string[] | null>,
     /** Uninstall a skill folder, unlinking it from the employees that had it. */
     uninstall: (name: string) =>
       ipcRenderer.invoke(
@@ -663,6 +728,19 @@ const api = {
 contextBridge.exposeInMainWorld("imb", api);
 
 export type IMB = typeof api;
+
+/** Parse `--remote-incompatible=<shell>:<backend>` (null when compatible). */
+function readIncompatibility(): { shell: number; backend: number } | null {
+  const raw = readArg("remote-incompatible");
+  if (raw === null) return null;
+  const [shell, backend] = raw.split(":");
+  const shellVersion = Number(shell);
+  const backendVersion = Number(backend);
+  if (!Number.isFinite(shellVersion) || !Number.isFinite(backendVersion)) {
+    return null;
+  }
+  return { shell: shellVersion, backend: backendVersion };
+}
 
 function readArg(name: string): string | null {
   const prefix = `--${name}=`;

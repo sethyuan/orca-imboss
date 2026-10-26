@@ -9,6 +9,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../../../../app-store";
 import { setLocale } from "../../../../locale";
+import { chooseRemoteDirectory, isRemoteMode } from "../../../../remote-files";
 import { DetailBody } from "../../../detail-pane/detail-body";
 import { DetailHead } from "../../../detail-pane/detail-head";
 import { Field } from "../../../field";
@@ -112,6 +113,16 @@ export function SettingsGeneral(): React.JSX.Element {
   async function chooseWorkdir(): Promise<void> {
     setWorkdirError(null);
     try {
+      // Remote: the folder must be chosen *on the backend* — a native dialog here
+      // would hand out a path the agent cannot read.
+      if (isRemoteMode()) {
+        const path = await chooseRemoteDirectory(
+          t("Choose the working directory on the server"),
+        );
+        if (path === null) return;
+        setWorkdir(await imb.workdir.set(path));
+        return;
+      }
       const next = await imb.workdir.choose();
       if (next) setWorkdir(next);
     } catch (err) {

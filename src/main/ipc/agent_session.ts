@@ -4,9 +4,9 @@ import type {
   AgentSessionSendResult,
   AgentSessionSteerRevokeResult,
 } from "@shared/types";
-import { ipcMain } from "electron";
+import type { Binder } from "../rpc/types";
 import {
-  bind,
+  bind as bindSession,
   deliver,
   interruptChat,
   interruptTurn,
@@ -39,25 +39,25 @@ const MAX_STEER_ID_LENGTH = 64;
  * binding a chat does not build a Pi session. `agentSession:unbind` removes the
  * registration.
  */
-export function registerAgentSessionHandlers(): void {
-  ipcMain.handle(
+export function registerAgentSessionHandlers(rpc: Binder): void {
+  rpc(
     "agentSession:bind",
-    (event, employeeId: unknown, chatId: unknown): void => {
-      bind(
+    (ctx, employeeId: unknown, chatId: unknown): void => {
+      bindSession(
         assertInteger(employeeId, "employee id"),
         assertInteger(chatId, "chat id"),
-        event.sender,
+        ctx.subscriber,
       );
     },
   );
 
-  ipcMain.handle(
+  rpc(
     "agentSession:unbind",
-    (event, employeeId: unknown, chatId: unknown): void => {
+    (ctx, employeeId: unknown, chatId: unknown): void => {
       unbind(
         assertInteger(employeeId, "employee id"),
         assertInteger(chatId, "chat id"),
-        event.sender,
+        ctx.subscriber,
       );
     },
   );
@@ -65,18 +65,16 @@ export function registerAgentSessionHandlers(): void {
   // Halt: interrupt every agent session belonging to a chat — its non-assistant
   // employee participants plus the assistant's root-chat orchestration session.
   // Returns the number of session states acted on.
-  ipcMain.handle(
-    "agentSession:interruptChat",
-    (_event, chatId: unknown): Promise<number> =>
-      interruptChat(assertInteger(chatId, "chat id")),
+  rpc("agentSession:interruptChat", (_ctx, chatId: unknown): Promise<number> =>
+    interruptChat(assertInteger(chatId, "chat id")),
   );
 
   // Interrupt the **current turn** of exactly one `(employee, chat)` session
   // (the agent-session view's button). Queued messages are kept and the session
   // stays alive. Returns whether a streaming run was actually interrupted.
-  ipcMain.handle(
+  rpc(
     "agentSession:interruptTurn",
-    (_event, employeeId: unknown, chatId: unknown): Promise<boolean> =>
+    (_ctx, employeeId: unknown, chatId: unknown): Promise<boolean> =>
       interruptTurn(
         assertInteger(employeeId, "employee id"),
         assertInteger(chatId, "chat id"),
@@ -86,9 +84,9 @@ export function registerAgentSessionHandlers(): void {
   // Cosmetic run state for the same view: labels (`Send` vs `Interject`) and the
   // interrupt chip's enabled state. Never used to route a message — `deliver()`
   // re-checks the live session.
-  ipcMain.handle(
+  rpc(
     "agentSession:state",
-    (_event, employeeId: unknown, chatId: unknown): AgentSessionRunState =>
+    (_ctx, employeeId: unknown, chatId: unknown): AgentSessionRunState =>
       readRunState(
         assertInteger(employeeId, "employee id"),
         assertInteger(chatId, "chat id"),
@@ -106,7 +104,7 @@ export function registerAgentSessionHandlers(): void {
    * failure (those surface as `error` events on the bound windows), so a
    * rejection here only ever means the request itself was invalid.
    */
-  ipcMain.handle(
+  rpc(
     "agentSession:send",
     async (
       _event,
@@ -170,7 +168,7 @@ export function registerAgentSessionHandlers(): void {
    * and a text that is no longer pending cannot either (`gone`). Only invalid
    * parameters throw, mirroring `agentSession:send`.
    */
-  ipcMain.handle(
+  rpc(
     "agentSession:revokeSteer",
     async (
       _event,

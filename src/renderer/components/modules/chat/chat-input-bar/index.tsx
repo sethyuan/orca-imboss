@@ -365,17 +365,18 @@ export function ChatInputBar({
 
   const addFiles = (files: readonly File[] | null): void => {
     if (!files || files.length === 0) return;
-    addEntries(
+    void addEntries(
       Array.from(files).map((file) => ({ file, kind: "file" as const })),
     );
   };
 
-  const addEntries = (entries: readonly FileEntry[]): void => {
+  const addEntries = async (entries: readonly FileEntry[]): Promise<void> => {
     if (entries.length === 0) return;
     setNotice(null);
-    const { items, failedFolders } = pendingFromEntries(
+    const { items, failedFolders } = await pendingFromEntries(
       entries,
       capCount(entries.length),
+      chatId,
     );
     if (failedFolders > 0) {
       setNotice(
@@ -423,7 +424,13 @@ export function ChatInputBar({
       // A file that already lives on disk keeps its own path; a clipboard-only
       // one is persisted first (the shared helper owns that rule).
       if (imb.files.getPath(file)) {
-        next.push(toPendingAttachment(file, fileAttachment(file)));
+        try {
+          next.push(
+            toPendingAttachment(file, await fileAttachment(file, chatId)),
+          );
+        } catch {
+          failed += 1;
+        }
         continue;
       }
       // Reject oversized payloads before reading their bytes into memory.
@@ -465,7 +472,7 @@ export function ChatInputBar({
   // Folders dropped from the OS are attached by path (kind = "folder"); the
   // shared helper tells them apart from files via Chromium's entry API.
   const addDropped = (dataTransfer: DataTransfer): void => {
-    addEntries(dropEntries(dataTransfer));
+    void addEntries(dropEntries(dataTransfer));
   };
 
   const onDragOver = (event: React.DragEvent<HTMLDivElement>): void => {

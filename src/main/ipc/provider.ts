@@ -4,7 +4,8 @@ import type {
   ProviderModelsQuery,
   ProviderUpsert,
 } from "@shared/types";
-import { clipboard, ipcMain, shell, type WebContents } from "electron";
+import type { Subscriber } from "../rpc/types";
+import type { Binder } from "../rpc/types";
 import { listAvailableModels, refreshModelStore } from "../agent/model-runtime";
 import { reconcileCapabilityRefs } from "../capability-refs";
 import {
@@ -25,23 +26,24 @@ import {
 } from "../agent/providers";
 import { setSetting } from "../db/settings";
 import { getImageModelRef } from "../image-gen";
+import { getClipboard, getExternalOpener } from "../platform";
 import { assertString, parsePageQuery } from "./helpers";
 
 /** One in-flight subscription sign-in. A second click is rejected. */
 let activeLogin: {
   controller: AbortController;
-  sender: WebContents;
+  sender: Subscriber;
 } | null = null;
 
 // --- providers / skills ---
-export function registerProviderHandlers(): void {
-  ipcMain.handle("providers:list", () => listProviders());
+export function registerProviderHandlers(bind: Binder): void {
+  bind("providers:list", () => listProviders());
 
-  ipcMain.handle("providers:listPage", (_event, page: unknown) =>
+  bind("providers:listPage", (_ctx, page: unknown) =>
     listProvidersPage(parsePageQuery(page)),
   );
 
-  ipcMain.handle("providers:upsert", async (_event, input: ProviderUpsert) => {
+  bind("providers:upsert", async (_ctx, input: ProviderUpsert) => {
     // Persist the provider first, then refresh the app's model store so the
     // newly added/updated provider is immediately available. Best-effort:
     // a refresh failure is logged and never fails the save.
@@ -49,7 +51,7 @@ export function registerProviderHandlers(): void {
     await refreshModelStore(new AbortController().signal);
   });
 
-  ipcMain.handle("providers:remove", async (_event, id: unknown) => {
+  bind("providers:remove", async (_ctx, id: unknown) => {
     // Removal cascades into every stored reference to that provider: the
     // app-wide image model (cleared here, its own single trigger) and — via the
     // shared capability-reference sweep — employee `model_id`s plus the default
@@ -62,13 +64,13 @@ export function registerProviderHandlers(): void {
     notifyEmployeesChanged(report.employeeIds);
   });
 
-  ipcMain.handle("providers:listModels", (_event, input: unknown) =>
+  bind("providers:listModels", (_ctx, input: unknown) =>
     listModels(input as ProviderModelsQuery),
   );
 
   // Full usable-model list from the shared ModelRuntime (built-in + custom,
   // auth-configured only) — backs the default-model / employee model selects.
-  ipcMain.handle("models:list", () => {
+  bind("models:list", () => {
     // Read-path self-heal for model references (employee `model_id` + the
     // app-wide default model) and, in the same pass, for capability refs: a
     // provider or server removed outside the app is repaired the next time the
@@ -77,16 +79,16 @@ export function registerProviderHandlers(): void {
     return listAvailableModels();
   });
 
-  ipcMain.handle("providers:login", async (event, id: unknown) => {
+  bind("providers:login", async (ctx, id: unknown) => {
     if (activeLogin) {
       throw new Error("A sign-in is already in progress.");
     }
     const providerId = assertString(id, "provider id");
     const controller = new AbortController();
-    const sender = event.sender;
+    const sender = ctx.subscriber;
     activeLogin = { controller, sender };
-    const onGone = (): void => controller.abort();
-    sender.once("destroyed", onGone);
+    // A caller that goes away must not leave a sign-in running forever.
+    const offGone = sender.onClose(() => controller.abort());
     try {
       await loginProviderSubscription(
         providerId,
@@ -95,23 +97,23 @@ export function registerProviderHandlers(): void {
       );
       await refreshModelStore(controller.signal);
     } finally {
-      sender.removeListener("destroyed", onGone);
+      offGone();
       if (activeLogin?.controller === controller) activeLogin = null;
     }
   });
 
-  ipcMain.handle("providers:cancelLogin", () => {
+  bind("providers:cancelLogin", () => {
     activeLogin?.controller.abort();
   });
 
-  ipcMain.handle("providers:submitLogin", (_event, value: unknown) => {
+  bind("providers:submitLogin", (_ctx, value: unknown) => {
     submitLoginCode(assertString(value, "authorization code"));
   });
 
-  ipcMain.handle("providers:copyKey", async (_event, id: unknown) => {
+  bind("providers:copyKey", async (_ctx, id: unknown) => {
     const key = await revealProviderKey(assertString(id, "provider id"));
     if (!key) throw new Error("No API key set for this provider.");
-    clipboard.writeText(key);
+    getClipboard().writeText(key);
     return true;
   });
 }
@@ -134,13 +136,13 @@ function clearImageModelIfProviderRemoved(providerId: string): void {
 
 /** Pi already requires https. Re-check before handing the URL to the OS. */
 function deliverLoginEvent(
-  sender: WebContents,
+  sender: Subscriber,
   payload: ProviderLoginEvent,
 ): void {
-  if (!sender.isDestroyed()) sender.send("providers:loginEvent", payload);
+  if (sender.alive) sender.send("providers:loginEvent", payload);
   const url = loginUrl(payload);
   if (!url || !isHttpsUrl(url)) return;
-  void shell.openExternal(url);
+  getExternalOpener().openExternal(url);
 }
 
 function loginUrl(payload: ProviderLoginEvent): string | undefined {

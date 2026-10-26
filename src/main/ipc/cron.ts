@@ -1,8 +1,8 @@
 import type { CronJobInfo } from "@shared/types";
-import { ipcMain } from "electron";
 import { removeJob, runNow, setEnabled, updateJob } from "../cron";
 import * as dbCron from "../db/cron";
 import { assertInteger, assertString } from "./helpers";
+import type { Binder } from "../rpc/types";
 
 /** Assert a non-empty (trimmed) string within an optional max length. */
 function assertNonEmptyString(
@@ -20,10 +20,10 @@ function assertNonEmptyString(
   return safe;
 }
 
-export function registerCronHandlers(): void {
+export function registerCronHandlers(bind: Binder): void {
   // List an employee's jobs (assistant id 0 included) with chat titles resolved
   // for the Employees detail pane.
-  ipcMain.handle("cron:listByEmployee", (_event, employeeId: unknown) => {
+  bind("cron:listByEmployee", (_ctx, employeeId: unknown) => {
     const safeId = assertInteger(employeeId, "employee id");
     if (safeId < 0) throw new Error("employee id must not be negative.");
     return dbCron.listByEmployee(safeId);
@@ -31,12 +31,12 @@ export function registerCronHandlers(): void {
 
   // Every job across all employees (flat, creation order), for the unified
   // Scheduled tasks module.
-  ipcMain.handle("cron:listAll", (): CronJobInfo[] => dbCron.listAll());
+  bind("cron:listAll", (): CronJobInfo[] => dbCron.listAll());
 
   // Edit the editable fields only (schedule + content); the composite id and
   // therefore chat/employee are immutable. Revalidates the schedule (throws on
   // an invalid expression) and returns the updated row, or null when gone.
-  ipcMain.handle(
+  bind(
     "cron:update",
     (
       _event,
@@ -56,9 +56,9 @@ export function registerCronHandlers(): void {
   );
 
   // Enable/disable a job: persists the flag and starts/stops the live handle.
-  ipcMain.handle(
+  bind(
     "cron:setEnabled",
-    (_event, id: unknown, enabled: unknown): CronJobInfo | null => {
+    (_ctx, id: unknown, enabled: unknown): CronJobInfo | null => {
       const safeId = assertNonEmptyString(id, "cron job id", 256);
       if (typeof enabled !== "boolean") {
         throw new Error("enabled must be a boolean.");
@@ -69,17 +69,14 @@ export function registerCronHandlers(): void {
 
   // Manual "Run now": queue the job's content onto its (employee, chat) session
   // immediately. Does not touch the schedule timestamps.
-  ipcMain.handle(
-    "cron:runNow",
-    async (_event, id: unknown): Promise<boolean> => {
-      const safeId = assertNonEmptyString(id, "cron job id", 256);
-      return runNow(safeId);
-    },
-  );
+  bind("cron:runNow", async (_ctx, id: unknown): Promise<boolean> => {
+    const safeId = assertNonEmptyString(id, "cron job id", 256);
+    return runNow(safeId);
+  });
 
   // Remove a job: stops the live Cron handle and deletes the DB row. Returns
   // false when the job does not exist (idempotent from the renderer's view).
-  ipcMain.handle("cron:remove", (_event, id: unknown): boolean => {
+  bind("cron:remove", (_ctx, id: unknown): boolean => {
     const safeId = assertString(id, "cron job id");
     if (safeId.trim().length === 0) {
       throw new Error("cron job id must not be empty.");

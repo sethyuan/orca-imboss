@@ -4,6 +4,7 @@ import icon from "../../resources/icon.png?asset";
 import trayColorIcon from "../../resources/tray/tray.png?asset";
 import trayTemplateIcon from "../../resources/tray/trayTemplate.png?asset";
 import { t } from "@shared/l10n";
+import { getRemoteIncompatibility, isRemoteMode } from "./app-mode";
 import { getResolvedLocale } from "./locale";
 import {
   DEFAULT_WINDOW_HEIGHT,
@@ -113,7 +114,18 @@ export function createMainWindow(): BrowserWindow {
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       spellcheck: false,
-      additionalArguments: [`--locale=${locale}`],
+      // `--remote-mode` is what the preload turns into `imb.remote.enabled`: the
+      // renderer decides between "a path the agent can read" and "upload the
+      // bytes" from it.
+      additionalArguments: [
+        `--locale=${locale}`,
+        ...(isRemoteMode() ? ["--remote-mode=1"] : []),
+        ...(getRemoteIncompatibility() !== null
+          ? [
+              `--remote-incompatible=${getRemoteIncompatibility()?.shell}:${getRemoteIncompatibility()?.backend}`,
+            ]
+          : []),
+      ],
     },
   });
 

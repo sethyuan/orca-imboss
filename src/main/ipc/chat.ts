@@ -1,7 +1,6 @@
 import { ASSISTANT_ID } from "@shared/constants/employees";
 import { MAX_TAGS_PER_CHAT, normalizeTag } from "@shared/constants/tags";
 import type { ChatParticipantUpdate } from "@shared/types";
-import { ipcMain } from "electron";
 import { deliver, disposeForChat } from "../agent/session-queue";
 import { deletePastedFilesForChat } from "../attachments";
 import { integrationManager } from "../integrations";
@@ -18,14 +17,15 @@ import {
   validateAttachmentsPayload,
 } from "./attachment-prompt";
 import { assertInteger, assertString, parsePageQuery } from "./helpers";
+import type { Binder } from "../rpc/types";
 
-export function registerChatHandlers(): void {
-  ipcMain.handle("chats:list", () => dbChats.listChats());
+export function registerChatHandlers(bind: Binder): void {
+  bind("chats:list", () => dbChats.listChats());
 
-  ipcMain.handle("chats:summaries", () => dbChats.listChatSummaries());
+  bind("chats:summaries", () => dbChats.listChatSummaries());
 
   // Pin/unpin one conversation (sorts above the rest of the list).
-  ipcMain.handle("chats:setPinned", (_event, id: unknown, pinned: unknown) => {
+  bind("chats:setPinned", (_ctx, id: unknown, pinned: unknown) => {
     const safeId = assertInteger(id, "chat id");
     const updated = dbChats.setPinned(safeId, pinned === true);
     if (updated !== null) {
@@ -36,7 +36,7 @@ export function registerChatHandlers(): void {
 
   // Mute/unmute one conversation (silences its notifications; the unread
   // counter and the list order are unaffected).
-  ipcMain.handle("chats:setMuted", (_event, id: unknown, muted: unknown) => {
+  bind("chats:setMuted", (_ctx, id: unknown, muted: unknown) => {
     const safeId = assertInteger(id, "chat id");
     const updated = dbChats.setMuted(safeId, muted === true);
     if (updated !== null) {
@@ -45,44 +45,41 @@ export function registerChatHandlers(): void {
     return updated;
   });
 
-  ipcMain.handle("chats:summariesPage", (_event, page: unknown) =>
+  bind("chats:summariesPage", (_ctx, page: unknown) =>
     dbChats.listChatSummariesPage(parsePageQuery(page)),
   );
 
   // Single chat summary (live per-chat refresh by the renderer).
-  ipcMain.handle("chats:summary", (_event, id: unknown) =>
+  bind("chats:summary", (_ctx, id: unknown) =>
     dbChats.getChatSummary(assertInteger(id, "chat id")),
   );
 
   // Root (user) chat of a chat, resolved by walking `from_chat_id` upward.
   // Used by the session view to redirect the assistant from a task group chat
   // to the root-chat session it actually runs in.
-  ipcMain.handle("chats:rootId", (_event, id: unknown) =>
+  bind("chats:rootId", (_ctx, id: unknown) =>
     dbChats.getRootChatId(assertInteger(id, "chat id")),
   );
 
-  ipcMain.handle("chats:markRead", (_event, id: unknown) => {
+  bind("chats:markRead", (_ctx, id: unknown) => {
     const safeId = assertInteger(id, "chat id");
     dbChats.markRead(safeId);
     // Keep the renderer unread mirror in sync (cleared on open).
     sendToRenderer("chats:unreadChanged", { chatId: safeId, unread: 0 });
   });
 
-  ipcMain.handle(
-    "chats:create",
-    (_event, title: unknown, participants: unknown[]) => {
-      if (!Array.isArray(participants)) {
-        throw new Error("participants must be an array.");
-      }
-      const ids = participants.map((p) => assertInteger(p, "participant id"));
-      // The assistant is always a participant of a root (assistant ↔ user)
-      // chat so it can post replies with `imb_send_message`.
-      const withAssistant = [...new Set([ASSISTANT_ID, ...ids])];
-      return dbChats.createChat(assertString(title, "title"), withAssistant);
-    },
-  );
+  bind("chats:create", (_ctx, title: unknown, participants: unknown[]) => {
+    if (!Array.isArray(participants)) {
+      throw new Error("participants must be an array.");
+    }
+    const ids = participants.map((p) => assertInteger(p, "participant id"));
+    // The assistant is always a participant of a root (assistant ↔ user)
+    // chat so it can post replies with `imb_send_message`.
+    const withAssistant = [...new Set([ASSISTANT_ID, ...ids])];
+    return dbChats.createChat(assertString(title, "title"), withAssistant);
+  });
 
-  ipcMain.handle("chats:update", (_event, id: unknown, title: unknown) => {
+  bind("chats:update", (_ctx, id: unknown, title: unknown) => {
     const safeId = assertInteger(id, "chat id");
     const updated = dbChats.updateChatTitle(
       safeId,
@@ -96,9 +93,9 @@ export function registerChatHandlers(): void {
     return updated;
   });
 
-  ipcMain.handle(
+  bind(
     "chats:updateParticipants",
-    (_event, id: unknown, changes: ChatParticipantUpdate) => {
+    (_ctx, id: unknown, changes: ChatParticipantUpdate) => {
       const safeId = assertInteger(id, "chat id");
       const updated = dbChats.updateChatParticipants(safeId, changes);
       if (updated !== null) {
@@ -113,7 +110,7 @@ export function registerChatHandlers(): void {
 
   // Replace one conversation's tags (normalized, deduped, capped). Broadcasts
   // `chats:changed` so every window's cached summary picks the new tags up.
-  ipcMain.handle("chats:setTags", (_event, id: unknown, tags: unknown) => {
+  bind("chats:setTags", (_ctx, id: unknown, tags: unknown) => {
     const safeId = assertInteger(id, "chat id");
     if (!Array.isArray(tags)) throw new Error("tags must be an array.");
     // Tags live on root (user) conversations only; task group chats roll up to
@@ -141,7 +138,7 @@ export function registerChatHandlers(): void {
   // capped). Used by the composer's "Common projects" action so the renderer
   // never has to read-modify-write `chats:setTags`. Root (user) conversations
   // only, mirroring `chats:setTags`.
-  ipcMain.handle("chats:addTags", (_event, id: unknown, tags: unknown) => {
+  bind("chats:addTags", (_ctx, id: unknown, tags: unknown) => {
     const safeId = assertInteger(id, "chat id");
     if (!Array.isArray(tags)) throw new Error("tags must be an array.");
     const chat = dbChats.getChat(safeId);
@@ -161,7 +158,7 @@ export function registerChatHandlers(): void {
     return dbChats.getChatSummary(safeId);
   });
 
-  ipcMain.handle("chats:delete", async (_event, id: unknown) => {
+  bind("chats:delete", async (_ctx, id: unknown) => {
     const safeId = assertInteger(id, "chat id");
     // Chats spawned from this one (`from_chat_id`) go with it, and those may
     // spawn further chats, so delete the whole descendant tree.
@@ -196,9 +193,9 @@ export function registerChatHandlers(): void {
    * Chat pipeline: append the user message → run the assistant's agent turn
    * (serialized per session queue).
    */
-  ipcMain.handle(
+  bind(
     "chat:send",
-    async (_event, chatId: unknown, content: unknown, attachments: unknown) => {
+    async (_ctx, chatId: unknown, content: unknown, attachments: unknown) => {
       const safeChatId = assertInteger(chatId, "chat id");
       const safeContent = assertString(content, "content");
       const safeAttachments = validateAttachmentsPayload(attachments);

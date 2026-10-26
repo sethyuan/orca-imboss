@@ -1,24 +1,25 @@
 import { READ_CHAT_PROMPT } from "@shared/constants/prompts";
-import { ipcMain, shell } from "electron";
 import { existsSync } from "fs";
 import { isAbsolute } from "path";
 import { wakeAgent } from "../agent/session-queue";
 import * as dbMessages from "../db/messages";
 import { agentPrompt, validateAttachmentsPayload } from "./attachment-prompt";
+import { getRevealer } from "../platform";
 import { assertInteger, assertObject, assertString } from "./helpers";
+import type { Binder } from "../rpc/types";
 
-export function registerMessageHandlers(): void {
-  ipcMain.handle("messages:list", (_event, chatId: unknown) =>
+export function registerMessageHandlers(bind: Binder): void {
+  bind("messages:list", (_ctx, chatId: unknown) =>
     dbMessages.listMessages(assertInteger(chatId, "chat id")),
   );
 
-  ipcMain.handle("messages:search", (_event, query: unknown) =>
+  bind("messages:search", (_ctx, query: unknown) =>
     dbMessages.searchMessages(assertString(query, "query")),
   );
 
-  ipcMain.handle(
+  bind(
     "messages:append",
-    (_event, chatId: unknown, senderEmployeeId: unknown, content: unknown) => {
+    (_ctx, chatId: unknown, senderEmployeeId: unknown, content: unknown) => {
       const safeChatId = assertInteger(chatId, "chat id");
       const safeSender =
         senderEmployeeId === null
@@ -40,7 +41,7 @@ export function registerMessageHandlers(): void {
   // answers JSON: the JSON is parsed by the card, the preview and the search
   // index, and duplicating binary metadata there would only create a second
   // source of truth. Field-level validation stays in the messages service.
-  ipcMain.handle(
+  bind(
     "messages:answer",
     (
       _event,
@@ -92,12 +93,33 @@ export function registerMessageHandlers(): void {
     },
   );
 
+  /**
+   * The trusted record of one attachment (name/type/path/kind).
+   *
+   * Read-only and bounded exactly like `messages:revealAttachment`: the renderer
+   * supplies a message id + index, never a path. A remote shell needs it because
+   * "show me this file" becomes "download it here, then show it": the path is on
+   * the backend, and only the backend may resolve it.
+   */
+  bind(
+    "messages:attachmentFile",
+    (_ctx, messageId: unknown, index: unknown) => {
+      const attachment = resolveAttachment(messageId, index);
+      return {
+        name: attachment.name,
+        type: attachment.type,
+        path: attachment.path ?? null,
+        kind: attachment.kind ?? "file",
+      };
+    },
+  );
+
   // Reveal a message attachment in the OS file manager. The renderer only
   // passes the message id + index; the path is read from the trusted stored
   // record so a compromised renderer can never reveal arbitrary paths.
-  ipcMain.handle(
+  bind(
     "messages:revealAttachment",
-    async (_event, messageId: unknown, index: unknown) => {
+    async (_ctx, messageId: unknown, index: unknown) => {
       const attachment = resolveAttachment(messageId, index);
       const path = attachment.path;
       if (!path) throw new Error("Attachment location is unavailable.");
@@ -110,11 +132,11 @@ export function registerMessageHandlers(): void {
       if (attachment.kind === "folder") {
         // Open the folder itself; `showItemInFolder` would only select it in
         // its parent. `openPath` resolves to an error string ("" on success).
-        const error = await shell.openPath(path);
+        const error = await getRevealer().openPath(path);
         if (error) throw new Error(error);
         return;
       }
-      shell.showItemInFolder(path);
+      getRevealer().showItemInFolder(path);
     },
   );
 }

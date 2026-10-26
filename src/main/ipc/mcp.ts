@@ -1,5 +1,4 @@
 import type { CapabilityUnlinkResult, McpServerInput } from "@shared/types";
-import { ipcMain } from "electron";
 import {
   reconcileCapabilityRefs,
   remapEmployeeMcpRef,
@@ -7,6 +6,7 @@ import {
 import { notifyEmployeesChanged } from "../employee-events";
 import * as mcpStore from "../mcp-store";
 import { assertString } from "./helpers";
+import type { Binder } from "../rpc/types";
 
 /**
  * MCP server CRUD over the app's `~/.imboss/agent/mcp.json`. Servers are keyed
@@ -27,41 +27,35 @@ import { assertString } from "./helpers";
  * its `mcp-management` skill) are repaired by the read-path sweep instead —
  * see `capability-refs.ts`.
  */
-export function registerMcpHandlers(): void {
-  ipcMain.handle("mcp:list", () => mcpStore.readMcpServers());
+export function registerMcpHandlers(bind: Binder): void {
+  bind("mcp:list", () => mcpStore.readMcpServers());
 
-  ipcMain.handle("mcp:create", (_event, input: McpServerInput) =>
+  bind("mcp:create", (_ctx, input: McpServerInput) =>
     mcpStore.createMcpServer(input),
   );
 
-  ipcMain.handle(
-    "mcp:update",
-    (_event, name: unknown, input: McpServerInput) => {
-      const currentName = assertString(name, "mcp name");
-      const updated = mcpStore.updateMcpServer(currentName, input);
-      if (updated && updated.name !== currentName) {
-        const remapped = remapEmployeeMcpRef(currentName, updated.name);
-        notifyEmployeesChanged(remapped);
-      }
-      return updated;
-    },
-  );
+  bind("mcp:update", (_ctx, name: unknown, input: McpServerInput) => {
+    const currentName = assertString(name, "mcp name");
+    const updated = mcpStore.updateMcpServer(currentName, input);
+    if (updated && updated.name !== currentName) {
+      const remapped = remapEmployeeMcpRef(currentName, updated.name);
+      notifyEmployeesChanged(remapped);
+    }
+    return updated;
+  });
 
-  ipcMain.handle(
-    "mcp:delete",
-    (_event, name: unknown): CapabilityUnlinkResult => {
-      const safeName = assertString(name, "mcp name");
-      const removed = mcpStore.deleteMcpServer(safeName);
-      if (!removed) return { removed: false, unlinkedEmployeeIds: [] };
-      // Scoped sweep: only this name can have become dangling, so unrelated
-      // references are not touched. `force` because a read-path sweep may have
-      // run a moment ago and been throttled.
-      const report = reconcileCapabilityRefs({
-        mcp: [safeName],
-        force: true,
-      });
-      notifyEmployeesChanged(report.employeeIds);
-      return { removed: true, unlinkedEmployeeIds: report.employeeIds };
-    },
-  );
+  bind("mcp:delete", (_ctx, name: unknown): CapabilityUnlinkResult => {
+    const safeName = assertString(name, "mcp name");
+    const removed = mcpStore.deleteMcpServer(safeName);
+    if (!removed) return { removed: false, unlinkedEmployeeIds: [] };
+    // Scoped sweep: only this name can have become dangling, so unrelated
+    // references are not touched. `force` because a read-path sweep may have
+    // run a moment ago and been throttled.
+    const report = reconcileCapabilityRefs({
+      mcp: [safeName],
+      force: true,
+    });
+    notifyEmployeesChanged(report.employeeIds);
+    return { removed: true, unlinkedEmployeeIds: report.employeeIds };
+  });
 }

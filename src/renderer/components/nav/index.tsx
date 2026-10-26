@@ -174,7 +174,12 @@ export function Nav(): React.JSX.Element {
 
   const main = NAV_ITEMS.filter((i) => i.section === "main");
   const bottom = NAV_ITEMS.filter((i) => i.section === "bottom");
-  const miniApps = data.miniapps.items;
+  // Mini Apps are local web servers on the *backend*: their iframe entry is
+  // `127.0.0.1:<port>`, which a remote desktop can never reach. The whole section
+  // is hidden in remote mode rather than showing dead tiles (see
+  // `.pi/facts/grpc-remote-backend-research.md` §6.4 for the alternatives we
+  // deliberately did not build).
+  const miniApps = appStore.remote.enabled ? [] : data.miniapps.items;
   const miniAppKeys = miniApps.map((app) => `miniapp:${app.id}`);
   const openedKeys = openedItems.map(openedItemKey);
 

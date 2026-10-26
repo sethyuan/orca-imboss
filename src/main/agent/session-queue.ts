@@ -8,7 +8,7 @@ import type {
   AgentSessionSteerPhase,
   AgentSessionSteerRevokeResult,
 } from "@shared/types";
-import type { WebContents } from "electron";
+import type { Subscriber } from "../rpc/types";
 import * as dbChats from "../db/chats";
 import * as dbMessages from "../db/messages";
 import { errorEvent, sendEventTo, toStreamEvent } from "./agent-events";
@@ -80,7 +80,7 @@ interface QueueState {
   queue: string[];
   idleTimer?: NodeJS.Timeout;
   /** Windows that bound this key (receive its streamed events). */
-  boundSenders: Set<WebContents>;
+  boundSenders: Set<Subscriber>;
   /**
    * Interjections this app successfully handed to the **current** run, in
    * hand-over order. Reset at the start of every run, so it only ever describes
@@ -529,18 +529,18 @@ export async function wakeAgent(
 export function bind(
   employeeId: number,
   chatId: number,
-  sender: WebContents,
+  sender: Subscriber,
 ): void {
   const state = getOrCreateState(employeeId, chatId);
   clearIdleTimer(state);
   sendLiveSeed(state, sender);
   if (state.boundSenders.has(sender)) return;
   state.boundSenders.add(sender);
-  const onDestroyed = (): void => {
-    sender.removeListener("destroyed", onDestroyed);
+  // `onClose` fires once; the returned disposer is unused on purpose (the
+  // registration is as short-lived as the subscriber).
+  sender.onClose(() => {
     unbind(employeeId, chatId, sender);
-  };
-  sender.once("destroyed", onDestroyed);
+  });
 }
 
 /**
@@ -551,7 +551,7 @@ export function bind(
  * seed degrades to the previous behaviour (the tail arrives with the next
  * delta), it must never break `bind`.
  */
-function sendLiveSeed(state: QueueState, sender: WebContents): void {
+function sendLiveSeed(state: QueueState, sender: Subscriber): void {
   const session = state.session;
   if (!state.busy || state.disposed || !session?.isStreaming) return;
   if (state.lastForwardedWasMessageEnd) return;
@@ -578,7 +578,7 @@ function sendLiveSeed(state: QueueState, sender: WebContents): void {
 export function unbind(
   employeeId: number,
   chatId: number,
-  sender: WebContents,
+  sender: Subscriber,
 ): void {
   const key = keyFor(employeeId, chatId);
   const state = states.get(key);

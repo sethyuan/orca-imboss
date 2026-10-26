@@ -10,7 +10,7 @@ import { Modal } from "../../../modal";
 import "./index.css";
 
 export function SettingsAbout(): React.JSX.Element {
-  const { updater } = useApp();
+  const { updater, remote } = useApp();
   const [version, setVersion] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [restartOpen, setRestartOpen] = useState(false);
@@ -139,6 +139,13 @@ export function SettingsAbout(): React.JSX.Element {
     <>
       <DetailHead eyebrow="About" title="imboss" sub={t("Version info")} />
       <DetailBody>
+        {remote.enabled ? (
+          <p className="imb-about-note">
+            {t(
+              "Running against a remote backend: conversations, agents, cron and integrations live on the server, and files are fetched on demand. Mini Apps need a web server on this machine, so they are hidden in remote mode.",
+            )}
+          </p>
+        ) : null}
         <div className="imb-about-brand">
           <BrandLogo className="imb-about-logo" />
           <span className="imb-about-name">imboss</span>
@@ -148,6 +155,19 @@ export function SettingsAbout(): React.JSX.Element {
             <span className="imb-k">{t("App name")}</span>
             <span className="imb-v">imboss</span>
           </div>
+          {remote.enabled ? (
+            <div className="imb-kv">
+              <span className="imb-k">{t("Backend")}</span>
+              <span className="imb-v">
+                {remote.incompatibility === null
+                  ? t("Remote (compatible)")
+                  : t("Remote (API v${shell} ≠ v${backend})", {
+                      shell: String(remote.incompatibility.shell),
+                      backend: String(remote.incompatibility.backend),
+                    })}
+              </span>
+            </div>
+          ) : null}
           <div className="imb-kv">
             <span className="imb-k">{t("Version")}</span>
             <span className="imb-v imb-about-version-cell">

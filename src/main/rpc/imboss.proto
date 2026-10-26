@@ -1,0 +1,134 @@
+// imboss remote backend — gRPC contract (v1).
+//
+// One implementation per IPC channel is shared by both transports (see
+// `.pi/facts/grpc-remote-backend-research.md` §3): the channel name *is* the RPC
+// method name and the positional argument array *is* the payload. Keeping them
+// identical is what lets `src/preload` and the whole renderer stay untouched.
+//
+// The JSON payloads are the app's own DTOs from `src/shared/types`; validation
+// happens server-side in the channel handler (the same `assert*` helpers IPC
+// uses), so this file only fixes the envelope, not every DTO.
+
+syntax = "proto3";
+
+package imboss.v1;
+
+service Imboss {
+  // Handshake: version + channel table + auth check. Call it before anything
+  // else; an incompatible `api_version` means "upgrade one side".
+  rpc Info(InfoRequest) returns (InfoReply);
+
+  // Every request/response channel (`"messages:append"`, …).
+  rpc Invoke(InvokeRequest) returns (InvokeReply);
+
+  // Main → client event channels (`chats:changed`, `agentSession:event`, …).
+  rpc Subscribe(SubscribeRequest) returns (stream Event);
+
+  // Client → backend bytes, then one channel call with those bytes appended as
+  // its last positional argument (`files:uploadAttachment`, …). The reply is that
+  // call's result (e.g. a `MessageAttachment` carrying the backend path).
+  rpc Upload(stream UploadChunk) returns (UploadReply);
+
+  // Backend → client bytes for one file (images for `imb-file:`, attachments the
+  // user explicitly opens). Reads are restricted to the data folder plus
+  // previewable images — see `files-guard.ts`.
+  rpc Download(DownloadRequest) returns (stream DownloadChunk);
+}
+
+message InfoRequest {}
+
+message InfoReply {
+  // Version of the backend package (`package.json`).
+  string app_version = 1;
+  // Bumped whenever a channel is added/removed/changed in an incompatible way.
+  int32 api_version = 2;
+  // Absolute path of the backend's data folder (for display only).
+  string data_root = 3;
+  // Channel table this backend serves; the client refuses unknown names.
+  repeated string channels = 4;
+  // True while only one client may be connected (v1 behaviour).
+  bool single_client = 5;
+}
+
+message InvokeRequest {
+  // Exact IPC channel name, e.g. "messages:append".
+  string method = 1;
+  // JSON array of the positional arguments (`[]` when the channel takes none).
+  bytes args_json = 2;
+  // Caller-side deadline hint; 0 = the server default for this method.
+  int64 timeout_ms = 3;
+}
+
+message InvokeReply {
+  // JSON of the handler's return value.
+  bytes result_json = 1;
+  // Distinguishes "the handler returned undefined" from "returned null".
+  bool has_result = 2;
+}
+
+message SubscribeRequest {
+  // Event channels the client wants. Empty = all of them.
+  repeated string channels = 1;
+  // Last `Event.seq` the client already applied. The backend replays what it
+  // still has buffered after that point, so a short reconnect loses nothing;
+  // when the gap is too large it answers with a "server:resync" event instead
+  // and the client refetches its snapshots. 0 = no history to resume.
+  int64 resume_from_seq = 2;
+}
+
+// One pushed event. Ordering within a stream is guaranteed by HTTP/2; `seq` is
+// what lets the client notice a gap (dropped backpressure, server restart) and
+// what makes a reconnect resumable.
+message UploadMeta {
+  // Channel that receives the bytes, e.g. "files:uploadAttachment".
+  string channel = 1;
+  // JSON array of that channel's arguments *without* the byte payload, which is
+  // appended as the last positional argument on completion.
+  bytes args_json = 2;
+  // Declared size, checked against the backend's limit before any byte is kept.
+  int64 total_bytes = 3;
+  // Client-generated; also names the `.partial` file so a retry replaces it.
+  string upload_id = 4;
+  // Original file name (display name + stored file name suffix).
+  string file_name = 5;
+  // When true the backend streams the bytes into a temp file and appends that
+  // **path** (a string) as the channel's last argument instead of a Buffer. Used
+  // for imports that may be far larger than the memory cap (backup/employee
+  // archives): the file never has to fit in RAM on either side.
+  bool to_temp_file = 6;
+}
+
+message UploadChunk {
+  oneof part {
+    UploadMeta meta = 1;
+    bytes data = 2;
+  }
+}
+
+message UploadReply {
+  bytes result_json = 1;
+  bool has_result = 2;
+}
+
+message DownloadRequest {
+  string path = 1;
+  // Cache key (file mtime); echoed but not interpreted.
+  string version = 2;
+}
+
+message DownloadChunk {
+  bytes data = 1;
+}
+
+message Event {
+  // Event channel name, e.g. "chats:changed".
+  string channel = 1;
+  // JSON payload (absent for signal-only channels such as "skills:changed").
+  bytes payload_json = 2;
+  bool has_payload = 3;
+  // Monotonic per client, contiguous unless the backend had to drop events.
+  int64 seq = 4;
+  // Events the backend discarded inside this window (backpressure). Non-zero
+  // means "your view may be incomplete": refetch the snapshots.
+  int32 dropped = 5;
+}

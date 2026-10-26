@@ -1,20 +1,20 @@
-import { ipcMain } from "electron";
 import { listMiniApps, openMiniApp, setMiniAppOrder } from "../mini-apps";
 import { assertString } from "./helpers";
+import type { Binder } from "../rpc/types";
 
 /**
  * Mini Apps IPC. Mirrors `src/main/mini-apps.ts`: `list`/`setOrder` are pure
  * filesystem operations; `open` also lazily starts the app's supervised server
  * and resolves only once the entry URL is reachable.
  */
-export function registerMiniAppHandlers(): void {
-  ipcMain.handle("miniapps:list", () => listMiniApps());
+export function registerMiniAppHandlers(bind: Binder): void {
+  bind("miniapps:list", () => listMiniApps());
 
-  ipcMain.handle("miniapps:setOrder", (_event, ids: unknown) =>
+  bind("miniapps:setOrder", (_ctx, ids: unknown) =>
     setMiniAppOrder(assertIdList(ids)),
   );
 
-  ipcMain.handle("miniapps:open", (_event, id: unknown) =>
+  bind("miniapps:open", (_ctx, id: unknown) =>
     openMiniApp(assertString(id, "mini app id")),
   );
 }

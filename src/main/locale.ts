@@ -1,17 +1,24 @@
+import { DEFAULT_LOCALE } from "@shared/constants/locales";
 import { SettingKeys } from "@shared/constants/settings";
 import { setupL10N } from "@shared/l10n";
 import zhCN from "@shared/translations/zhCN.json";
-import { app } from "electron";
-import { getSetting } from "./db/settings";
+import { getAppInfo } from "./platform";
+import { getShellSetting } from "./settings-shell";
 
 const TRANSLATIONS = { "zh-CN": zhCN };
 
+/**
+ * Resolved UI locale.
+ *
+ * Priority: the stored setting (the user's explicit choice, which is data and
+ * therefore lives with the database) → the host's own locale → the app default.
+ * The database check matters for the remote desktop shell, which never opens the
+ * data folder (it belongs to the backend) and must still start localized.
+ */
 export function getResolvedLocale(): string {
-  const stored = getSetting(SettingKeys.Locale);
-  if (stored) {
-    return stored;
-  }
-  return app.getLocale();
+  const stored = getShellSetting(SettingKeys.Locale);
+  if (stored) return stored;
+  return getAppInfo().getLocale() ?? DEFAULT_LOCALE;
 }
 
 /**

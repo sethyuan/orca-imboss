@@ -1,0 +1,113 @@
+/* Remote folder picker. Same visual vocabulary as the other modals: material
+   background from the Modal shell, list rows like the module list panes. */
+
+.imb-path-browser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-3);
+  min-height: 320px;
+}
+
+.imb-path-browser-roots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--imb-space-2);
+}
+
+.imb-path-browser-chip {
+  border: 1px solid var(--imb-border-subtle);
+  background: var(--imb-surface-raised);
+  color: var(--imb-fg);
+  border-radius: var(--imb-radius-pill);
+  padding: 2px var(--imb-space-3);
+  font-size: var(--imb-text-sm);
+  cursor: pointer;
+}
+
+.imb-path-browser-chip:hover {
+  background: var(--imb-surface-hover);
+}
+
+.imb-path-browser-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: var(--imb-text-sm);
+  color: var(--imb-muted);
+  row-gap: 2px;
+}
+
+.imb-path-browser-crumb button {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  color: var(--imb-link, var(--imb-fg));
+  cursor: pointer;
+  font: inherit;
+}
+
+.imb-path-browser-crumb button:hover {
+  text-decoration: underline;
+}
+
+.imb-path-browser-sep {
+  opacity: 0.5;
+  padding: 0 1px;
+}
+
+.imb-path-browser-list {
+  flex: 1;
+  min-height: 200px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--imb-border-subtle);
+  border-radius: var(--imb-radius-control);
+  background: var(--imb-surface);
+}
+
+.imb-path-browser-row {
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-2);
+  width: 100%;
+  padding: var(--imb-space-2) var(--imb-space-3);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--imb-fg);
+  font: inherit;
+}
+
+.imb-path-browser-row:hover {
+  background: var(--imb-surface-hover);
+}
+
+.imb-path-browser-row.is-parent {
+  color: var(--imb-muted);
+  border-bottom: 1px solid var(--imb-border-subtle);
+}
+
+.imb-path-browser-folder {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.imb-path-browser-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imb-path-browser-empty {
+  padding: var(--imb-space-4);
+  color: var(--imb-muted);
+  font-size: var(--imb-text-sm);
+  text-align: center;
+}
+
+.imb-path-browser-new {
+  display: flex;
+  gap: var(--imb-space-2);
+  align-items: center;
+}

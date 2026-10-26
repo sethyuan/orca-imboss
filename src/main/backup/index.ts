@@ -1,5 +1,4 @@
 import DB from "better-sqlite3";
-import { app } from "electron";
 import {
   existsSync,
   mkdirSync,
@@ -10,8 +9,8 @@ import {
   statSync,
   writeFileSync,
 } from "fs";
-import { homedir, tmpdir } from "os";
-import { join } from "path";
+import { tmpdir } from "os";
+import { dirname, join } from "path";
 import { t } from "@shared/l10n";
 import type {
   BackupInfo,
@@ -22,6 +21,7 @@ import type {
 } from "@shared/types";
 import { getDataRoot } from "../data-dir";
 import { getDB } from "../db";
+import { getAppInfo } from "../platform";
 import {
   BACKUP_EXTENSION,
   BACKUP_FORMAT,
@@ -42,14 +42,20 @@ import {
 
 export { BACKUP_EXTENSION, BACKUP_FORMAT, BACKUP_FORMAT_VERSION };
 
+/**
+ * Sibling paths of the data folder. Derived from `getDataRoot()` rather than a
+ * hardcoded `~/.imboss`, so a relocated data folder keeps its staging/marker next
+ * to itself (and two deployments with different `--data-root` never collide).
+ */
+
 /** Folder an archive is unpacked into, next to (never inside) the data folder. */
 export function getRestoreStagingDir(): string {
-  return join(homedir(), ".imboss.restore-staging");
+  return `${getDataRoot()}.restore-staging`;
 }
 
 /** Marker recording that a staged restore waits for the next launch. */
 export function getRestoreMarkerPath(): string {
-  return join(homedir(), ".imboss.restore-pending.json");
+  return `${getDataRoot()}.restore-pending.json`;
 }
 
 /** Name prefix of the data folders previous restores kept aside. */
@@ -91,7 +97,7 @@ export async function createBackup(options: {
     format: BACKUP_FORMAT,
     formatVersion: BACKUP_FORMAT_VERSION,
     schemaVersion: live.pragma("user_version", { simple: true }) as number,
-    appVersion: app.getVersion(),
+    appVersion: getAppInfo().getVersion(),
     createdAt: Date.now(),
     platform: process.platform,
     counts: {
@@ -158,7 +164,9 @@ export function stageRestore(path: string): StagedRestore {
     const schema = getDB().pragma("user_version", { simple: true }) as number;
     if (manifest.schemaVersion > schema) {
       throw new Error(
-        t("This backup comes from a newer version of imboss and cannot be restored."),
+        t(
+          "This backup comes from a newer version of imboss and cannot be restored.",
+        ),
       );
     }
     const staging = getRestoreStagingDir();
@@ -204,10 +212,12 @@ export function cancelPendingRestore(): void {
 
 /** Data folders kept aside by earlier restores, newest first. */
 export function listKeptDataDirs(): string[] {
+  // Kept folders are siblings of the data folder (same parent as the data root).
+  const parent = dirname(getDataRoot());
   try {
-    return readdirSync(homedir())
+    return readdirSync(parent)
       .filter((name) => name.startsWith(KEPT_DATA_DIR_PREFIX))
-      .map((name) => join(homedir(), name))
+      .map((name) => join(parent, name))
       .sort()
       .reverse();
   } catch {
@@ -237,7 +247,10 @@ export function applyPendingRestore(): RestoreOutcome | null {
   }
 
   const root = getDataRoot();
-  const keptAt = join(homedir(), `${KEPT_DATA_DIR_PREFIX}${stamp()}`);
+  const keptAt = join(
+    dirname(getDataRoot()),
+    `${KEPT_DATA_DIR_PREFIX}${stamp()}`,
+  );
   let movedAside = false;
   try {
     if (existsSync(root)) {

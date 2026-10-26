@@ -1,7 +1,8 @@
-import { app } from "electron";
 import { ASSISTANT_ID } from "@shared/constants/employees";
 import { READ_CHAT_PROMPT } from "@shared/constants/prompts";
+import { app, dialog } from "electron";
 import { materializeBuiltinSkills } from "./agent/builtin-skills";
+import { setRemoteMode } from "./app-mode";
 import { refreshModelStore } from "./agent/model-runtime";
 import { cancelRunRecovery, initRunRecovery } from "./agent/run-recovery";
 import {
@@ -16,13 +17,18 @@ import { getAgentRoot } from "./data-dir";
 import { initDatabase } from "./db";
 import { purgeDisabledEmployees } from "./db/employees";
 import { unlinkSessionFile } from "./db/sessions";
+import { installDesktopBroadcaster } from "./desktop/broadcast";
+import { installLocalSettingsStore } from "./desktop/local-settings";
+import { createIpcBinder } from "./desktop/ipc";
+import { installDesktopPlatform } from "./desktop/platform";
 import { applyStoredHttpProxy } from "./http-proxy";
 import {
   registerImbFileHandler,
   registerImbFileScheme,
 } from "./imb-file-protocol";
 import { initIntegrations, shutdownIntegrations } from "./integrations";
-import { registerIpcHandlers } from "./ipc";
+import { registerRemoteHandlers } from "./ipc";
+import { registerLocalHandlers } from "./ipc/local";
 import { initLocale } from "./locale";
 import {
   createMainWindow,
@@ -32,6 +38,12 @@ import {
   showMainWindow,
 } from "./main-window";
 import { stopAllMiniAppServers, syncMiniAppIndex } from "./mini-apps";
+import {
+  parseRemoteArgs,
+  RemoteArgsError,
+  type RemoteOptions,
+} from "./remote/args";
+import { startRemoteShell } from "./remote/shell";
 import { initTheme } from "./theme";
 import { initUpdater } from "./updater";
 import {
@@ -39,11 +51,44 @@ import {
   unregisterWindowShortcut,
 } from "./window-shortcut";
 
+/**
+ * Desktop entry point.
+ *
+ * Two modes, decided by the command line (`--remote=host:port`):
+ * - **local** (default): everything runs in this process, exactly as before —
+ *   the database, the agent sessions, cron, IM integrations, Mini Apps.
+ * - **remote shell**: the business layer lives in a backend reached over gRPC;
+ *   this process keeps the window, tray, shortcut, dialogs and its own updater,
+ *   and proxies every channel to the backend (`src/main/remote/shell.ts`).
+ *
+ * Keeping both modes on the same channel table is what makes the switch a
+ * start-up flag rather than a fork of the app.
+ */
+
+let remoteOptions: RemoteOptions | null = null;
+try {
+  remoteOptions = parseRemoteArgs(process.argv);
+} catch (error) {
+  if (error instanceof RemoteArgsError) {
+    // A `--remote` setup that cannot work must not fall back to local mode: the
+    // user would be editing a different data folder than they expect.
+    dialog.showErrorBox("imboss — remote mode", error.message);
+    app.quit();
+    throw error;
+  }
+  throw error;
+}
+
+const isRemote = remoteOptions !== null;
+setRemoteMode(isRemote);
+
 // Keep the Pi SDK's own agent-dir defaults (MCP OAuth credentials and MCP logs)
 // inside the app's isolated data dir instead of the host's `~/.pi/agent`. The
 // app passes explicit `agentDir`/paths everywhere else, and the MCP extension's
 // server discovery is supplied by the app's own `loadConfig`.
-process.env.PI_CODING_AGENT_DIR = getAgentRoot();
+if (!isRemote) {
+  process.env.PI_CODING_AGENT_DIR = getAgentRoot();
+}
 
 // Must run before the `app` `ready` event (Electron requires it): registers the
 // `imb-file:` scheme used by `<img>` to load attachment/avatar files directly.
@@ -57,8 +102,9 @@ if (!singleInstanceLock) {
 
 // A restore staged from Settings › Backup replaces the whole data folder, so it
 // has to be applied before anything reads or creates it — and only in the
-// process that actually owns the single-instance lock.
-if (singleInstanceLock) {
+// process that actually owns the single-instance lock (and only when this
+// process owns the data folder at all).
+if (singleInstanceLock && !isRemote) {
   const restored = applyPendingRestore();
   if (restored) {
     console.log(
@@ -94,6 +140,9 @@ app.on("before-quit", () => {
   markQuitting();
   unregisterWindowShortcut();
   disposeTray();
+  // Backend services only exist in local mode; the remote shell owns none of
+  // them (its backend does, and keeps running).
+  if (isRemote) return;
   cancelRunRecovery();
   cron.stopAll();
   stopAllMiniAppServers();
@@ -112,6 +161,29 @@ app.whenReady().then(() => {
   // Matches `appId` in electron-builder.yml.
   app.setAppUserModelId("com.orcastudio.imboss");
 
+  // Host capabilities and the event sink are needed by both modes: a remote
+  // setup still opens its dialogs, clipboard and notifications on this machine.
+  installDesktopPlatform();
+  installDesktopBroadcaster();
+  // Fallback store for shell settings when there is no local database (remote
+  // shell); with a database it is never consulted.
+  installLocalSettingsStore();
+
+  if (remoteOptions !== null) {
+    void startRemoteShell(remoteOptions).then(
+      () => {
+        started = true;
+      },
+      (error: unknown) => {
+        console.error(
+          "[remote] failed to start the remote shell:",
+          error instanceof Error ? error.message : error,
+        );
+      },
+    );
+    return;
+  }
+
   initDatabase();
   // Apply the persisted outbound proxy before any network work (integrations,
   // model-catalog refresh, provider "Fetch models") so it takes effect from the
@@ -124,7 +196,8 @@ app.whenReady().then(() => {
   // assistant's sessions can load them. Best-effort: a failure is logged and
   // never blocks startup.
   materializeBuiltinSkills();
-  registerIpcHandlers();
+  registerLocalHandlers();
+  registerRemoteHandlers(createIpcBinder());
   initTheme();
 
   // Serve `imb-file:` requests (attachment / avatar images). Must be registered

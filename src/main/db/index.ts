@@ -25,3 +25,16 @@ export function getDB(): DB.Database {
   }
   return _db;
 }
+
+/**
+ * True once {@link initDatabase} has opened the database.
+ *
+ * Only the desktop shell's *local* concerns ask this: window bounds, the global
+ * shortcut and the theme are read at startup, before a remote shell has any
+ * backend to ask, and a remote shell never opens the database at all (the data
+ * folder belongs to the backend). Business code must keep calling `getDB()` and
+ * fail loudly instead of silently degrading.
+ */
+export function isDatabaseReady(): boolean {
+  return _db !== null;
+}

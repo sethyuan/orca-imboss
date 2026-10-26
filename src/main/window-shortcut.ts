@@ -7,7 +7,7 @@ import {
 } from "@shared/shortcut";
 import type { WindowShortcutState, WindowShortcutUpdate } from "@shared/types";
 import { globalShortcut } from "electron";
-import { getSetting, setSetting } from "./db/settings";
+import { getShellSetting, setShellSetting } from "./settings-shell";
 import { toggleMainWindow } from "./main-window";
 
 /**
@@ -42,7 +42,7 @@ function platformDefault(): string {
 
 /** Resolve the persisted value into an accelerator (`null` = feature off). */
 function readConfigured(): string | null {
-  const stored = getSetting(SettingKeys.WindowShortcut);
+  const stored = getShellSetting(SettingKeys.WindowShortcut);
   if (stored === null) return platformDefault();
   if (stored.trim() === "") return null;
   // A hand-edited / corrupted row must not leave the feature silently dead.
@@ -123,7 +123,7 @@ export function setWindowShortcut(raw: unknown): WindowShortcutUpdate {
     suspended = false;
     configured = null;
     apply();
-    setSetting(SettingKeys.WindowShortcut, "");
+    setShellSetting(SettingKeys.WindowShortcut, "");
     return { accepted: true, rejected: null, state: getWindowShortcutState() };
   }
 
@@ -152,7 +152,7 @@ export function setWindowShortcut(raw: unknown): WindowShortcutUpdate {
     };
   }
 
-  setSetting(SettingKeys.WindowShortcut, configured);
+  setShellSetting(SettingKeys.WindowShortcut, configured);
   return { accepted: true, rejected: null, state: getWindowShortcutState() };
 }
 

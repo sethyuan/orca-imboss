@@ -50,6 +50,16 @@ export function isPreviewableImageExtension(ext: string): boolean {
   return EXT_TO_MIME[ext.trim().toLowerCase()] !== undefined;
 }
 
+/**
+ * MIME type for a served image path, or `application/octet-stream` when the
+ * extension is unknown. Used by the remote `imb-file:` handler, which streams
+ * bytes and therefore has to declare a content type.
+ */
+export function imageMimeForPath(path: string): string {
+  const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase();
+  return (ext !== undefined && EXT_TO_MIME[ext]) || "application/octet-stream";
+}
+
 /** True when a path's extension is a previewable image format. */
 export function isPreviewableImagePath(path: string): boolean {
   const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1];

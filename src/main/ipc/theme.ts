@@ -1,15 +1,15 @@
-import { ipcMain } from "electron";
 import {
   getThemeState,
   sanitizeMode,
   setThemeColor,
   setThemeMode,
 } from "../theme";
+import type { Binder } from "../rpc/types";
 
-export function registerThemeHandlers(): void {
-  ipcMain.handle("theme:get", () => getThemeState());
+export function registerThemeHandlers(bind: Binder): void {
+  bind("theme:get", () => getThemeState());
 
-  ipcMain.handle("theme:set", (_event, patch: unknown) => {
+  bind("theme:set", (_ctx, patch: unknown) => {
     if (typeof patch !== "object" || patch === null) {
       throw new Error("theme patch must be an object.");
     }

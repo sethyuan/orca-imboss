@@ -1,6 +1,6 @@
 import { SettingKeys } from "@shared/constants/settings";
 import { screen, type BrowserWindow } from "electron";
-import { getSetting, setSetting } from "./db/settings";
+import { getShellSetting, setShellSetting } from "./settings-shell";
 
 // Window state persistence: stores the main window's normal (unmaximized) bounds
 // so they can be restored on the next launch. Persisted via the DB `settings` KV
@@ -28,7 +28,9 @@ interface WindowBounds {
  * and lets Electron center the window on the primary display.
  */
 export function loadWindowBounds(): WindowBounds | null {
-  const stored = getSetting(SettingKeys.WindowState);
+  // A remote shell stores this in its own JSON (see `settings-shell.ts`): the
+  // window position describes *this* machine, never the backend.
+  const stored = getShellSetting(SettingKeys.WindowState);
   if (!stored) return null;
 
   let parsed: unknown;
@@ -121,7 +123,10 @@ export function saveWindowBounds(win: BrowserWindow): void {
   if (win.isDestroyed()) return;
   const { x, y, width, height } = win.getNormalBounds();
   if (width <= 0 || height <= 0) return;
-  setSetting(SettingKeys.WindowState, JSON.stringify({ x, y, width, height }));
+  setShellSetting(
+    SettingKeys.WindowState,
+    JSON.stringify({ x, y, width, height }),
+  );
 }
 
 function isSafeInteger(value: unknown): value is number {

@@ -1,32 +1,26 @@
-import { ipcMain } from "electron";
 import { readSessionView } from "../agent/session-view";
 import { deleteSession, getSession, setSession } from "../db/sessions";
 import { assertInteger, assertString } from "./helpers";
+import type { Binder } from "../rpc/types";
 
-export function registerSessionHandlers(): void {
+export function registerSessionHandlers(bind: Binder): void {
   // Projected, read-only view of a persistent `(employee, chat)` agent
   // session. Never exposes system prompts / tool args / tool results.
-  ipcMain.handle(
-    "sessions:entries",
-    (_event, employeeId: unknown, chatId: unknown) => {
-      const safeEmployee = assertInteger(employeeId, "employee id");
-      const safeChat = assertInteger(chatId, "chat id");
-      return readSessionView(safeEmployee, safeChat);
-    },
-  );
+  bind("sessions:entries", (_ctx, employeeId: unknown, chatId: unknown) => {
+    const safeEmployee = assertInteger(employeeId, "employee id");
+    const safeChat = assertInteger(chatId, "chat id");
+    return readSessionView(safeEmployee, safeChat);
+  });
 
-  ipcMain.handle(
-    "sessions:get",
-    (_event, employeeId: unknown, chatId: unknown) => {
-      const safeEmployee = assertInteger(employeeId, "employee id");
-      const safeChat = assertInteger(chatId, "chat id");
-      return getSession(safeEmployee, safeChat);
-    },
-  );
+  bind("sessions:get", (_ctx, employeeId: unknown, chatId: unknown) => {
+    const safeEmployee = assertInteger(employeeId, "employee id");
+    const safeChat = assertInteger(chatId, "chat id");
+    return getSession(safeEmployee, safeChat);
+  });
 
-  ipcMain.handle(
+  bind(
     "sessions:set",
-    (_event, employeeId: unknown, chatId: unknown, sessionPath: unknown) => {
+    (_ctx, employeeId: unknown, chatId: unknown, sessionPath: unknown) => {
       const safeEmployee = assertInteger(employeeId, "employee id");
       const safeChat = assertInteger(chatId, "chat id");
       setSession(
@@ -37,12 +31,9 @@ export function registerSessionHandlers(): void {
     },
   );
 
-  ipcMain.handle(
-    "sessions:delete",
-    (_event, employeeId: unknown, chatId: unknown) => {
-      const safeEmployee = assertInteger(employeeId, "employee id");
-      const safeChat = assertInteger(chatId, "chat id");
-      return deleteSession(safeEmployee, safeChat);
-    },
-  );
+  bind("sessions:delete", (_ctx, employeeId: unknown, chatId: unknown) => {
+    const safeEmployee = assertInteger(employeeId, "employee id");
+    const safeChat = assertInteger(chatId, "chat id");
+    return deleteSession(safeEmployee, safeChat);
+  });
 }

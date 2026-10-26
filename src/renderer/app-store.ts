@@ -191,6 +191,37 @@ export const appStore = proxy({
   activeChatId: null as number | null,
   activeSessionKey: null as string | null,
 
+  /**
+   * Remote path browser (`components/path-browser`): the only UI state here that
+   * belongs to the *backend* rather than this window. `title` is set by the flow
+   * that asked for a folder; the resolver lives in `remote-files.ts` so a
+   * function is never proxied by the store.
+   */
+  pathBrowser: { open: false, title: "" } as { open: boolean; title: string },
+
+  /**
+   * Remote transport facts the window was started with (`remote-files.ts` owns
+   * the helpers). `incompatibility` non-null = the shell and the backend disagree
+   * about the channel contract; the shell banner says so and read-only browsing
+   * keeps working.
+   */
+  remote: {
+    enabled: imb.remote.enabled === true,
+    incompatibility: (imb.remote.incompatibility ?? null) as {
+      shell: number;
+      backend: number;
+    } | null,
+  },
+
+  /**
+   * Bumped every time the remote transport tells us the event stream could not
+   * be resumed (backend restart, long outage, backpressure). Whatever the UI
+   * holds may be stale from that moment on, so the snapshot-loading effects
+   * (chat thread, agent session) include this in their dependencies and refetch.
+   * Always 0 in local mode — there is no gap to recover from.
+   */
+  resyncEpoch: 0,
+
   // Pending chat to select when the chat module is mounted (set by an OS
   // notification click). Cleared once consumed.
   focusChatId: null as number | null,
@@ -1252,6 +1283,18 @@ export async function initAppStore(): Promise<void> {
   // OS notification click → switch to the chat module and select the chat.
   imb.chats.onFocus((chatId) => {
     void appStore.focusChat(chatId);
+  });
+
+  // The remote event stream could not be resumed: refetch every snapshot we
+  // already hold, and bump `resyncEpoch` so the views that own their own data
+  // (chat thread, agent session) reload as well. Local mode never fires this.
+  imb.remote.onResync(({ reason }) => {
+    console.warn(`[remote] resync (${reason}); refetching snapshots`);
+    appStore.resyncEpoch += 1;
+    if (appStore.data.chats.loaded) void appStore.reloadChats();
+    if (appStore.data.employees.loaded) void appStore.reloadEmployees();
+    // Mini Apps cannot work against a remote backend (see `nav/index.tsx`).
+    if (!appStore.remote.enabled) void appStore.reloadMiniApps();
   });
 
   // Updater state is pushed by main on every transition. Fetch once as well in

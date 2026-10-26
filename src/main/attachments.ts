@@ -7,6 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "fs";
+import { randomUUID } from "crypto";
 import { rm } from "fs/promises";
 import { basename, extname, isAbsolute, join, resolve, sep } from "path";
 import { MAX_ATTACHMENT_BYTES } from "@shared/constants/attachments";
@@ -30,6 +31,14 @@ import { getAttachmentsDir } from "./data-dir";
  *   renderer-suggested extension only when it is filesystem-safe.
  * - Writes are atomic (temp file + rename) and chmod 0600 on POSIX.
  */
+
+/**
+ * Name prefixes this module mints itself. Only these may be deleted from the
+ * attachments store: a chip dropped from the composer must never be able to
+ * remove a file the user picked from their own disk (those live outside the
+ * store anyway, but the check keeps the trust model in one place).
+ */
+const APP_MINTED_PREFIXES = ["pasted-", "upload-"];
 
 /** A filesystem-safe extension (letters/digits only, short). */
 const SAFE_EXTENSION = /^[a-z0-9]{1,8}$/;
@@ -140,6 +149,57 @@ export function savePastedFile(
 }
 
 /**
+ * Store a file the *remote client* uploaded (a picked local file, which only
+ * exists on the user's machine).
+ *
+ * Same store, same limits and same ownership rules as {@link savePastedFile},
+ * with two differences that matter in remote mode:
+ * - the on-disk name carries a UUID, so a retried upload can never collide with
+ *   the copy the previous attempt wrote;
+ * - the name kept in the metadata is the user's own (`report.pdf`), while the
+ *   disk name is prefixed, which is what marks it as app-minted for deletion.
+ */
+export function saveUploadedFile(
+  chatId: number,
+  suggestedName: string,
+  mime: string,
+  data: Buffer,
+): MessageAttachment {
+  if (!Number.isSafeInteger(chatId)) {
+    throw new Error("chat id must be an integer.");
+  }
+  if (!Buffer.isBuffer(data) || data.length === 0) {
+    throw new Error("Attachment data is required.");
+  }
+  if (data.length > MAX_ATTACHMENT_BYTES) {
+    throw new Error("Attachment is too large.");
+  }
+
+  const safeMime = mime.length > 0 ? mime.slice(0, MAX_MIME_LENGTH) : "";
+  const type = safeMime.length > 0 ? safeMime : DEFAULT_MIME;
+  const base = sanitizeBaseName(suggestedName);
+  const ext = resolveExtension(suggestedName, type);
+  const displayName = ext.length > 0 ? `${base}.${ext}` : base;
+
+  const dir = chatAttachmentsDir(chatId);
+  mkdirSync(dir, { recursive: true });
+  const dest = join(dir, `upload-${randomUUID()}-${displayName}`);
+
+  const tmp = `${dest}.tmp`;
+  writeFileSync(tmp, data);
+  renameSync(tmp, dest);
+  if (process.platform !== "win32") {
+    try {
+      chmodSync(dest, 0o600);
+    } catch {
+      // Best-effort hardening only (mirrors `savePastedFile`).
+    }
+  }
+
+  return { name: displayName, size: data.length, type, path: dest };
+}
+
+/**
  * Delete a single pasted file previously written by `savePastedFile` (e.g.
  * when the user removes the chip from the composer). The renderer supplies the
  * path, so ownership is verified before anything is removed: the path must
@@ -152,7 +212,11 @@ export function deletePastedFile(path: string): void {
   const root = getAttachmentsDir();
   const resolved = resolve(path);
   if (!resolved.startsWith(root + sep)) return;
-  if (!basename(resolved).startsWith("pasted-")) return;
+  if (
+    !APP_MINTED_PREFIXES.some((prefix) => basename(resolved).startsWith(prefix))
+  ) {
+    return;
+  }
   try {
     if (!lstatSync(resolved).isFile()) return;
   } catch {

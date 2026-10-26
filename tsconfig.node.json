@@ -4,7 +4,9 @@
     "electron.vite.config.*",
     "src/main/**/*",
     "src/shared/**/*",
-    "src/preload/**/*"
+    "src/preload/**/*",
+    "scripts/build-remote-backend.ts",
+    "scripts/tests/**/*"
   ],
   "compilerOptions": {
     "composite": true,

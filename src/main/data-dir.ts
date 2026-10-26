@@ -1,14 +1,21 @@
 import { chmodSync, existsSync, mkdirSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
 
 /**
  * Root of the app's dedicated data folder under the user's home directory.
  * Everything the app persists — SQLite database, avatars and Pi SDK
  * environment files (skills, auth, models, sessions) — lives here, isolated
  * from Electron's default userData and from the host system's own Pi agent.
+ *
+ * `IMBOSS_DATA_ROOT` relocates the whole folder (the headless backend's
+ * `--data-root`, or a deployment that keeps data on another volume). It is read
+ * on every call — not captured at import time — because the backend resolves its
+ * configuration before the first filesystem access.
  */
 export function getDataRoot(): string {
+  const override = process.env["IMBOSS_DATA_ROOT"]?.trim();
+  if (override !== undefined && override.length > 0) return resolve(override);
   return join(homedir(), ".imboss");
 }
 
