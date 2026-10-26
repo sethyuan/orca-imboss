@@ -12,7 +12,6 @@ imboss is a desktop app where you chat with an AI **Assistant** who acts as your
 
 [imboss intro video](https://www.bilibili.com/video/BV1e3po6rET6/?share_source=copy_web&vd_source=89506ada1738e6a7900dc6eb24d24da5)
 
-
 ## How it works
 
 1. **You talk to the Assistant.** Chat naturally, like messaging a colleague — no prompt engineering required.
@@ -103,6 +102,41 @@ imboss is a desktop app where you chat with an AI **Assistant** who acts as your
 - imboss manages its own isolated Pi agent environment, so it never touches a system-wide Pi installation.
 - API keys are stored locally with restrictive file permissions.
 
+### Remote mode
+
+- Run the **backend on a remote server** as a plain Node.js package and connect the desktop app to it from your machine. Started without flags, imboss behaves exactly as before: everything local, no network.
+- Chats, agents, scheduled tasks, integrations and your data live on the server; the desktop keeps the window, tray, shortcut, notifications and its own updates.
+- The two sides talk over gRPC with a shared token. Files you attach are uploaded to the server, and images in the history are fetched from it on demand.
+
+**Server** (Node.js >= 22, a writable home directory; build the zip with `pnpm run build:remote`, see [Building](#building)):
+
+```bash
+unzip imboss-backend-<version>.zip && cd imboss-backend-<version>
+npm install --omit=dev      # the zip ships no node_modules; better-sqlite3 has prebuilt binaries
+node main.cjs --init        # writes ~/.imboss/server.json (mode 0600) and prints the token
+node main.cjs               # run under systemd/pm2 — see systemd/imboss-backend.service
+```
+
+**Desktop**:
+
+```bash
+imboss --remote=<host>:47810 --remote-token-file=$HOME/.imboss-token
+```
+
+| Flag                                     | Meaning                                                                                |
+| ---------------------------------------- | -------------------------------------------------------------------------------------- |
+| `--remote=<host:port>`                   | Connect to a backend instead of running locally.                                       |
+| `--remote-token-file=<path>`             | Read the token from a file (recommended).                                              |
+| `--remote-token-env=<NAME>`              | Read the token from an environment variable.                                           |
+| `--remote-token=<token>`                 | Inline token — debugging only, it is visible in the process list.                      |
+| `--remote-ca=<pem>`, `--remote-insecure` | Accepted for forward compatibility; this version speaks plaintext gRPC and only warns. |
+
+Server side: `--init`, `--config <path>`, `--data-root <path>`, `--listen <host:port>` (default `0.0.0.0:47810`), `--token-file <path>`, `--token <token>` (debugging only), `--version`, `--help`. The token is also read from `IMBOSS_TOKEN` / `IMBOSS_TOKEN_FILE`.
+
+**Security.** The transport is plaintext gRPC and the shared token is the only authentication. Do not expose the port to the open internet: put it behind a firewall, or use an SSH tunnel (`ssh -L 47810:127.0.0.1:47810 host` together with `--listen 127.0.0.1:47810`) or a private network such as Tailscale or WireGuard.
+
+**Known limits.** One client per backend (a second one is rejected with a clear message), Mini Apps are hidden in remote mode, the backend has no self-update (replace the folder and restart). Attachments are capped at 50 MiB; imports (backup and employee packages) are streamed to disk and capped at 2 GiB.
+
 ### Automatic updates
 
 - Built-in updates from GitHub releases: get notified, download and restart to apply.
@@ -128,10 +162,13 @@ On first launch, add a model provider in **Providers**, then say hello to your A
 
 ```bash
 pnpm build              # typecheck + build
+pnpm run build:remote   # headless backend → dist/imboss-backend-<version>.zip
 pnpm dist:mac           # macOS (DMG + ZIP)
 pnpm dist:win           # Windows (NSIS installer)
 pnpm dist:linux         # Linux (AppImage)
 ```
+
+`build:remote` bundles the backend entry into `main.cjs`, writes a `package.json` with runtime dependencies only (no `postinstall`) and packs it with a `proto/` contract, a README and a systemd unit. **No `node_modules` is shipped** — the server installs its own, which is what lets the native `better-sqlite3` binary match the server's platform.
 
 ## License
 
@@ -147,7 +184,7 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the [Co
 ## Under the hood
 
 - **Runtime** — Electron 44, React 19 + TypeScript, `electron-vite`.
-- **Data** — `better-sqlite3` in WAL mode, kept in the main process behind IPC.
+- **Data** — `better-sqlite3` in WAL mode. In local mode it stays in the main process behind IPC; in remote mode a plain Node.js backend owns it and the desktop reaches it over gRPC.
 - **Agent** — the [Pi SDK](https://github.com/earendil-works/pi-coding-agent), isolated under `~/.imboss/agent`.
 - **Updates & packaging** — `electron-updater` and `electron-builder`.
 

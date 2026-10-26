@@ -102,6 +102,41 @@ imboss 是一款桌面应用：你与一位担任「幕僚长」的 AI **助理*
 - imboss 管理自己独立的 Pi 智能体环境，绝不影响系统级的 Pi 安装。
 - API 密钥保存在本地，并设置严格的访问权限。
 
+### 远程模式
+
+- 后端可以作为一个纯 Node.js 包运行在**远程服务器**上，本机的桌面应用远程连接它。不带任何参数启动时，imboss 与以前完全一致：全部本地、不联网。
+- 会话、智能体、定时任务、消息集成与你的数据都在服务器上；桌面端保留窗口、托盘、全局快捷键、通知以及自身的更新能力。
+- 两端通过带共享 token 的 gRPC 通信。你附加的文件会上传到服务器，历史消息里的图片则按需从服务器拉取。
+
+**服务器**（Node.js >= 22，一个可写的家目录；压缩包用 `pnpm run build:remote` 生成，见[构建](#构建)）：
+
+```bash
+unzip imboss-backend-<version>.zip && cd imboss-backend-<version>
+npm install --omit=dev      # 压缩包不含 node_modules；better-sqlite3 提供预编译二进制
+node main.cjs --init        # 生成 ~/.imboss/server.json（权限 0600）并打印 token
+node main.cjs               # 用 systemd/pm2 托管，样例见 systemd/imboss-backend.service
+```
+
+**桌面端**：
+
+```bash
+imboss --remote=<host>:47810 --remote-token-file=$HOME/.imboss-token
+```
+
+| 参数                                     | 含义                                                     |
+| ---------------------------------------- | -------------------------------------------------------- |
+| `--remote=<host:port>`                   | 连接远程后端，而不是本地运行。                           |
+| `--remote-token-file=<path>`             | 从文件读取 token（推荐）。                               |
+| `--remote-token-env=<NAME>`              | 从环境变量读取 token。                                   |
+| `--remote-token=<token>`                 | 直接在命令行给出 token——仅用于调试，会出现在进程列表里。 |
+| `--remote-ca=<pem>`、`--remote-insecure` | 为向后兼容而接受；本版本使用明文 gRPC，只会给出警告。    |
+
+服务器端参数：`--init`、`--config <path>`、`--data-root <path>`、`--listen <host:port>`（默认 `0.0.0.0:47810`）、`--token-file <path>`、`--token <token>`（仅调试）、`--version`、`--help`。token 也可通过 `IMBOSS_TOKEN` / `IMBOSS_TOKEN_FILE` 提供。
+
+**安全提示。** 传输为明文 gRPC，唯一认证手段是共享 token。不要把端口直接暴露到公网：请置于防火墙之后，或使用 SSH 隧道（`ssh -L 47810:127.0.0.1:47810 host`，并在服务器上以 `--listen 127.0.0.1:47810` 启动），或使用 Tailscale、WireGuard 之类的私有网络。
+
+**已知限制。** 一个后端只服务一个客户端（第二个会被明确拒绝）；远程模式下微应用会被隐藏；后端没有自更新（替换目录后重启）；附件上限 50 MiB；导入（备份包与员工包）以流式写入磁盘，上限 2 GiB。
+
 ### 自动更新
 
 - 内置基于 GitHub Releases 的更新能力：收到提醒、下载并重启即可应用新版本。
@@ -127,10 +162,13 @@ pnpm dev                # 启动应用，支持热更新
 
 ```bash
 pnpm build              # 类型检查 + 构建
+pnpm run build:remote   # 打包无界面后端 → dist/imboss-backend-<version>.zip
 pnpm dist:mac           # macOS（DMG + ZIP）
 pnpm dist:win           # Windows（NSIS 安装包）
 pnpm dist:linux         # Linux（AppImage）
 ```
+
+`build:remote` 把后端入口打包成 `main.cjs`，生成只含运行时依赖、**没有 `postinstall`** 的 `package.json`，并连同 `proto/` 接口约定、README 与 systemd 样例一起打成一个压缩包。**包内不含 `node_modules`**——由服务器自行安装，这样原生模块 `better-sqlite3` 的二进制才能与服务端平台匹配。
 
 ## 许可说明
 
@@ -146,7 +184,7 @@ imboss 采用**双重许可**模式：
 ## 技术实现
 
 - **运行时** —— Electron 44、React 19 + TypeScript、`electron-vite`。
-- **数据** —— `better-sqlite3`（WAL 模式），仅驻留主进程，通过 IPC 访问。
+- **数据** —— `better-sqlite3`（WAL 模式）。本地模式下仅驻留主进程、通过 IPC 访问；远程模式下由远端纯 Node.js 后端承载，桌面端通过 gRPC 访问。
 - **智能体** —— [Pi SDK](https://github.com/earendil-works/pi-coding-agent)，隔离运行于 `~/.imboss/agent`。
 - **更新与打包** —— `electron-updater` 与 `electron-builder`。
 
