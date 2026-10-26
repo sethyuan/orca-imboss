@@ -94,6 +94,26 @@
 }
 
 /*
+ * Self bubble: a saturated green fill, where the muted ink every other host uses
+ * would sit at ~2:1 and read as a disabled control. The glyph derives from the
+ * bubble's own text colour instead (same idea as the code-block copy button),
+ * including the focus ring, which would otherwise be green-on-green.
+ */
+.imb-msg.imb-self .imb-msg-copy {
+  color: color-mix(in oklab, var(--imb-bubble-text) 62%, transparent);
+}
+
+.imb-msg.imb-self .imb-msg-copy:hover {
+  background: color-mix(in oklab, var(--imb-bubble-text) 14%, transparent);
+  color: var(--imb-bubble-text);
+}
+
+.imb-msg.imb-self .imb-msg-copy:focus-visible {
+  box-shadow: 0 0 0 3px
+    color-mix(in oklab, var(--imb-bubble-text) 35%, transparent);
+}
+
+/*
  * Touch / no-hover platforms have no row hover to reveal anything, so the copy
  * action would be unreachable. It stays visible at the reduced opacity the code
  * blocks use for their own copy button; the time tag keeps its hover-only

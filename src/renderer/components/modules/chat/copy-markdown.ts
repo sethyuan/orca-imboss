@@ -16,11 +16,13 @@ const MARKDOWN_KINDS: ReadonlySet<string> = new Set(["text", "report"]);
  * Rules (boss-approved):
  * - **Root chat only.** `readonly` marks the read-only group-chat mirror; the
  *   interactive root chat is the only view that offers the action.
- * - **Assistant side only.** A `null` sender is the boss (or a system notice);
- *   their messages are not "assistant messages".
+ * - **Both sides of the conversation.** The boss asked for the assistant's
+ *   messages first and then for their own: prose is prose, whoever wrote it, and
+ *   a long prompt is exactly as worth reusing as a long answer. So the sender is
+ *   deliberately *not* part of the rule any more — only the kind and the text.
  * - **Markdown prose only** (`text`/`report`), and only when there is something
- *   to copy — a media-only row has empty content and must not offer an action
- *   that copies nothing.
+ *   to copy — a media-only row (empty content, attachments only) must not offer
+ *   an action that copies nothing.
  *
  * The text is returned **verbatim** (byte-faithful source): code fences, tables,
  * KaTeX source and `@<employeeId>` mentions stay exactly as written. Nothing is
@@ -32,7 +34,6 @@ export function markdownCopySource(
   readonly: boolean,
 ): string | null {
   if (readonly) return null;
-  if (message.senderEmployeeId === null) return null;
   if (!MARKDOWN_KINDS.has(message.kind)) return null;
   if (typeof message.content !== "string") return null;
   return message.content.trim().length > 0 ? message.content : null;
