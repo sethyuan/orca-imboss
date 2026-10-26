@@ -47,3 +47,28 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
         run: pnpm run build && npx electron-builder --publish always
+
+      # The remote backend zip is platform-independent (pure Node bundle, no
+      # node_modules inside — better-sqlite3 is installed at deploy time), so a
+      # single build on Linux serves every platform.
+      - name: Build remote backend
+        if: runner.os == 'Linux'
+        run: pnpm run build:remote
+
+      - name: Upload remote backend zip to release
+        if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          zip="dist/imboss-backend-${version}.zip"
+          if [ ! -f "$zip" ]; then
+            echo "expected remote backend zip at $zip" >&2
+            exit 1
+          fi
+          tag="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            # workflow_dispatch: electron-builder publishes under v<version>.
+            tag="v${version}"
+          fi
+          gh release upload "$tag" "$zip" --clobber
