@@ -16,8 +16,9 @@ import { IconPlus, IconTrash } from "../../../icons";
 import { Input } from "../../../input";
 import { Select } from "../../../select";
 import { ShortcutInput, shortcutRejectMessage } from "../../../shortcut-input";
+import { useFavoriteModels } from "../../../../use-favorite-models";
 import {
-  modelRef,
+  groupedModelSelectOptions,
   thinkingLevelsFor,
   thinkingSelectOptions,
 } from "../../../../thinking-options";
@@ -40,6 +41,7 @@ export function SettingsGeneral(): React.JSX.Element {
   const [defaultThinking, setDefaultThinking] = useState("");
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
   const [models, setModels] = useState<ModelOption[]>([]);
+  const favorites = useFavoriteModels();
   const [workdir, setWorkdir] = useState<WorkDirState | null>(null);
   const [workdirError, setWorkdirError] = useState<string | null>(null);
   // Global show/hide shortcut: the main process owns the OS registration, so the
@@ -189,13 +191,12 @@ export function SettingsGeneral(): React.JSX.Element {
         >
           <Select
             value={defaultModel}
-            options={[
+            options={groupedModelSelectOptions(
+              models,
               { value: "", label: t("None") },
-              ...models.map((model) => ({
-                value: modelRef(model),
-                label: modelRef(model),
-              })),
-            ]}
+              favorites.refs,
+            )}
+            onToggleStar={favorites.toggle}
             onChange={changeDefaultModel}
           />
         </Field>
@@ -208,13 +209,12 @@ export function SettingsGeneral(): React.JSX.Element {
         >
           <Select
             value={imageModel}
-            options={[
+            options={groupedModelSelectOptions(
+              models,
               { value: "", label: t("None") },
-              ...models.map((model) => ({
-                value: modelRef(model),
-                label: modelRef(model),
-              })),
-            ]}
+              favorites.refs,
+            )}
+            onToggleStar={favorites.toggle}
             onChange={changeImageModel}
           />
         </Field>

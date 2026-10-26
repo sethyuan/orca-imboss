@@ -12,7 +12,7 @@ import { Textarea } from "../../../textarea";
 import {
   defaultModelSelectNote,
   defaultThinkingSelectNote,
-  modelRef,
+  groupedModelSelectOptions,
   thinkingLevelsFor,
   thinkingSelectOptions,
 } from "../../../../thinking-options";
@@ -27,6 +27,9 @@ export interface EmployeeRecruitModalProps {
   defaultModel: string;
   /** App default thinking level, inherited when the recruit leaves it unset. */
   defaultThinking: string;
+  /** Favorite `provider/id`s, oldest first. */
+  favoriteModels: readonly string[];
+  onToggleFavorite: (ref: string) => void;
   onCreate: (input: EmployeeInput) => Promise<Employee | null>;
 }
 
@@ -38,6 +41,8 @@ export function EmployeeRecruitModal({
   models,
   defaultModel,
   defaultThinking,
+  favoriteModels,
+  onToggleFavorite,
   onCreate,
 }: EmployeeRecruitModalProps): React.JSX.Element {
   const [name, setName] = useState("");
@@ -166,17 +171,16 @@ export function EmployeeRecruitModal({
       <Field label={t("Model")}>
         <Select
           value={modelId}
-          options={[
+          options={groupedModelSelectOptions(
+            models,
             {
               value: "",
               label: t("Default"),
               note: defaultModelSelectNote(defaultModel, models),
             },
-            ...models.map((model) => ({
-              value: modelRef(model),
-              label: modelRef(model),
-            })),
-          ]}
+            favoriteModels,
+          )}
+          onToggleStar={onToggleFavorite}
           onChange={setModelId}
         />
       </Field>

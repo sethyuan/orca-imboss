@@ -1,20 +1,48 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { cls } from "reactutils";
 import { useDropdownPosition } from "../../hooks/use-dropdown-position";
 import { useEscapeKey } from "../../hooks/use-escape-key";
 import { usePopupLayer } from "../../hooks/use-popup-layer";
-import { IconChevronDown } from "../icons";
+import { IconChevronDown, IconStar } from "../icons";
 import "./index.css";
+
+function optionMatchesTypeahead(option: SelectOption, buffer: string): boolean {
+  const texts = [option.menuLabel ?? option.label, option.label];
+  if (option.group) texts.push(option.group);
+  return texts.some((text) => text.toLowerCase().startsWith(buffer));
+}
 
 export interface SelectOption {
   value: string;
+  /** Text in the closed control. */
   label: string;
   /**
    * Muted gloss after `label` on the same row. The closed control shows it
    * too, because that control repeats the selected option's text.
    */
   note?: string;
+  /**
+   * Text of the open row when it should be shorter than `label`.
+   * Type-ahead matches this, `label`, and `group`.
+   */
+  menuLabel?: string;
+  /** Non-selectable heading inserted before the first row of a run. */
+  group?: string;
+  /** Thin rule before this row's heading. Ignored when it has no `group`. */
+  dividerBefore?: boolean;
+  /** Shows a star button. The row click still selects. */
+  starable?: boolean;
+  starred?: boolean;
+  /** Accessible name of the star button. */
+  starLabel?: string;
 }
 
 export interface SelectProps {
@@ -26,6 +54,8 @@ export interface SelectProps {
   disabled?: boolean;
   id?: string;
   label?: string;
+  /** Star click. Does not select the row or close the menu. */
+  onToggleStar?: (value: string) => void;
 }
 
 /**
@@ -46,6 +76,7 @@ export function Select({
   disabled = false,
   id,
   label,
+  onToggleStar,
 }: SelectProps): React.JSX.Element {
   const uid = useId();
   const listboxId = `select-${uid}`;
@@ -182,7 +213,7 @@ export function Select({
             bufferRef.current = "";
           }, 500);
           const match = options.findIndex((o) =>
-            o.label.toLowerCase().startsWith(bufferRef.current),
+            optionMatchesTypeahead(o, bufferRef.current),
           );
           if (match >= 0) setActiveIndex(match);
         }
@@ -193,6 +224,13 @@ export function Select({
   function optionId(index: number): string {
     return `${listboxId}-opt-${index}`;
   }
+
+  useEffect(() => {
+    if (!open || activeIndex < 0) return;
+    document
+      .getElementById(optionId(activeIndex))
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, open]);
 
   return (
     <div
@@ -268,44 +306,97 @@ export function Select({
                 —
               </li>
             )}
-            {options.map((option, index) => (
-              <li
-                key={option.value}
-                id={optionId(index)}
-                role="option"
-                aria-selected={option.value === value}
-                className={cls(
-                  "imb-select-option imb-menu-row",
-                  index === activeIndex && "imb-is-active",
-                  option.value === value && "imb-is-selected",
-                )}
-                onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => commit(index)}
-              >
-                <span
-                  className={cls(
-                    "imb-select-option-label",
-                    option.note && "imb-has-note",
+            {options.map((option, index) => {
+              const showGroup =
+                !!option.group && option.group !== options[index - 1]?.group;
+              const menuText = option.menuLabel ?? option.label;
+              return (
+                <Fragment key={option.value}>
+                  {option.dividerBefore && showGroup && (
+                    <li
+                      className="imb-select-sep imb-menu-sep"
+                      role="presentation"
+                    />
                   )}
-                >
-                  {option.note ? (
-                    <>
-                      <span className="imb-select-value-main">
-                        {option.label}
+                  {showGroup && (
+                    <li className="imb-select-group" role="presentation">
+                      {option.group}
+                    </li>
+                  )}
+                  <li
+                    id={optionId(index)}
+                    role="option"
+                    aria-selected={option.value === value}
+                    aria-label={
+                      option.menuLabel && option.menuLabel !== option.label
+                        ? option.label
+                        : undefined
+                    }
+                    className={cls(
+                      "imb-select-option imb-menu-row",
+                      option.group && "imb-is-grouped",
+                      index === activeIndex && "imb-is-active",
+                      option.value === value && "imb-is-selected",
+                    )}
+                    onMouseEnter={() => setActiveIndex(index)}
+                    onClick={() => commit(index)}
+                  >
+                    <span
+                      className={cls(
+                        "imb-select-option-label",
+                        option.note && "imb-has-note",
+                      )}
+                    >
+                      {option.note ? (
+                        <>
+                          <span className="imb-select-value-main">
+                            {menuText}
+                          </span>
+                          <span className="imb-select-note">{option.note}</span>
+                        </>
+                      ) : (
+                        menuText
+                      )}
+                    </span>
+                    {option.starable && onToggleStar ? (
+                      <span className="imb-select-option-side">
+                        <span
+                          className="imb-select-check imb-select-check-slot"
+                          aria-hidden="true"
+                        >
+                          {option.value === value ? "✓" : ""}
+                        </span>
+                        <button
+                          type="button"
+                          className={cls(
+                            "imb-select-star",
+                            option.starred && "imb-is-on",
+                          )}
+                          aria-pressed={option.starred === true}
+                          aria-label={option.starLabel}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onToggleStar(option.value);
+                          }}
+                        >
+                          <IconStar
+                            className="imb-icon imb-sm"
+                            filled={option.starred === true}
+                          />
+                        </button>
                       </span>
-                      <span className="imb-select-note">{option.note}</span>
-                    </>
-                  ) : (
-                    option.label
-                  )}
-                </span>
-                {option.value === value && (
-                  <span className="imb-select-check" aria-hidden="true">
-                    ✓
-                  </span>
-                )}
-              </li>
-            ))}
+                    ) : (
+                      option.value === value && (
+                        <span className="imb-select-check" aria-hidden="true">
+                          ✓
+                        </span>
+                      )
+                    )}
+                  </li>
+                </Fragment>
+              );
+            })}
           </ul>,
           document.body,
         )}
