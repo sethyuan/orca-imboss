@@ -147,6 +147,52 @@
   color: var(--imb-muted);
 }
 
+/*
+ * Card-level "additional notes" block, rendered after every question. The
+ * input reuses the free-answer textarea's box so the two read as the same kind
+ * of field, but it sits apart from the questions (a rule above it) because it
+ * answers none of them.
+ */
+.imb-ask-supplement {
+  margin-top: var(--imb-space-4);
+  padding-top: var(--imb-space-3);
+  border-top: 1px solid var(--imb-border);
+}
+
+.imb-ask-supplement-title {
+  font-size: var(--imb-text-sm);
+  color: var(--imb-muted);
+  margin-bottom: var(--imb-space-2);
+}
+
+.imb-ask-supplement-input {
+  width: 100%;
+  border: 1px solid var(--imb-border);
+  border-radius: var(--imb-radius-sm);
+  padding: var(--imb-space-2) var(--imb-space-3);
+  font-size: var(--imb-text-base);
+  font-family: inherit;
+  background: var(--imb-surface);
+  color: var(--imb-fg);
+  min-height: 84px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.imb-ask-supplement-input::placeholder {
+  color: var(--imb-muted);
+}
+
+/* An answered card keeps its notes legible but not editable: the native
+   disabled styling greys the text out, which would hide what the boss wrote. */
+.imb-ask-card-submitted .imb-ask-supplement-input:disabled {
+  color: var(--imb-fg);
+  -webkit-text-fill-color: var(--imb-fg);
+  opacity: 1;
+  background: var(--imb-bg-control);
+  resize: none;
+}
+
 .imb-ask-submit {
   margin-top: var(--imb-space-3);
   background: var(--imb-accent);

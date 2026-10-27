@@ -85,6 +85,16 @@ export function AnswerCard({
             )}
           </div>
         ))}
+        {/* The boss's instructions beyond the questions (see `AskCard`); shown
+            after the per-question items, like they are entered. */}
+        {payload.supplement !== undefined && (
+          <div className="imb-answer-supplement">
+            <div className="imb-answer-qid">
+              {t("Additional notes (optional)")}
+            </div>
+            <div className="imb-answer-text">{payload.supplement}</div>
+          </div>
+        )}
         <MessageTime label={timeLabel} />
       </div>
     </div>

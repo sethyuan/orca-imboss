@@ -1,3 +1,4 @@
+import { MAX_ANSWER_SUPPLEMENT_LENGTH } from "@shared/constants/ask";
 import type { Message } from "@shared/types";
 
 /** One parsed answer entry (an item of a `kind=answer` message payload). */
@@ -10,10 +11,17 @@ export interface AnswerItem {
 /**
  * Parsed `answer` message payload. `askMessageId` is absent on legacy rows
  * written before answers were stamped with the ask they reply to.
+ *
+ * `supplement` is the boss's free-form instructions written in the card's
+ * "additional notes" field, i.e. text that is *not* an answer to any question.
+ * It is absent when the boss left that field empty (including every legacy row),
+ * and the answers JSON is the only place it is stored: the agent reads it
+ * straight from the `answer` message content.
  */
 export interface AnswerPayload {
   askMessageId?: number;
   answers: AnswerItem[];
+  supplement?: string;
 }
 
 /** Defensive parse of the answer payload; returns null on any invalid shape. */
@@ -29,7 +37,10 @@ export function parseAnswer(content: string): AnswerPayload | null {
   }
   const record = parsed as Record<string, unknown>;
   const answers = record["answers"];
-  if (!Array.isArray(answers) || answers.length === 0) return null;
+  // The answer list is mandatory even when the boss only wrote notes: the card
+  // always serializes one (possibly empty), so a missing/foreign field means
+  // the payload is not ours.
+  if (!Array.isArray(answers)) return null;
   const result: AnswerItem[] = [];
   for (const item of answers) {
     if (typeof item !== "object" || item === null) continue;
@@ -46,7 +57,10 @@ export function parseAnswer(content: string): AnswerPayload | null {
       text: typeof a["text"] === "string" ? a["text"] : undefined,
     });
   }
-  if (result.length === 0) return null;
+  // Nothing answered at all is not an answer payload (legacy invariant). A
+  // `supplement` alone *is* one: the boss may only want to add instructions.
+  const supplement = parseSupplement(record["supplement"]);
+  if (result.length === 0 && supplement === undefined) return null;
   const askMessageId = record["askMessageId"];
   return {
     askMessageId:
@@ -54,7 +68,19 @@ export function parseAnswer(content: string): AnswerPayload | null {
         ? askMessageId
         : undefined,
     answers: result,
+    ...(supplement !== undefined ? { supplement } : {}),
   };
+}
+
+/**
+ * Defensive read of the payload's `supplement`: a trimmed non-empty string,
+ * capped like the writer caps it, or `undefined` for anything else.
+ */
+function parseSupplement(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  if (text.length === 0) return undefined;
+  return text.slice(0, MAX_ANSWER_SUPPLEMENT_LENGTH);
 }
 
 /** Result of pairing `answer` messages with the `ask` messages they reply to. */

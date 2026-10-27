@@ -38,3 +38,11 @@
   margin-top: 2px;
   white-space: pre-wrap;
 }
+
+/* Card-level "additional notes" of the answer: styled like one more answer
+   item, but set apart because it answers no question. */
+.imb-answer-supplement {
+  margin-top: var(--imb-space-2);
+  padding-left: 10px;
+  border-left: 2px solid var(--imb-border);
+}

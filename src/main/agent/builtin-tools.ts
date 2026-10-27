@@ -1174,6 +1174,11 @@ function addParticipantTool(env: AgentEnvironment): AnyPiTool {
  * employee. The assistant alerts the boss with a separate `imb_notify` call
  * after posting. The boss answers through the AskCard UI, which appends a
  * `kind:"answer"` message and wakes the assistant.
+ *
+ * The card always offers an "additional notes" field after the last question,
+ * so an answer may carry a top-level `supplement` string next to `answers`: the
+ * boss's instructions *beyond* the questions (absent when left empty). It is
+ * part of the answer and must be honoured — see the tool description.
  */
 function askTool(env: AgentEnvironment): AnyPiTool {
   return {
@@ -1187,6 +1192,10 @@ function askTool(env: AgentEnvironment): AnyPiTool {
       "used when a question has no `options`). When `options` are given but `type` is omitted, the " +
       "question defaults to `multiple` (checkboxes). The boss answers through the question card, " +
       "delivered back as an `answer` message; call `imb_notify` afterwards so the boss is alerted. " +
+      'The card always shows an "additional notes" field after the last question, so the answer ' +
+      "may also carry a top-level `supplement` string next to `answers`: extra instructions the boss " +
+      "wrote beyond the questions (absent when empty, and the only content when they answered no " +
+      "question). Treat `supplement` as part of the answer and follow it. " +
       "Attachments are capped at 5; pass `attachmentTotal` when more files were produced.",
     promptSnippet: "ask the boss a question set",
     parameters: Type.Object({

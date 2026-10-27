@@ -45,7 +45,11 @@ interface AskQuestion {
   options: string[];
 }
 
-/** `answer` content: `{ askMessageId?, answers: [{ questionId, selected?, text? }] }`. */
+/**
+ * `answer` content:
+ * `{ askMessageId?, answers: [{ questionId, selected?, text? }], supplement? }`.
+ * `supplement` holds the card-level notes the boss wrote beyond the questions.
+ */
 interface AnswerItem {
   text: string;
   selected: string[];
@@ -253,13 +257,32 @@ function extractAnswer(content: string): Partial<Extraction> {
     if (selected.length === 0 && text.length === 0) continue;
     answers.push({ text, selected });
   }
-  if (answers.length === 0) return unparsed;
+  // The card-level "additional notes" (`supplement`) answer no question, so they
+  // never count as answers — but they are readable content and must be
+  // searchable like everything else the boss wrote.
+  const supplement = readSupplement(
+    payload === null ? null : payload["supplement"],
+  );
+  if (answers.length === 0 && supplement.length === 0) return unparsed;
+  if (answers.length === 0) {
+    // Notes only: there is no answer to count, so the teaser falls back to the
+    // "Answer: <text>" form with the notes themselves (see `preview-text.ts`).
+    return { text: supplement, fragments: [supplement] };
+  }
   // Same as `ask`: the count is the teaser, the answers only feed search.
   return {
     text: "",
-    fragments: answers.map((answer) => answerText(answer)),
+    fragments: [
+      ...answers.map((answer) => answerText(answer)),
+      ...(supplement.length > 0 ? [supplement] : []),
+    ],
     answerCount: answers.length,
   };
+}
+
+/** Defensive read of an `answer` payload's note field: a trimmed string or `""`. */
+function readSupplement(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 /**

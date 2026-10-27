@@ -1,3 +1,4 @@
+import { MAX_ANSWER_SUPPLEMENT_LENGTH } from "@shared/constants/ask";
 import { MAX_USER_ATTACHMENTS } from "@shared/constants/attachments";
 import { t } from "@shared/l10n";
 import type { Message } from "@shared/types";
@@ -10,6 +11,7 @@ import {
   removeAskDraftAttachment,
   setAskDraftAttachments,
   setAskDraftSelection,
+  setAskDraftSupplement,
   setAskDraftText,
 } from "../../../../ask-draft";
 import {
@@ -115,6 +117,13 @@ export function AskCard({
       return seedDraftText(readAskDraft(message.id)?.text);
     },
   );
+  // The card-level "additional notes" field: instructions that belong to no
+  // question. Seeded from the folded answer (once answered) or from the
+  // retained draft, exactly like the per-question inputs.
+  const [supplement, setSupplement] = useState<string>(() => {
+    if (persisted) return persisted.supplement ?? "";
+    return readAskDraft(message.id)?.supplement ?? "";
+  });
   // Files attached to the pending answer. Seeded from the retained draft so a
   // module switch (which unmounts the card) does not lose them.
   const [draftAttachments, setDraftAttachments] = useState<PendingAttachment[]>(
@@ -153,6 +162,7 @@ export function AskCard({
     if (!persisted) return;
     setSelectedByQuestion(seedSelected(persisted.answers));
     setTextByQuestion(seedText(persisted.answers));
+    setSupplement(persisted.supplement ?? "");
     setSubmitted(true);
     // An answered card has no draft any more: a retained one would be a ghost
     // from the moment before the answer landed (e.g. a submit followed by a
@@ -210,6 +220,13 @@ export function AskCard({
     if (submitted || readonly) return;
     setTextByQuestion((previous) => ({ ...previous, [questionId]: text }));
     setAskDraftText(message.id, message.chatId, questionId, text);
+  };
+
+  /** Record the card-level extra instructions (card + retained draft). */
+  const applySupplement = (text: string): void => {
+    if (submitted || readonly) return;
+    setSupplement(text);
+    setAskDraftSupplement(message.id, message.chatId, text);
   };
 
   /**
@@ -405,7 +422,11 @@ export function AskCard({
       selectedByQuestion,
       textByQuestion,
     );
-    if (answers.length === 0) {
+    // Notes ride along with the answers, in the same JSON payload: they are the
+    // boss's instructions *beyond* the questions, so they must reach the agent
+    // even when not a single question was answered.
+    const notes = supplement.trim();
+    if (answers.length === 0 && notes.length === 0) {
       setError(t("Please answer at least one question first."));
       return;
     }
@@ -421,7 +442,12 @@ export function AskCard({
       await imb.messages.answer(
         message.chatId,
         message.id,
-        { answers },
+        notes.length > 0
+          ? {
+              answers,
+              supplement: notes.slice(0, MAX_ANSWER_SUPPLEMENT_LENGTH),
+            }
+          : { answers },
         attachments.length > 0 ? attachments : undefined,
       );
       setSubmitted(true);
@@ -561,6 +587,27 @@ export function AskCard({
             )}
           </div>
         ))}
+        {/* Fixed, card-level field *after* every question: instructions that
+            answer no question at all. An answered/read-only card only shows it
+            when there is something to show, so historical cards (never written
+            with notes) keep their current, quieter layout. */}
+        {(!readonly && !submitted) || supplement.length > 0 ? (
+          <div className="imb-ask-supplement">
+            <div className="imb-ask-supplement-title">
+              {t("Additional notes (optional)")}
+            </div>
+            <textarea
+              className="imb-ask-supplement-input"
+              value={supplement}
+              disabled={submitted || readonly}
+              maxLength={MAX_ANSWER_SUPPLEMENT_LENGTH}
+              onChange={(e) => applySupplement(e.target.value)}
+              placeholder={t(
+                "Anything you want to add beyond the questions above (optional)",
+              )}
+            />
+          </div>
+        ) : null}
         {!readonly && !submitted && (
           <div className="imb-ask-attach">
             <AttachMenuButton

@@ -1,3 +1,4 @@
+import { MAX_ANSWER_SUPPLEMENT_LENGTH } from "@shared/constants/ask";
 import { READ_CHAT_PROMPT } from "@shared/constants/prompts";
 import { existsSync } from "fs";
 import { isAbsolute } from "path";
@@ -60,10 +61,20 @@ export function registerMessageHandlers(bind: Binder): void {
       // Stamp the answer with the ask it replies to so the card can rehydrate
       // its retained options/text after a reload. Set after the spread so a
       // renderer-supplied `askMessageId` can never override it.
-      const payload = {
-        ...assertObject(answers, "answers"),
-        askMessageId: safeAskId,
-      };
+      //
+      // `supplement` (the card's "additional notes", i.e. instructions beyond
+      // the questions) travels inside this same JSON — the agent reads it from
+      // the `answer` message content. It is the one field validated here: only
+      // our own card writes it, so a blank one is dropped instead of stored, and
+      // the length is capped exactly like the draft caps it.
+      const rawAnswers = assertObject(answers, "answers");
+      const supplement = normalizeAnswerSupplement(rawAnswers["supplement"]);
+      const payload = { ...rawAnswers, askMessageId: safeAskId };
+      if (supplement === undefined) {
+        delete payload["supplement"];
+      } else {
+        payload["supplement"] = supplement;
+      }
       const message = dbMessages.appendMessage(
         safeChatId,
         null,
@@ -139,6 +150,19 @@ export function registerMessageHandlers(bind: Binder): void {
       getRevealer().showItemInFolder(path);
     },
   );
+}
+
+/**
+ * Normalise the answer payload's card-level notes (`supplement`): absent or
+ * blank means "no notes" (`undefined`, so the field is not written at all), a
+ * string is trimmed and capped, and anything else is rejected — only our own
+ * ask card serializes this field, so a wrong type is a caller bug.
+ */
+function normalizeAnswerSupplement(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const text = assertString(value, "answer supplement").trim();
+  if (text.length === 0) return undefined;
+  return text.slice(0, MAX_ANSWER_SUPPLEMENT_LENGTH);
 }
 
 /**

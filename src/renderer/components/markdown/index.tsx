@@ -22,6 +22,7 @@ import remarkMath from "remark-math-extended";
 import type { PluggableList } from "unified";
 import { copyToClipboard } from "../../clipboard";
 import { IconCheck, IconCopy } from "../icons";
+import { GFM_OPTIONS } from "./gfm";
 import { MENTION_TAG, mentionPlugin } from "./mention";
 import "./index.css";
 
@@ -40,8 +41,12 @@ import "./index.css";
  *   HTML-escaped before it is handed to `dangerouslySetInnerHTML`.
  */
 
-/** Module-level plugin lists keep referential stability across re-renders. */
-const REMARK_PLUGINS: PluggableList = [remarkGfm, remarkMath];
+/**
+ * Module-level plugin lists keep referential stability across re-renders.
+ * `GFM_OPTIONS` disables single-tilde strikethrough (`~abc~` stays literal,
+ * `~~abc~~` still strikes through) — see `./gfm.ts`.
+ */
+const REMARK_PLUGINS: PluggableList = [[remarkGfm, GFM_OPTIONS], remarkMath];
 const REHYPE_PLUGINS: PluggableList = [[rehypeKatex, { strict: "ignore" }]];
 
 const SAFE_HREF_SCHEMES = new Set(["http:", "https:", "mailto:"]);

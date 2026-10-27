@@ -19,6 +19,7 @@
  * whether the files are now referenced by a message (submit) or garbage
  * (removal / eviction / deleted conversation) — see `clearAskDraft`.
  */
+import { MAX_ANSWER_SUPPLEMENT_LENGTH } from "@shared/constants/ask";
 import {
   discardPendingAttachments,
   revokePendingAttachment,
@@ -33,6 +34,12 @@ export interface AskDraft {
   selected: Record<string, string[]>;
   /** Free-form text per question id (a `free` question or a "Other" field). */
   text: Record<string, string>;
+  /**
+   * The card's "additional notes" field: instructions beyond the questions,
+   * keyed to the card as a whole (never to a question id). Empty when the boss
+   * wrote none.
+   */
+  supplement: string;
   /** Files the boss attached to this answer, in the order they were added. */
   attachments: PendingAttachment[];
   /** Epoch ms of the last edit; oldest entries are evicted first. */
@@ -186,6 +193,29 @@ export function setAskDraftText(
 }
 
 /**
+ * Record the card's "additional notes" text (an empty string clears it).
+ *
+ * Not keyed by question id: the field belongs to the whole card, so it survives
+ * `pruneAskDraft` (which only drops entries of questions that no longer exist)
+ * and is capped like a per-question text so one pasted blob cannot live in
+ * memory forever.
+ */
+export function setAskDraftSupplement(
+  messageId: number,
+  chatId: number,
+  text: string,
+): void {
+  const draft = ensureDraft(messageId, chatId);
+  if (!draft) return;
+  if (typeof text !== "string" || text.length === 0) {
+    draft.supplement = "";
+  } else {
+    draft.supplement = text.slice(0, MAX_ANSWER_SUPPLEMENT_LENGTH);
+  }
+  commit(messageId, draft);
+}
+
+/**
  * Drop the entries of questions that no longer exist in the ask payload (the
  * card was re-rendered from a changed/chunked question set). A no-op when the
  * draft only holds current questions.
@@ -224,6 +254,7 @@ function ensureDraft(messageId: number, chatId: number): AskDraft | undefined {
       chatId,
       selected: {},
       text: {},
+      supplement: "",
       attachments: [],
       updatedAt: Date.now(),
     };
@@ -249,6 +280,9 @@ function isEmpty(draft: AskDraft): boolean {
   return (
     Object.keys(draft.selected).length === 0 &&
     Object.keys(draft.text).length === 0 &&
+    // A note-only draft is content: dropping it would lose what the boss typed
+    // in the "additional notes" field on any page/chat switch.
+    draft.supplement.length === 0 &&
     draft.attachments.length === 0
   );
 }
