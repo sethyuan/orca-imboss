@@ -49,8 +49,16 @@
  * in the DOM and focusable, and hidden with opacity only — never `display` or
  * `visibility` — so tabbing to it reveals it via `:focus-within`.
  *
- * No visible chrome at rest: the button sits on the bubble's own fill, and light
- * chrome there would read as a third chip competing with the time tag.
+ * It wears the very same chip recipe as the time tag next to it (`--imb-surface`
+ * fill + hairline + one raise, see `.imb-thread-jump` for the same recipe used
+ * by another control floating over the transcript), so the meta row reads as
+ * two chips instead of one tag plus a naked glyph. The fill is deliberately
+ * **opaque**: the button straddles the host's bottom edge, and ~7px of it hangs
+ * over the thread background — a translucent fill would change hue at that
+ * edge, while an opaque chip stays one solid shape on the green (self) bubble,
+ * the surface (other) bubble and the thread fill alike. The hairline is equally
+ * load-bearing: the other bubble's fill *is* `--imb-surface`, so without it the
+ * chip would vanish there.
  */
 .imb-msg-copy {
   display: inline-flex;
@@ -59,10 +67,11 @@
   width: 18px;
   height: 18px;
   padding: 0;
-  border: none;
+  border: 1px solid var(--imb-border);
   border-radius: var(--imb-radius-chip);
-  background: transparent;
+  background: var(--imb-surface);
   color: var(--imb-fg-muted);
+  box-shadow: var(--imb-elev-raised);
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
@@ -83,49 +92,43 @@
   pointer-events: auto;
 }
 
+/*
+ * Hover / press deepen the chip with an **opaque** tint (the same 8% step
+ * `.imb-thread-jump` uses), never a translucent `--imb-row-hover`: the chip
+ * floats over two different fills, so a see-through hover would let the bubble
+ * colour bleed through the button and read as a smudge.
+ *
+ * No self-bubble overrides: the glyph now sits on the light/dark chip fill, not
+ * on the saturated green, so the theme's muted ink is legible again (`--imb-fg`
+ * and `--imb-bubble-text` are the same value in both themes anyway) and the
+ * accent focus ring needs no green-on-green replacement.
+ */
 .imb-msg-copy:hover {
-  background: var(--imb-row-hover);
+  background: color-mix(in oklch, var(--imb-fg) 8%, var(--imb-surface));
   color: var(--imb-fg);
+}
+
+.imb-msg-copy:active {
+  background: color-mix(in oklch, var(--imb-fg) 14%, var(--imb-surface));
 }
 
 .imb-msg-copy:focus-visible {
   outline: none;
-  box-shadow: var(--imb-focus-ring);
-}
-
-/*
- * Self bubble: a saturated green fill, where the muted ink every other host uses
- * would sit at ~2:1 and read as a disabled control. The glyph derives from the
- * bubble's own text colour instead (same idea as the code-block copy button),
- * including the focus ring, which would otherwise be green-on-green.
- */
-.imb-msg.imb-self .imb-msg-copy {
-  color: color-mix(in oklab, var(--imb-bubble-text) 62%, transparent);
-}
-
-.imb-msg.imb-self .imb-msg-copy:hover {
-  background: color-mix(in oklab, var(--imb-bubble-text) 14%, transparent);
-  color: var(--imb-bubble-text);
-}
-
-.imb-msg.imb-self .imb-msg-copy:focus-visible {
-  box-shadow: 0 0 0 3px
-    color-mix(in oklab, var(--imb-bubble-text) 35%, transparent);
+  /* Ring *plus* the resting raise: replacing the shadow would flatten the chip
+     at the exact moment it must read as a focused control. */
+  box-shadow: var(--imb-focus-ring), var(--imb-elev-raised);
 }
 
 /*
  * Touch / no-hover platforms have no row hover to reveal anything, so the copy
- * action would be unreachable. It stays visible at the reduced opacity the code
- * blocks use for their own copy button; the time tag keeps its hover-only
- * behaviour (it is information, not an action).
+ * action would be unreachable. It stays visible at full opacity: the chip is
+ * now the button's own chrome, and a 55%-transparent chip would read as a
+ * washed-out, disabled control. Press feedback is the `:active` tint above. The
+ * time tag keeps its hover-only behaviour (it is information, not an action).
  */
 @media (hover: none) {
   .imb-msg-copy {
-    opacity: 0.55;
-    pointer-events: auto;
-  }
-
-  .imb-msg-copy:active {
     opacity: 1;
+    pointer-events: auto;
   }
 }

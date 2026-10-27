@@ -55,9 +55,14 @@ export function MessageTime({
 
 /**
  * Copy-to-clipboard glyph button. Mirrors the code-block copy button
- * (`markdown/index.tsx`): the icon flips to a check for ~1.5s, the label
- * (`title` + `aria-label`) flips to "Copied", and a clipboard failure is
- * non-fatal — the message text stays selectable.
+ * (`markdown/index.tsx`) in *behaviour*: the icon flips to a check for ~1.5s,
+ * the label (`title` + `aria-label`) flips to "Copied", and a clipboard failure
+ * is non-fatal — the message text stays selectable.
+ *
+ * It does not mirror the code-block copy button in *chrome*: this one sits in the
+ * bubble's bottom-right meta row, so it wears the same chip as the time tag
+ * beside it (opaque `--imb-surface` fill + hairline + one raise, hover/press
+ * deepen it). Colours, reveal and the no-hover fallback all live in `index.css`.
  */
 function CopyMarkdownButton({ text }: { text: string }): React.JSX.Element {
   const [copied, setCopied] = useState(false);
@@ -106,9 +111,9 @@ function CopyMarkdownButton({ text }: { text: string }): React.JSX.Element {
       title={label}
     >
       {copied ? (
-        <IconCheck className="imb-icon imb-xs" />
+        <IconCheck className="imb-icon imb-2xs" />
       ) : (
-        <IconCopy className="imb-icon imb-xs" />
+        <IconCopy className="imb-icon imb-2xs" />
       )}
     </button>
   );

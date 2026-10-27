@@ -164,6 +164,11 @@ h4 {
   height: 14px;
 }
 
+.imb-icon.imb-2xs {
+  width: 12px;
+  height: 12px;
+}
+
 .imb-error-text {
   color: var(--imb-danger);
 }
