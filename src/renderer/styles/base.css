@@ -25,6 +25,8 @@ body {
   font-size: var(--imb-fs-body);
   line-height: var(--imb-leading-body);
   text-rendering: optimizeLegibility;
+  text-autospace: normal;
+  text-spacing-trim: normal;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
