@@ -2,9 +2,11 @@ import {
   isSubscriptionLoginProvider,
   SUBSCRIPTION_SIGNED_IN_LABELS,
 } from "@shared/constants/providers";
+import { SettingKeys } from "@shared/constants/settings";
 import { t } from "@shared/l10n";
-import type { ProviderInfo, ProviderUpsert } from "@shared/types";
-import { useEffect, useRef, useState } from "react";
+import type { ModelOption, ProviderInfo, ProviderUpsert } from "@shared/types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { modelRef } from "../../../../thinking-options";
 import { Button } from "../../../button";
 import { DetailBody } from "../../../detail-pane/detail-body";
 import { DetailHead } from "../../../detail-pane/detail-head";
@@ -50,6 +52,30 @@ export function ProviderDetail({
   const [error, setError] = useState<string | null>(null);
   const [removeOpen, setRemoveOpen] = useState(false);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Models this provider contributes (Pi catalog for built-ins, the stored
+  // list for custom ones) plus the app default, so a model can be picked
+  // right here instead of only in the global model selects.
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [defaultModel, setDefaultModel] = useState("");
+
+  const loadModels = useCallback(async (): Promise<void> => {
+    try {
+      const [all, stored] = await Promise.all([
+        imb.models.list(),
+        imb.settings.get(SettingKeys.DefaultModel),
+      ]);
+      setModels(all.filter((model) => model.provider === provider.id));
+      setDefaultModel(stored ?? "");
+    } catch {
+      // A model list is a convenience here; the provider is still usable
+      // without it (the global model selects load their own list).
+      setModels([]);
+    }
+  }, [provider.id]);
+
+  useEffect(() => {
+    void loadModels();
+  }, [loadModels]);
 
   useEffect(() => {
     return () => {
@@ -126,6 +152,9 @@ export function ProviderDetail({
     setError(null);
     try {
       await onSave(input);
+      // A new key can add this provider's models to the runtime, so the
+      // list is re-read instead of trusted from before the save.
+      await loadModels();
       // Reflect what was persisted (trimmed base URL, de-duplicated model ids)
       // without depending on the reloaded provider identity.
       setConfig((prev) => ({
@@ -149,6 +178,17 @@ export function ProviderDetail({
   };
 
   const masked = provider.keyHint ? `••••••••${provider.keyHint}` : "••••••••";
+
+  /** Make one of this provider's models the app-wide default. */
+  const useAsDefault = async (model: ModelOption): Promise<void> => {
+    try {
+      const ref = modelRef(model);
+      await imb.settings.set(SettingKeys.DefaultModel, ref);
+      setDefaultModel(ref);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   return (
     <>
@@ -203,6 +243,39 @@ export function ProviderDetail({
           </>
         )}
         <SubscriptionLogin providerId={provider.id} onSignedIn={onSignedIn} />
+        {provider.kind === "built-in" && (
+          <Field
+            label={t("Available models")}
+            hint={t(
+              "Models this provider offers. Pick one to use it as the app default.",
+            )}
+          >
+            {models.length === 0 ? (
+              <p className="imb-module-note">
+                {t("No models available for this provider yet.")}
+              </p>
+            ) : (
+              <div className="imb-provider-model-list">
+                {models.map((model) => {
+                  const ref = modelRef(model);
+                  const isDefault = defaultModel === ref;
+                  return (
+                    <Button
+                      key={ref}
+                      size="sm"
+                      variant={isDefault ? "primary" : "secondary"}
+                      title={isDefault ? t("Current default model") : ref}
+                      onClick={() => void useAsDefault(model)}
+                    >
+                      {model.name || model.id}
+                      {isDefault && ` · ${t("Default")}`}
+                    </Button>
+                  );
+                })}
+              </div>
+            )}
+          </Field>
+        )}
         {provider.authType === "oauth" ? (
           <Field label={t("Subscription")}>
             <span className="imb-provider-info">
