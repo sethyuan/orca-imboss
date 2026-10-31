@@ -4,7 +4,7 @@ import {
   SPEND_RANGES,
   SPEND_RANGE_LABELS,
 } from "@shared/constants/spend";
-import { TAG_FILTER_NONE } from "@shared/constants/tags";
+import { matchesTagFilter } from "@shared/constants/tags";
 import { t } from "@shared/l10n";
 import type { SpendGrouping, SpendRange, SpendReport } from "@shared/types";
 import { useEffect, useState } from "react";
@@ -53,6 +53,11 @@ export function SpendModule(): React.JSX.Element {
   // switch keeps it (session-only: an app restart clears it) — the grouping,
   // range and selected row already live there for the same reason.
   const { tags: tagFilter, setTags: setTagFilter } = useModuleFilter("spend");
+  // Serialized tag filter: the tag-filtered "All conversations" total is
+  // computed main-side (`SpendReport.chatFilterTotal`), so a tag change has to
+  // refetch. Keying the effect on this string (instead of the array) refetches
+  // on a real change only, not on a new array instance carrying the same tags.
+  const tagFilterKey = tagFilter.join("\u0000");
   // Candidate tags, re-read on every mount (the `chat_tags` table may have
   // changed while the module was unmounted).
   const [tagOptions, setTagOptions] = useState<string[]>([]);
@@ -67,7 +72,10 @@ export function SpendModule(): React.JSX.Element {
     setLoading(true);
     setError(null);
     void imb.spend
-      .report(effectiveRange)
+      // The filter only narrows the "All conversations" total; the rows below
+      // are narrowed locally (see `visibleChats`) so switching tags never waits
+      // for the round trip.
+      .report(effectiveRange, tagFilter)
       .then((next) => {
         if (alive) setReport(next);
       })
@@ -80,7 +88,8 @@ export function SpendModule(): React.JSX.Element {
     return () => {
       alive = false;
     };
-  }, [effectiveRange, refreshToken]);
+    // `tagFilter` is covered by `tagFilterKey` (same source array).
+  }, [effectiveRange, tagFilterKey, refreshToken]);
 
   // Names/roles in the report come from the DB; a create/rename/delete pushed
   // by main (or the agent's `imb_set_employees`) invalidates them.
@@ -132,18 +141,16 @@ export function SpendModule(): React.JSX.Element {
   const entries: SpendListEntry[] = [];
   if (report !== null) {
     if (spendGrouping === "chat") {
-      // The total row keeps the grand total; only the conversation rows below
-      // it are narrowed by the (AND) tag filter. The "No tags" pseudo-value
-      // matches conversations with no tag at all.
+      // Only the conversation rows are narrowed here; the "All conversations"
+      // total comes back already filtered (`chatFilterTotal`), computed by main
+      // from the same per-conversation accumulators. Both use the shared
+      // `matchesTagFilter` rule, so the row always equals the sum of the rows
+      // below it.
       const visibleChats =
         tagFilter.length === 0
           ? report.chats
           : report.chats.filter((chat) =>
-              tagFilter.every((tag) =>
-                tag === TAG_FILTER_NONE
-                  ? chat.tags.length === 0
-                  : chat.tags.includes(tag),
-              ),
+              matchesTagFilter(chat.tags, tagFilter),
             );
       // "全部对话" is the default-selected first row (no subtitle).
       entries.push({
@@ -151,8 +158,8 @@ export function SpendModule(): React.JSX.Element {
         employeeId: null,
         chatId: null,
         name: t("All conversations"),
-        tokens: report.totals.totalTokens,
-        cost: report.totals.cost,
+        tokens: report.chatFilterTotal.totals.totalTokens,
+        cost: report.chatFilterTotal.totals.cost,
       });
       for (const chat of visibleChats) {
         const title = chat.title || t("Untitled");

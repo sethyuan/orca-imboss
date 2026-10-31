@@ -1,5 +1,6 @@
 import type {
   SpendChatEmployeeReport,
+  SpendChatFilterTotal,
   SpendChatReport,
   SpendEmployeeChatReport,
   SpendEmployeeReport,
@@ -10,6 +11,7 @@ import type {
   SpendTrendBucket,
 } from "@shared/types";
 import { SPEND_EMPLOYEE_RECENT_CHATS } from "@shared/constants/spend";
+import { matchesTagFilter } from "@shared/constants/tags";
 import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import { readFile, stat } from "fs/promises";
 import { loadPiSdk } from "./agent/pi-sdk";
@@ -83,9 +85,18 @@ interface Accumulator {
   chats: Set<number>;
 }
 
-/** Build the usage report for `range` (the `spend:report` IPC payload). */
+/**
+ * Build the usage report for `range` (the `spend:report` IPC payload).
+ *
+ * `chatTags` is the conversation grouping's tag filter: it narrows **only**
+ * `chatFilterTotal` (the "All conversations" number). The grand total, the
+ * employee rows and the `chats` rows are unaffected — the renderer narrows its
+ * own list rows. Passing no filter (or an empty one) reproduces the unfiltered
+ * report exactly.
+ */
 export async function buildSpendReport(
   range: SpendRange,
+  chatTags: readonly string[] = [],
 ): Promise<SpendReport> {
   const now = Date.now();
   const cutoff = rangeCutoff(range, now);
@@ -222,15 +233,97 @@ export async function buildSpendReport(
       );
     });
 
+  // Sorted once and shared: with no tag filter the "All conversations" total
+  // *is* the grand total, so both fields point at the same numbers.
+  const grandByModel = sortModels([...grand.byModel.values()]);
+
   return {
     range,
     generatedAt: now,
     totals: grand.totals,
-    byModel: sortModels([...grand.byModel.values()]),
+    byModel: grandByModel,
     trend: fillTrend(grand.trend, range, now),
     employees,
     chats,
+    chatFilterTotal: buildChatFilterTotal(
+      perChat,
+      tagsByChat,
+      chatTags,
+      grand,
+      grandByModel,
+      chats.length,
+    ),
   };
+}
+
+/**
+ * Aggregate the conversations matched by `filter` into the "All conversations"
+ * number: token/cost totals plus a merged per-model breakdown.
+ *
+ * Derived from the finished per-conversation accumulators (the same objects the
+ * `chats` rows are built from), so it agrees with the visible rows by
+ * construction and never re-reads a session file.
+ *
+ * An empty filter returns the grand total's own objects instead of re-summing:
+ * every usage record is folded into both the grand total and its root chat, so
+ * `sum(chats[].totals) === totals`, and reusing the grand total keeps the
+ * unfiltered number bit-for-bit what it was before tag filtering existed.
+ */
+function buildChatFilterTotal(
+  perChat: Map<number, Accumulator>,
+  tagsByChat: Map<number, string[]>,
+  filter: readonly string[],
+  grand: Accumulator,
+  grandByModel: SpendModelBreakdown[],
+  chatCount: number,
+): SpendChatFilterTotal {
+  if (filter.length === 0) {
+    return {
+      tags: [],
+      chats: chatCount,
+      totals: grand.totals,
+      byModel: grandByModel,
+    };
+  }
+
+  const totals = emptyTotals();
+  const byModel = new Map<string, SpendModelBreakdown>();
+  let matched = 0;
+  for (const [chatId, accumulator] of perChat) {
+    if (!matchesTagFilter(tagsByChat.get(chatId) ?? [], filter)) continue;
+    matched += 1;
+    addTotals(totals, accumulator.totals);
+    for (const [key, model] of accumulator.byModel) {
+      let merged = byModel.get(key);
+      if (!merged) {
+        merged = {
+          provider: model.provider,
+          model: model.model,
+          totals: emptyTotals(),
+        };
+        byModel.set(key, merged);
+      }
+      addTotals(merged.totals, model.totals);
+    }
+  }
+
+  return {
+    tags: [...filter],
+    chats: matched,
+    totals,
+    byModel: sortModels([...byModel.values()]),
+  };
+}
+
+/** Fold one ready-made `SpendTotals` bucket into another (incl. the call count). */
+function addTotals(target: SpendTotals, source: SpendTotals): void {
+  target.input += source.input;
+  target.output += source.output;
+  target.cacheRead += source.cacheRead;
+  target.cacheWrite += source.cacheWrite;
+  target.totalTokens += source.totalTokens;
+  target.cost += source.cost;
+  target.calls += source.calls;
 }
 
 function createAccumulator(): Accumulator {

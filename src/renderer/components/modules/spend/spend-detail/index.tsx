@@ -266,14 +266,18 @@ function chatView(chat: SpendChatReport): SpendView {
 }
 
 function totalView(report: SpendReport, grouping: SpendGrouping): SpendView {
+  // The conversation grouping's fallback view is the "All conversations" total,
+  // which follows the tag filter (computed by main, see `chatFilterTotal`) so
+  // it matches the list row exactly. The employee grouping keeps the grand
+  // total.
+  const filtered = grouping === "chat";
   return {
     eyebrow: t("Total"),
-    // In the conversation grouping the fallback view describes all chats.
-    title: grouping === "chat" ? t("All conversations") : t("All employees"),
-    totals: report.totals,
-    byModel: report.byModel,
+    title: filtered ? t("All conversations") : t("All employees"),
+    totals: filtered ? report.chatFilterTotal.totals : report.totals,
+    byModel: filtered ? report.chatFilterTotal.byModel : report.byModel,
     // "全部对话" (all conversations) also omits the trend section.
-    trend: grouping === "chat" ? null : report.trend,
+    trend: filtered ? null : report.trend,
     chats: null,
     employees: null,
     byChat: null,

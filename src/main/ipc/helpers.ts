@@ -1,4 +1,9 @@
-import { MAX_TAGS_PER_CHAT, normalizeTag } from "@shared/constants/tags";
+import {
+  MAX_TAG_FILTER_TAGS,
+  MAX_TAGS_PER_CHAT,
+  normalizeTag,
+  TAG_FILTER_NONE,
+} from "@shared/constants/tags";
 import type { PageQuery } from "@shared/types";
 
 export function assertString(value: unknown, field: string): string {
@@ -68,4 +73,40 @@ export function parsePageQuery(value: unknown): PageQuery {
     if (record["noTags"]) page.noTags = true;
   }
   return page;
+}
+
+/**
+ * Validate a tag **filter** payload defensively (a filter over conversations,
+ * e.g. `spend:report`'s second argument).
+ *
+ * Differs from the filter inside {@link parsePageQuery} on purpose: the
+ * `TAG_FILTER_NONE` ("no tags") pseudo-value survives verbatim, and the length
+ * is bounded by {@link MAX_TAG_FILTER_TAGS} instead of `MAX_TAGS_PER_CHAT` (a
+ * filter is not a conversation — silently truncating one would answer for a
+ * filter the user never picked). Concrete tags are normalized, whitespace-only
+ * entries dropped and duplicates collapsed; input order is preserved.
+ */
+export function parseTagFilter(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new Error("tag filter must be an array.");
+  }
+  if (value.length > MAX_TAG_FILTER_TAGS) {
+    throw new Error(`at most ${MAX_TAG_FILTER_TAGS} tags may be filtered on.`);
+  }
+  const tags: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") {
+      throw new Error("each tag must be a string.");
+    }
+    // "No tags" is a sentinel, not a tag: keep it as-is (normalization would
+    // otherwise drop it together with whitespace-only input).
+    if (entry === TAG_FILTER_NONE) {
+      if (!tags.includes(TAG_FILTER_NONE)) tags.push(TAG_FILTER_NONE);
+      continue;
+    }
+    const tag = normalizeTag(entry);
+    if (tag.length > 0 && !tags.includes(tag)) tags.push(tag);
+  }
+  return tags;
 }

@@ -102,13 +102,48 @@ export interface SpendReport {
   range: SpendRange;
   /** Epoch ms when the report was produced. */
   generatedAt: number;
-  /** Grand total across every employee. */
+  /** Grand total across every employee (never narrowed by the tag filter). */
   totals: SpendTotals;
   byModel: SpendModelBreakdown[];
   /** Dense trend series for the requested window; empty for "all". */
   trend: SpendTrendBucket[];
   /** Per-employee rows, most expensive first. */
   employees: SpendEmployeeReport[];
-  /** Per-conversation rows (all chats, incl. task group chats), most expensive first. */
+  /**
+   * Per-conversation rows (all chats, incl. task group chats), most expensive
+   * first. Deliberately **not** narrowed by the tag filter the report was
+   * requested with: the conversation list narrows its own rows (instantly, see
+   * `chatFilterTotal` for why the aggregate lives server-side).
+   */
   chats: SpendChatReport[];
+  /**
+   * Aggregate over the conversations matched by that same tag filter — the
+   * number behind the conversation grouping's "All conversations" row and its
+   * detail pane. See {@link SpendChatFilterTotal}.
+   */
+  chatFilterTotal: SpendChatFilterTotal;
+}
+
+/**
+ * Aggregate over the conversations matched by the conversation-grouping tag
+ * filter (`spend:report`'s second argument), so the "All conversations" row
+ * and its detail pane follow the tag filter exactly like the conversation rows
+ * below it do.
+ *
+ * Computed server-side from the same per-conversation accumulators the `chats`
+ * rows are built from, which keeps it consistent with them by construction.
+ * With an empty `tags` list it folds every conversation, so it is identical to
+ * the report's grand total (`SpendReport.totals`) — an unfiltered report cannot
+ * change. There is no trend series: the conversation grouping never plots one.
+ */
+export interface SpendChatFilterTotal {
+  /**
+   * The filter it was computed with (echoed back for the caller's sanity):
+   * `TAG_FILTER_NONE` matches conversations without any tag; empty = no filter.
+   */
+  tags: string[];
+  /** Number of conversations folded into `totals`. */
+  chats: number;
+  totals: SpendTotals;
+  byModel: SpendModelBreakdown[];
 }

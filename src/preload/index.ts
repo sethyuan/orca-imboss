@@ -700,9 +700,18 @@ const api = {
   },
 
   spend: {
-    /** Aggregated token/cost report, per employee and as a grand total. */
-    report: (range: SpendRange) =>
-      ipcRenderer.invoke("spend:report", range) as Promise<SpendReport>,
+    /**
+     * Aggregated token/cost report, per employee and as a grand total.
+     *
+     * `chatTags` is the conversation grouping's tag filter (AND-combined,
+     * `TAG_FILTER_NONE` = "no tags"): it narrows `chatFilterTotal` — the
+     * "All conversations" number — and nothing else. Omit it for the
+     * unfiltered report.
+     */
+    report: (range: SpendRange, chatTags: readonly string[] = []) =>
+      ipcRenderer.invoke("spend:report", range, [
+        ...chatTags,
+      ]) as Promise<SpendReport>,
   },
 
   backup: {
