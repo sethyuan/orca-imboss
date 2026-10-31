@@ -1,0 +1,7 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
+  "include": ["playwright.config.ts", "tests/**/*"],
+  "compilerOptions": {
+    "composite": true
+  }
+}

@@ -5,3 +5,5 @@ pnpm-workspace.yaml
 LICENSE.md
 tsconfig.json
 tsconfig.*.json
+test-results
+playwright-report
