@@ -15,6 +15,9 @@ export const CURATED_PROVIDERS = [
   "openrouter",
   "xai",
   "xiaomi",
+  "xiaomi-token-plan-cn",
+  "xiaomi-token-plan-ams",
+  "xiaomi-token-plan-sgp",
   "zai",
 ] as const;
 
@@ -35,6 +38,9 @@ export const CURATED_PROVIDERS_LABELS = {
   openrouter: "OpenRouter",
   xai: "xAI",
   xiaomi: "Xiaomi",
+  "xiaomi-token-plan-cn": "Xiaomi Token Plan (CN)",
+  "xiaomi-token-plan-ams": "Xiaomi Token Plan (AMS)",
+  "xiaomi-token-plan-sgp": "Xiaomi Token Plan (SGP)",
   zai: "Z.ai",
 } as const;
 

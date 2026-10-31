@@ -49,7 +49,7 @@ imboss is a desktop app where you chat with an AI **Assistant** who acts as your
 
 ### Model providers
 
-- Connect providers through a curated list (Anthropic, OpenAI, DeepSeek, Google, Groq, MiniMax, Moonshot AI, OpenRouter, OpenCode Zen, OpenCode Go, xAI, Xiaomi, Z.ai, GitHub Copilot, and more) or add a **custom** provider.
+- Connect providers through a curated list (Anthropic, OpenAI, DeepSeek, Google, Groq, MiniMax, Moonshot AI, OpenRouter, OpenCode Zen, OpenCode Go, xAI, Xiaomi, Xiaomi Token Plan (CN/AMS/SGP), Z.ai, GitHub Copilot, and more) or add a **custom** provider.
 - Supports OpenAI-compatible completions/responses, Anthropic Messages and Google Generative AI APIs.
 - Fetch available models with one click, and keep API keys masked behind an explicit reveal.
 

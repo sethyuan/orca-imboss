@@ -49,7 +49,7 @@ imboss 是一款桌面应用：你与一位担任「幕僚长」的 AI **助理*
 
 ### 模型服务商
 
-- 通过精选列表接入服务商（Anthropic、OpenAI、DeepSeek、Google、Groq、MiniMax、Moonshot AI、OpenRouter、OpenCode Zen、OpenCode Go、xAI、小米、Z.ai、GitHub Copilot 等），也可添加**自定义**服务商。
+- 通过精选列表接入服务商（Anthropic、OpenAI、DeepSeek、Google、Groq、MiniMax、Moonshot AI、OpenRouter、OpenCode Zen、OpenCode Go、xAI、小米、小米 Token Plan（CN/AMS/SGP）、Z.ai、GitHub Copilot 等），也可添加**自定义**服务商。
 - 支持 OpenAI 兼容的 completions / responses、Anthropic Messages 与 Google Generative AI 协议。
 - 一键获取可用模型列表；API 密钥默认打码，仅在明确操作后显示。
 
