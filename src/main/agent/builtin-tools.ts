@@ -180,7 +180,8 @@ async function performSendMessage(
     groupChatId?: number;
     attachments?: string[];
     attachmentTotal?: number;
-    notify?: number[];
+    /** Participants to wake; `null`/absent means nobody is woken. */
+    notify?: number[] | null;
     notifyPrompt?: string;
     skipSenderCheck?: boolean;
   },
@@ -639,7 +640,56 @@ function createChatTool(
   };
 }
 
-/** `imb_send_message` — post as an active participant, optionally notifying others. */
+/**
+ * Cap on the participants one `imb_send_message` call may wake. Shared by the
+ * parameter schema and the raw-argument guard so both agree.
+ */
+const MAX_NOTIFY_IDS = 64;
+
+/**
+ * Guard the raw `notify` argument before the SDK coerces it.
+ *
+ * Tool arguments are run through `Value.Convert` before they are validated,
+ * and its conversions are lossy for this field: `""` becomes `[0]`,
+ * `[1, null]` becomes `[1, 0]` and `"null"` becomes `null`. A coerced `0`
+ * silently wakes the assistant (id 0) — a notification nobody asked for — so a
+ * malformed `notify` must fail loudly instead. This never repairs the value nor
+ * fills a missing one: an absent `notify` is left to the schema's `required`.
+ *
+ * Throws a message the model can act on; the SDK turns it into an error tool
+ * result (see `prepareToolCall`), so the next call can be corrected.
+ */
+function assertRawNotify(rawArgs: unknown): void {
+  if (typeof rawArgs !== "object" || rawArgs === null) return;
+  const args = rawArgs as Record<string, unknown>;
+  // `hasOwnProperty` (not `in`): only an explicitly passed key is inspected.
+  if (!Object.prototype.hasOwnProperty.call(args, "notify")) return;
+  const notify = args.notify;
+  // `null` is the documented "wake nobody" value; `[]` means the same thing and
+  // is deliberately accepted rather than rejected as a shape error.
+  if (notify === null) return;
+  if (!Array.isArray(notify)) {
+    throw new Error(
+      "Invalid `notify`: pass an array of employee ids, or `null` when nobody should be woken " +
+        "(e.g. a message for the boss).",
+    );
+  }
+  if (notify.length > MAX_NOTIFY_IDS) {
+    throw new Error(
+      `Invalid \`notify\`: at most ${MAX_NOTIFY_IDS} ids are allowed.`,
+    );
+  }
+  for (const id of notify) {
+    if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 0) {
+      throw new Error(
+        `Invalid \`notify\` entry ${JSON.stringify(id)}: ids must be non-negative integers. ` +
+          "Pass `null` when nobody should be woken.",
+      );
+    }
+  }
+}
+
+/** `imb_send_message` — post as an active participant, waking the listed participants. */
 function sendMessageTool(env: AgentEnvironment): AnyPiTool {
   return {
     name: "imb_send_message",
@@ -647,7 +697,9 @@ function sendMessageTool(env: AgentEnvironment): AnyPiTool {
     description:
       "Send a message into a chat as one of the active participants, with optional file-path attachments " +
       "(at most 5; pass `attachmentTotal` when more files were produced) and notifications to other " +
-      "participants. `kind` is `text` (the default) or `report` to report a finished task's result.",
+      "participants. `kind` is `text` (the default) or `report` to report a finished task's result. " +
+      "`notify` is required: pass the ids of the participants that must be woken, or `null` when nobody " +
+      "should be woken.",
     promptSnippet: "post to a chat",
     parameters: Type.Object({
       senderEmployeeId: Type.Integer({ minimum: 0 }),
@@ -662,10 +714,30 @@ function sendMessageTool(env: AgentEnvironment): AnyPiTool {
       attachmentTotal: Type.Optional(
         Type.Integer({ minimum: 0, maximum: MAX_ATTACHMENT_TOTAL }),
       ),
-      notify: Type.Optional(
-        Type.Array(Type.Integer({ minimum: 0 }), { maxItems: 64 }),
+      // Required, and nullable on purpose: notifying someone is a decision the
+      // caller has to make explicit (an assignment with no `notify` stays
+      // unread), while `null` states "wake nobody" without faking an id.
+      notify: Type.Union(
+        [
+          Type.Array(Type.Integer({ minimum: 0 }), {
+            maxItems: MAX_NOTIFY_IDS,
+          }),
+          Type.Null(),
+        ],
+        {
+          description:
+            "Participants to wake. Pass their ids when someone has to react (an assignment, a note to a " +
+            "teammate, a report back to whoever assigned the work); pass `null` when nobody should be " +
+            "woken (e.g. a message for the boss). `[]` means the same as `null`.",
+        },
       ),
     }),
+    // Reject a malformed raw `notify` before the SDK's coercion can turn it
+    // into a bogus id; validation then runs on the untouched arguments.
+    prepareArguments: (args) => {
+      assertRawNotify(args);
+      return args;
+    },
     execute: async (_toolCallId, params) => {
       const input = params as {
         senderEmployeeId: number;
@@ -674,7 +746,7 @@ function sendMessageTool(env: AgentEnvironment): AnyPiTool {
         content: string;
         attachments?: string[];
         attachmentTotal?: number;
-        notify?: number[];
+        notify: number[] | null;
       };
       const message = await performSendMessage(env, {
         senderEmployeeId: input.senderEmployeeId,
