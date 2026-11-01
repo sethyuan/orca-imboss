@@ -771,8 +771,9 @@ export function ChatModule(): React.JSX.Element {
 
   // Two paths that can leave the *already-selected* chat marked unread:
   //  - the window regains focus (nothing changes on focus by itself), and
-  //  - an `imb_notify` bump arrives for the selected chat while it is open
-  //    (that path pushes only `chats:unreadChanged`, never `messages:changed`).
+  //  - an out-of-band unread change (`chats:unreadChanged`, e.g. another client
+  //    of a remote backend marking the chat) that never pushes
+  //    `messages:changed`.
   // Both clear it again; the clear is idempotent, so they are cheap no-ops in
   // the common case. `chats:unreadChanged` additionally keeps the visible
   // (server-paged) list's badge in sync with the browse cache for every chat.

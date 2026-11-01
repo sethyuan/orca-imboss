@@ -238,32 +238,14 @@ export function markRead(id: number): void {
 
 /**
  * Increment the unread counter (messages from employees).
- * Root chats only — callers must not bump task group chats (see
- * `notifyUnread` for the enforced variant); the guard lives at the call site
- * in `appendMessage`, which already knows the chat's root/group nature.
+ * Root chats only — callers must not bump task group chats; the guard lives at
+ * the call site in `appendMessage`, which already knows the chat's root/group
+ * nature. This is the **only** unread bump path: one appended message = one
+ * unread, and the OS notification raised next to it (`notifyAlert`) never
+ * touches the counter.
  */
 export function bumpUnread(id: number): void {
   getDB().prepare("UPDATE chats SET unread = unread + 1 WHERE id = ?").run(id);
-}
-
-/**
- * Add a (non-negative) delta to a chat's unread counter and return the new
- * value. The delta is clamped to `>= 0` (a negative delta never underflows
- * below zero; `markRead` is the explicit clear path).
- * Root chats only — `notifyUnread` rejects task group chats before calling in.
- */
-export function addUnread(id: number, delta: number): number {
-  const numeric = Number(delta);
-  const safeDelta = Number.isFinite(numeric)
-    ? Math.max(0, Math.trunc(numeric))
-    : 0;
-  getDB()
-    .prepare("UPDATE chats SET unread = max(0, unread + ?) WHERE id = ?")
-    .run(safeDelta, id);
-  const row = getDB()
-    .prepare("SELECT unread FROM chats WHERE id = ?")
-    .get(id) as { unread: number } | undefined;
-  return row?.unread ?? 0;
 }
 
 export interface CreateChatOptions {

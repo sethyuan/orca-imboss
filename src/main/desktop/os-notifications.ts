@@ -3,7 +3,7 @@ import { getMainWindow, showMainWindow } from "../main-window";
 import type { OsNotification, OsNotifier } from "../platform";
 
 /**
- * Desktop OS notifications — the host half of `notifyUnread`.
+ * Desktop OS notifications — the host half of `notifyAlert`.
  *
  * Policy kept exactly as it was inline in `notifications.ts` before the
  * platform split:

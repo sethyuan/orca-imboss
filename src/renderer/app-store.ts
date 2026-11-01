@@ -1230,8 +1230,9 @@ export async function initAppStore(): Promise<void> {
   // by the modules after each mutation.
 
   // Chats: every message append refreshes that chat's summary (preview,
-  // lastAt, unread) and re-sorts the cached list. A lightweight unread-only
-  // event (imb_notify) updates items[].unread directly.
+  // lastAt, unread) and re-sorts the cached list. The unread-only event
+  // (`chats:unreadChanged`, pushed when a chat is marked read) updates
+  // items[].unread directly.
   imb.messages.onChanged(
     ({ chatId, senderEmployeeId, silent, root, muted, kind }) => {
       void appStore.refreshChatSummary(chatId);

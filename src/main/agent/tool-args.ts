@@ -156,10 +156,6 @@ function summarizeKnown(
       const chatId = text(record.chatId);
       return chatId ? `chat ${chatId}` : "";
     }
-    case "imb_notify": {
-      const employeeId = text(record.employeeId);
-      return employeeId ? `employee ${employeeId}` : "";
-    }
     case "imb_progress":
       return Array.isArray(record.steps) ? `${record.steps.length} steps` : "";
     case "imb_ask": {

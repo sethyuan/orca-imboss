@@ -141,10 +141,10 @@ export function createMainWindow(): BrowserWindow {
   win.on("unmaximize", () => win.webContents.send("window:maximized", false));
 
   // Forward focus regain to the renderer: the chat module clears the selected
-  // conversation's unread again on focus, because an `imb_notify` bump while
-  // the window was in the background only pushes `chats:unreadChanged` (no
-  // `messages:changed`), so the selection never changes and the selectedId
-  // effect never runs again.
+  // conversation's unread again on focus, because an out-of-band unread change
+  // (`chats:unreadChanged`) may arrive while the window was in the background
+  // without a `messages:changed`, so the selection never changes and the
+  // selectedId effect never runs again.
   win.on("focus", () => win.webContents.send("window:focus"));
 
   // Close = hide (the app keeps running in the tray); a real close only happens

@@ -1,16 +1,19 @@
 import * as dbChats from "./db/chats";
 import { getOsNotifier } from "./platform";
-import { sendToRenderer } from "./rpc/broadcast";
 
 /**
- * Unread bookkeeping and the "there is something new" nudge.
+ * The "there is something new" nudge the boss actually sees.
  *
- * Transport- and host-independent on purpose: the unread counter is persisted
- * data (so this runs where the database is), while *showing* an OS notification
- * is a host capability delegated to {@link getOsNotifier}. The desktop host
- * installs a notifier backed by Electron's `Notification` (see
- * `src/main/desktop/os-notifications.ts`); a remote backend installs nothing,
- * and its clients still receive the `chats:unreadChanged` event below.
+ * Transport- and host-independent on purpose: *showing* an OS notification is a
+ * host capability delegated to {@link getOsNotifier}. The desktop host installs
+ * a notifier backed by Electron's `Notification` (see
+ * `src/main/desktop/os-notifications.ts`); a remote backend installs nothing, so
+ * alerting degrades to a silent no-op there (the unread badge is pushed to the
+ * renderer by `db/messages.ts` on the same append).
+ *
+ * The unread counter itself is *not* bumped here: every message an employee or
+ * the assistant appends to a root chat already bumps it exactly once in
+ * `db/messages.ts` (`bumpUnread`), and this module must never add a second one.
  *
  * Re-exported here because every existing caller imports `sendToRenderer` from
  * this module; the implementation itself lives in `rpc/broadcast` so that
@@ -19,42 +22,39 @@ import { sendToRenderer } from "./rpc/broadcast";
 export { sendToRenderer } from "./rpc/broadcast";
 
 /**
- * Bump a chat's unread counter by `delta` (clamped >= 0), mirror the new count
- * to the renderer, and — when the host decides the user needs to be told — raise
- * an OS notification that, when clicked, focuses the app and jumps to the chat.
+ * Raise the OS notification that alerts the boss to a message which was just
+ * posted into one of his chats: when the app window is not focused a system
+ * notification pops up, and clicking it focuses the app and opens that chat.
  *
- * Root chats only: task group chats (fromChatId !== null) never record unread
- * (the badge is root-chat only and group chats track reads via read_cursors),
- * so a group chat id is rejected rather than silently ignored.
+ * Called by the send pipeline (`performSendMessage`) right after the message is
+ * stored, so the alert can never be forgotten by the model — every caller of
+ * this module is a deliberately *alerting* path:
+ * - `kind: "report"` and `imb_ask` alert by default (their text is derived from
+ *   the message when the caller gave no `alert`),
+ * - any other message alerts only when the caller passed an explicit `alert`.
  *
- * A muted chat keeps counting unread (the badge stays honest) but raises no OS
- * notification.
+ * Root chats only: task group chats (`fromChatId !== null`) never raise a
+ * notification — their activity reaches the boss through the assistant's
+ * progress cards and reports in the boss's own chat.
  *
- * Returns the new unread count.
+ * A muted chat stays silent too (it still counts unread; that bump happened in
+ * `db/messages.ts`). Blank text is a no-op rather than an empty banner.
  */
-export function notifyUnread(
-  chatId: number,
-  delta: number,
-  text: string,
-): number {
+export function notifyAlert(chatId: number, text: string): void {
+  const body = typeof text === "string" ? text.trim() : "";
+  if (body.length === 0) return;
   const chat = dbChats.getChat(chatId);
-  if (!chat) return 0;
-  if (chat.fromChatId !== null) return 0;
-
-  const newUnread = dbChats.addUnread(chatId, delta);
-  sendToRenderer("chats:unreadChanged", { chatId, unread: newUnread });
-
-  // A muted conversation still counts unread, but never notifies.
-  if (chat.muted) return newUnread;
+  if (!chat) return;
+  if (chat.fromChatId !== null) return;
+  if (chat.muted) return;
 
   // Whether the user is actually reachable is host knowledge (window focus, OS
   // notification support); a headless backend has nobody to interrupt.
   getOsNotifier().notify({
     chatId,
     title: chatTitle(chatId),
-    body: text,
+    body,
   });
-  return newUnread;
 }
 
 /** Notification title — the chat title when resolvable, otherwise the app name. */

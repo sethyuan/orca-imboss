@@ -46,7 +46,7 @@ import {
   normalizeImageSize,
 } from "../image-gen";
 import { readMcpServers } from "../mcp-store";
-import { notifyUnread, sendToRenderer } from "../notifications";
+import { notifyAlert, sendToRenderer } from "../notifications";
 import { materializeSessionFile, sessionPathFor } from "./session-files";
 import {
   interruptTurnDiscardingQueue,
@@ -63,14 +63,14 @@ import { listSkills } from "./skills";
  * Imboss built-in team tools.
  *
  * LLM-callable tools that let the assistant orchestrate a team (create/edit
- * employees, create chats, send messages, schedule cron jobs, notify) and let
+ * employees, create chats, send messages, schedule cron jobs) and let
  * participant agents work inside chats. Backed by a persistent per-(employee,
  * chat) Pi session with a read cursor. The assistant has no session in task
  * group chats: it reads them from its root-chat session on `wakeAgent`.
  *
  * The tool set is role-based: the assistant (employee id 0) gets the
  * orchestration tools (`imb_set_employees`, `imb_create_chat`,
- * `imb_add_participant`, `imb_list_employees`, `imb_toolset`, `imb_notify`,
+ * `imb_add_participant`, `imb_list_employees`, `imb_toolset`,
  * `imb_progress`, `imb_ask`, `imb_get_employee_stat`, `imb_interrupt`) plus
  * `imb_send_message` and `imb_read_chat`; a participant gets
  * `imb_send_message` and `imb_read_chat`, plus `imb_set_cronjob` and/or
@@ -183,6 +183,12 @@ async function performSendMessage(
     /** Participants to wake; `null`/absent means nobody is woken. */
     notify?: number[] | null;
     notifyPrompt?: string;
+    /**
+     * One-line OS-notification text for the boss. Absent/blank falls back to the
+     * default policy (`deriveAlertText`); it never means "do not alert" for the
+     * kinds that alert by default.
+     */
+    alert?: string | null;
     skipSenderCheck?: boolean;
   },
 ): Promise<Message> {
@@ -198,6 +204,23 @@ async function performSendMessage(
   if (!sender || sender.disabled) {
     throw new Error("Sender is not an active employee.");
   }
+  // The alert text is resolved before anything is written: an `alert` aimed at a
+  // task group chat is a mistake the caller can only fix in this call, and the
+  // notification itself would be dropped silently (the retired `imb_notify`
+  // tool behaved exactly that way, which made the model believe the boss had
+  // been alerted).
+  const explicitAlert =
+    typeof input.alert === "string" ? input.alert.trim() : "";
+  if (explicitAlert.length > 0 && chat.fromChatId !== null) {
+    throw new Error(
+      `Invalid \`alert\`: OS notifications can only be raised for the boss's own (root) chat, ` +
+        `and chat ${chat.id} is a task group chat. Post a short message into the boss's chat instead.`,
+    );
+  }
+  const alertText =
+    explicitAlert.length > 0
+      ? explicitAlert
+      : deriveAlertText(input.kind ?? "text", input.content);
   const attachments = await resolveAttachments(input.attachments);
   const message = dbMessages.appendMessage(
     input.chatId,
@@ -211,6 +234,12 @@ async function performSendMessage(
       attachmentTotal: input.attachmentTotal,
     },
   );
+
+  // The boss is alerted from here instead of by a second tool call: `report` and
+  // `ask` always alert, every other kind only with an explicit `alert` (see
+  // `deriveAlertText`). Root-chat and mute gating live in `notifyAlert`, and the
+  // unread counter is bumped exactly once, by `appendMessage` above.
+  if (alertText.length > 0) notifyAlert(input.chatId, alertText);
 
   for (const pid of input.notify ?? []) {
     if (!chat.participants.includes(pid)) continue;
@@ -689,6 +718,111 @@ function assertRawNotify(rawArgs: unknown): void {
   }
 }
 
+/**
+ * Cap on a caller-supplied `alert` text. It is a notification banner, not a
+ * message body: the full text always stays in the chat.
+ */
+const MAX_ALERT_LENGTH = 1000;
+
+/** Cap on the one-liner derived for a kind that alerts by default. */
+const ALERT_BODY_MAX = 200;
+
+/**
+ * Kinds that alert the boss whether or not the caller said so.
+ *
+ * `report` (a finished result) and `ask` (a decision only the boss can make) are
+ * the two messages a boss must never miss. Measuring the retired `imb_notify`
+ * usage showed the model alerted on top of them in 83% / 68% of the cases — that
+ * is exactly the recall a second, forgettable tool call cannot guarantee, so the
+ * notification is now part of posting. `progress` cards stay silent (they post
+ * in bursts and never ring) and plain `text` needs an explicit `alert`.
+ */
+const DEFAULT_ALERT_KINDS: ReadonlySet<string> = new Set(["report", "ask"]);
+
+/**
+ * One readable line out of a message body: its first non-empty line, markdown
+ * markers stripped, whitespace collapsed, length capped. Returns "" when there
+ * is nothing readable to show.
+ */
+function oneLine(value: string, max = ALERT_BODY_MAX): string {
+  const line =
+    value
+      .split("\n")
+      .map((part) => part.trim())
+      .find((part) => part.length > 0) ?? "";
+  const plain = line
+    .replace(/^[#>*+\-\s]+/, "")
+    .replace(/[*_`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (plain.length === 0) return "";
+  return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain;
+}
+
+/**
+ * The OS-notification text for a kind that alerts by default, or "" for a kind
+ * that only alerts when the caller passes an `alert` explicitly.
+ *
+ * `ask` content is the serialized question set, so the first question is the
+ * most informative line available (its own wording is already in the boss's
+ * language). Anything unreadable degrades to the first body line instead of
+ * failing the send.
+ */
+function deriveAlertText(kind: string, content: string): string {
+  if (!DEFAULT_ALERT_KINDS.has(kind)) return "";
+  if (kind === "ask") {
+    try {
+      const parsed = JSON.parse(content) as { questions?: unknown };
+      const questions = Array.isArray(parsed?.questions)
+        ? parsed.questions
+        : [];
+      const first: unknown = questions[0];
+      if (typeof first === "object" && first !== null) {
+        const text = (first as { text?: unknown }).text;
+        if (typeof text === "string") {
+          const derived = oneLine(text);
+          if (derived.length > 0) return derived;
+        }
+      }
+    } catch {
+      // Fall through: a payload that does not parse is still alertable.
+    }
+  }
+  return oneLine(content);
+}
+
+/**
+ * Guard the raw `alert` argument before the SDK coerces it.
+ *
+ * `Value.Convert` turns a number or a boolean into its string form, so
+ * `alert: 1` would be accepted as `"1"` and alert the boss with junk. An
+ * explicit `null` is allowed (it means "no alert") and a blank string is
+ * rejected rather than raising an empty banner.
+ */
+function assertRawAlert(rawArgs: unknown): void {
+  if (typeof rawArgs !== "object" || rawArgs === null) return;
+  const args = rawArgs as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(args, "alert")) return;
+  const alert = args.alert;
+  if (alert === null) return;
+  if (typeof alert !== "string") {
+    throw new Error(
+      "Invalid `alert`: pass a one-line string for the OS notification, or omit it when nobody " +
+        "should be disturbed.",
+    );
+  }
+  if (alert.trim().length === 0) {
+    throw new Error(
+      "Invalid `alert`: the text must not be empty. Omit `alert` when nobody should be disturbed.",
+    );
+  }
+  if (alert.length > MAX_ALERT_LENGTH) {
+    throw new Error(
+      `Invalid \`alert\`: at most ${MAX_ALERT_LENGTH} characters are allowed.`,
+    );
+  }
+}
+
 /** `imb_send_message` — post as an active participant, waking the listed participants. */
 function sendMessageTool(env: AgentEnvironment): AnyPiTool {
   return {
@@ -699,7 +833,9 @@ function sendMessageTool(env: AgentEnvironment): AnyPiTool {
       "(at most 5; pass `attachmentTotal` when more files were produced) and notifications to other " +
       "participants. `kind` is `text` (the default) or `report` to report a finished task's result. " +
       "`notify` is required: pass the ids of the participants that must be woken, or `null` when nobody " +
-      "should be woken.",
+      "should be woken. `alert` is optional: a `report` already raises an OS notification for the boss " +
+      "(its text is taken from `content`), and `alert` replaces that text or alerts him about any other " +
+      "message.",
     promptSnippet: "post to a chat",
     parameters: Type.Object({
       senderEmployeeId: Type.Integer({ minimum: 0 }),
@@ -731,11 +867,28 @@ function sendMessageTool(env: AgentEnvironment): AnyPiTool {
             "woken (e.g. a message for the boss). `[]` means the same as `null`.",
         },
       ),
+      // Optional, and not the way to alert the boss by default: `report` and
+      // `ask` alert on their own. This only alerts on another kind or replaces
+      // the derived one-liner (see `deriveAlertText`).
+      alert: Type.Optional(
+        Type.String({
+          minLength: 1,
+          maxLength: MAX_ALERT_LENGTH,
+          description:
+            "One-line text for the OS notification the boss sees when the app is not focused (clicking it " +
+            "focuses the app and opens this chat). A `report` always alerts and derives its text from " +
+            "`content`; pass `alert` to alert the boss about any other message, or to replace that " +
+            "derived text. Only the boss's own (root) chat can alert him — to alert him about a task " +
+            "group, post a short message into his chat. Omit when nobody needs to be disturbed.",
+        }),
+      ),
     }),
     // Reject a malformed raw `notify` before the SDK's coercion can turn it
-    // into a bogus id; validation then runs on the untouched arguments.
+    // into a bogus id, and a malformed `alert` before it becomes junk text;
+    // validation then runs on the untouched arguments.
     prepareArguments: (args) => {
       assertRawNotify(args);
+      assertRawAlert(args);
       return args;
     },
     execute: async (_toolCallId, params) => {
@@ -747,6 +900,7 @@ function sendMessageTool(env: AgentEnvironment): AnyPiTool {
         attachments?: string[];
         attachmentTotal?: number;
         notify: number[] | null;
+        alert?: string | null;
       };
       const message = await performSendMessage(env, {
         senderEmployeeId: input.senderEmployeeId,
@@ -756,6 +910,7 @@ function sendMessageTool(env: AgentEnvironment): AnyPiTool {
         attachments: input.attachments,
         attachmentTotal: input.attachmentTotal,
         notify: input.notify,
+        alert: input.alert,
       });
       return toolResult({ id: message.id });
     },
@@ -768,7 +923,8 @@ function sendMessageTool(env: AgentEnvironment): AnyPiTool {
  * Split out of `imb_send_message` so publishing progress has a dedicated,
  * typed tool: the sender is always the assistant (id 0), the card links to the
  * task group it reports on (`groupChatId`, rendered as the card's title link),
- * and it neither notifies anyone nor carries attachments. Registered only for
+ * and it neither notifies anyone, raises an OS notification (progress cards post
+ * in bursts and never ring) nor carries attachments. Registered only for
  * the assistant in `createTeamToolDefinitions`; the shared send pipeline keeps
  * its participant check, which the assistant satisfies in every chat it posts
  * to.
@@ -785,7 +941,9 @@ function progressTool(env: AgentEnvironment): AnyPiTool {
       "`employeeId`, that employee's `name`, and a `task` — a short phrase saying what that employee " +
       "is doing on this step, not their role/title; `status` `pending` before work is assigned, " +
       "`busy` once it is assigned and running, `done` when finished). Always resend the whole list " +
-      "on every update; no participant is notified.",
+      "on every update; no participant is notified and the boss gets no OS notification from this " +
+      "tool (progress cards never ring) — post an `imb_send_message` with an `alert` when he really " +
+      "must be interrupted.",
     promptSnippet: "post a progress card",
     parameters: Type.Object({
       chatId: Type.Integer({ minimum: 1 }),
@@ -1060,30 +1218,6 @@ function toolsetTool(): AnyPiTool {
   };
 }
 
-/** `imb_notify` — bump a chat's unread and optionally raise an OS notification. */
-function notifyTool(): AnyPiTool {
-  return {
-    name: "imb_notify",
-    label: "Notify",
-    description:
-      "Add a non-negative delta to a chat's unread counter and, when the app window " +
-      "is not focused, show an OS notification that focuses the app and jumps to that chat.",
-    promptSnippet: "bump unread / OS notification",
-    parameters: Type.Object({
-      chatId: Type.Integer({ minimum: 1 }),
-      unread: Type.Integer({ minimum: 0 }),
-      text: Type.String({ minLength: 1, maxLength: 1000 }),
-    }),
-    execute: async (_toolCallId, params) => {
-      const input = params as { chatId: number; unread: number; text: string };
-      const chat = dbChats.getChat(input.chatId);
-      if (!chat) throw new Error("Chat does not exist.");
-      const newUnread = notifyUnread(input.chatId, input.unread, input.text);
-      return toolResult({ chatId: input.chatId, unread: newUnread });
-    },
-  };
-}
-
 /**
  * `imb_set_cronjob` — create/update a scheduled task.
  *
@@ -1243,9 +1377,11 @@ function addParticipantTool(env: AgentEnvironment): AnyPiTool {
  *
  * Reserved for decisions only the boss can make. The sender is always the
  * assistant (id 0) and there is no `notify` — the boss is a human, not an
- * employee. The assistant alerts the boss with a separate `imb_notify` call
- * after posting. The boss answers through the AskCard UI, which appends a
- * `kind:"answer"` message and wakes the assistant.
+ * employee. Posting the card alerts him automatically: `ask` is one of the two
+ * kinds that raise an OS notification without being asked (see
+ * `deriveAlertText`), and an explicit `alert` replaces the derived text. The
+ * boss answers through the AskCard UI, which appends a `kind:"answer"` message
+ * and wakes the assistant.
  *
  * The card always offers an "additional notes" field after the last question,
  * so an answer may carry a top-level `supplement` string next to `answers`: the
@@ -1263,7 +1399,8 @@ function askTool(env: AgentEnvironment): AnyPiTool {
       "`multiple` renders checkboxes (several choices), and `free` renders a free-text field (also " +
       "used when a question has no `options`). When `options` are given but `type` is omitted, the " +
       "question defaults to `multiple` (checkboxes). The boss answers through the question card, " +
-      "delivered back as an `answer` message; call `imb_notify` afterwards so the boss is alerted. " +
+      "delivered back as an `answer` message. The boss is alerted automatically (an OS notification " +
+      "when the app is not focused); pass `alert` to replace that notification's text. " +
       'The card always shows an "additional notes" field after the last question, so the answer ' +
       "may also carry a top-level `supplement` string next to `answers`: extra instructions the boss " +
       "wrote beyond the questions (absent when empty, and the only content when they answered no " +
@@ -1295,7 +1432,26 @@ function askTool(env: AgentEnvironment): AnyPiTool {
       attachmentTotal: Type.Optional(
         Type.Integer({ minimum: 0, maximum: MAX_ATTACHMENT_TOTAL }),
       ),
+      // The card alerts by default (the notification text is the first
+      // question); this only replaces that text, e.g. when the first question is
+      // not the most informative line.
+      alert: Type.Optional(
+        Type.String({
+          minLength: 1,
+          maxLength: MAX_ALERT_LENGTH,
+          description:
+            "One-line text for the OS notification the boss sees when the app is not focused. " +
+            "`imb_ask` always alerts; without this the notification shows the first question. " +
+            "Omit it unless a different one-liner says it better.",
+        }),
+      ),
     }),
+    // A number or boolean `alert` would be coerced to junk text (see
+    // `assertRawAlert`); validation then runs on the untouched arguments.
+    prepareArguments: (args) => {
+      assertRawAlert(args);
+      return args;
+    },
     execute: async (_toolCallId, params) => {
       const input = params as {
         chatId: number;
@@ -1309,6 +1465,7 @@ function askTool(env: AgentEnvironment): AnyPiTool {
         };
         attachments?: string[];
         attachmentTotal?: number;
+        alert?: string | null;
       };
       const message = await performSendMessage(env, {
         senderEmployeeId: ASSISTANT_ID,
@@ -1317,6 +1474,7 @@ function askTool(env: AgentEnvironment): AnyPiTool {
         content: JSON.stringify(input.questions),
         attachments: input.attachments,
         attachmentTotal: input.attachmentTotal,
+        alert: input.alert,
       });
       return toolResult({ id: message.id });
     },
@@ -1677,7 +1835,7 @@ function interruptTool(
  *
  * - Assistant (id 0): orchestration tools — `imb_set_employees`,
  *   `imb_create_chat`, `imb_add_participant`, `imb_read_chat`,
- *   `imb_list_employees`, `imb_toolset`, `imb_notify`, `imb_progress`,
+ *   `imb_list_employees`, `imb_toolset`, `imb_progress`,
  *   `imb_ask`, `imb_get_employee_stat`, `imb_interrupt`; plus
  *   `imb_send_message`, the cron tools and `imb_generate_image`
  *   (never gated: the assistant's `mcp` list is immutable).
@@ -1810,7 +1968,6 @@ export function createTeamToolDefinitions(
     tools.push(addParticipantTool(env));
     tools.push(listEmployeesTool());
     tools.push(toolsetTool());
-    tools.push(notifyTool());
     // Progress cards are assistant-only: the tool hardcodes the sender to the
     // assistant and participants have no way to post one (they lack `steps`).
     tools.push(progressTool(env));
