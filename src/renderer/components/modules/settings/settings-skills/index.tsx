@@ -1,5 +1,5 @@
 import { t } from "@shared/l10n";
-import type { InstalledSkill } from "@shared/types";
+import type { InstalledSkill, InstalledSkillSource } from "@shared/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appStore, useApp } from "../../../../app-store";
 import { chooseRemoteDirectory, isRemoteMode } from "../../../../remote-files";
@@ -22,10 +22,23 @@ import "../settings-split.css";
 import "./index.css";
 
 /**
+ * Display form of the two skills roots. The real paths are main-process state
+ * (and `~/.imboss` can be relocated), so the UI shows the documented spellings.
+ */
+const SKILL_ROOT_LABELS: Record<InstalledSkillSource, string> = {
+  imboss: "~/.imboss/agent/skills",
+  agents: "~/.agents/skills",
+};
+
+/**
  * Settings › Skills — the installed-skills manager, embedded in the Settings
  * detail pane as a nested master/detail split (skill list + selected skill's
  * description). Moved out of the top-level nav so all configuration lives
  * under Settings.
+ *
+ * The list is the union of the app's own skills folder and the shared, read-only
+ * `~/.agents/skills`; the detail pane names the source so "why is there no
+ * Uninstall button" answers itself.
  */
 export function SettingsSkills(): React.JSX.Element {
   const [selectedName, setSelectedName] = useState<string | null>(null);
@@ -170,6 +183,30 @@ export function SettingsSkills(): React.JSX.Element {
 
   const selected = skills.find((skill) => skill.name === selectedName) ?? null;
 
+  /**
+   * Only the shared `~/.agents/skills` folder is read-only; anything else is
+   * the app's own skill. Written as an allow-list of the *external* value so a
+   * remote backend that predates the `source` field still behaves (it could
+   * only ever have listed the app's own folder).
+   */
+  const isReadOnly = (skill: InstalledSkill): boolean =>
+    skill.source === "agents";
+
+  /** Skill name → whether the entry is read-only (see `isReadOnly`). */
+  const readOnlyByName = useMemo((): Map<string, boolean> => {
+    const map = new Map<string, boolean>();
+    for (const skill of data.skills.items)
+      map.set(skill.name, isReadOnly(skill));
+    return map;
+  }, [data.skills.items]);
+
+  /**
+   * Only app-owned skills can be uninstalled: the shared folder belongs to other
+   * agent tools (main enforces this too, this is only what the UI offers).
+   */
+  const removableNames = (names: readonly string[]): string[] =>
+    names.filter((name) => readOnlyByName.get(name) !== true);
+
   /** How many employees currently select any of `names` (drives the copy). */
   const linkedEmployeeCount = (names: readonly string[]): number => {
     if (names.length === 0) return 0;
@@ -238,6 +275,15 @@ export function SettingsSkills(): React.JSX.Element {
             sub={skill.description ?? "—"}
             onContextMenu={(e) => {
               e.preventDefault();
+              // Selection-aware: a right-click on an already-selected row
+              // targets the whole selection; otherwise only the right-clicked
+              // skill (never a hidden select-all). Skills from the shared
+              // read-only folder are dropped from the target list.
+              const target = removableNames(
+                multi.selectedKeys.has(skill.name)
+                  ? [...multi.selectedKeys]
+                  : [skill.name],
+              );
               setCtxMenu({
                 x: e.clientX,
                 y: e.clientY,
@@ -251,15 +297,10 @@ export function SettingsSkills(): React.JSX.Element {
                     key: "uninstall",
                     label: t("Uninstall"),
                     danger: true,
+                    // Nothing here belongs to the app's own skills folder.
+                    disabled: target.length === 0,
                     onSelect: () => {
-                      // Selection-aware: a right-click on an already-selected
-                      // row uninstalls the whole selection; otherwise only the
-                      // right-clicked skill (never a hidden select-all).
-                      setBulkNames(
-                        multi.selectedKeys.has(skill.name)
-                          ? [...multi.selectedKeys]
-                          : [skill.name],
-                      );
+                      setBulkNames(target);
                       setBulkOpen(true);
                     },
                   },
@@ -278,18 +319,27 @@ export function SettingsSkills(): React.JSX.Element {
         eyebrow="Skill"
         title={selected.name}
         actions={
-          <Button
-            variant="danger"
-            size="sm"
-            loading={busy}
-            onClick={() => setUninstallTarget(selected)}
-          >
-            {t("Uninstall")}
-          </Button>
+          isReadOnly(selected) ? undefined : (
+            <Button
+              variant="danger"
+              size="sm"
+              loading={busy}
+              onClick={() => setUninstallTarget(selected)}
+            >
+              {t("Uninstall")}
+            </Button>
+          )
         }
       />
       <DetailBody style={{ paddingTop: "0" }}>
         <DetailReadOnlyDescription description={selected.description} />
+        <p className="imb-module-note">
+          {isReadOnly(selected)
+            ? t("Read from ${path}; it is managed by another tool.", {
+                path: SKILL_ROOT_LABELS.agents,
+              })
+            : t("Installed in ${path}", { path: SKILL_ROOT_LABELS.imboss })}
+        </p>
       </DetailBody>
     </>
   ) : null;

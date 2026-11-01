@@ -26,9 +26,11 @@ import type {
   McpTransport,
 } from "@shared/types";
 import { createHash } from "crypto";
+import { join } from "path";
 import {
   getAgentRoot,
   getAgentSessionsDir,
+  getAgentsSkillsDir,
   getBuiltinSkillsDir,
 } from "../data-dir";
 import { getChat } from "../db/chats";
@@ -599,7 +601,19 @@ export class AgentSession {
       sessionManager = pi.SessionManager.inMemory(cwd);
     }
 
-    const settingsManager = pi.SettingsManager.inMemory();
+    // The SDK discovers the shared `~/.agents/skills` folder on its own and
+    // loads it *before* `additionalSkillPaths` (where the built-in skills
+    // live), so a same-named folder there would replace an app-shipped built-in
+    // skill. Force-exclude exactly those paths (`-<path>` override). It has to
+    // go into the initial settings rather than `applyOverrides`, because the
+    // loader's `reload()` re-reads settings from storage and would drop an
+    // in-memory-only override; a disabled built-in-named folder then loses the
+    // name to the real built-in copy, as intended.
+    const settingsManager = pi.SettingsManager.inMemory({
+      skills: BUILTIN_SKILL_NAMES.map(
+        (name) => `-${join(getAgentsSkillsDir(), name)}`,
+      ),
+    });
     settingsManager.applyOverrides({ defaultTools: defaultToolNames });
 
     // Enumeration of the active tools for this employee-session's `[tools]`

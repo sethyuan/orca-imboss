@@ -5,7 +5,12 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { BUILTIN_SKILL_NAMES } from "./agent/builtin-skills";
 import { isValidSkillName } from "./agent/skills";
-import { getAgentSkillsDir, getAuthPath, getModelsPath } from "./data-dir";
+import {
+  getAgentSkillsDir,
+  getAgentsSkillsDir,
+  getAuthPath,
+  getModelsPath,
+} from "./data-dir";
 import { getDB } from "./db";
 import { parseJsonObject, parseStringArray, stringifyArray } from "./db/json";
 import { getSetting, setSetting } from "./db/settings";
@@ -20,7 +25,8 @@ import { readMcpRawEntries } from "./mcp-store";
  * live outside the database:
  *
  * - MCP servers: `~/.imboss/agent/mcp.json` (keys are the identities);
- * - user skills: `~/.imboss/agent/skills/<name>/SKILL.md`;
+ * - user skills: `~/.imboss/agent/skills/<name>/SKILL.md`, plus the shared
+ *   read-only `~/.agents/skills/<name>/SKILL.md`;
  * - built-in skills: `BUILTIN_SKILL_NAMES` (code-shipped, never on the user
  *   skills dir);
  * - models: configured providers (`auth.json` / `models.json`).
@@ -118,8 +124,8 @@ export interface KnownCatalog {
   builtinMcp: Set<string>;
   /** Code-shipped skills, always present regardless of the skills dir. */
   builtinSkills: Set<string>;
-  /** Absolute user skills root (`~/.imboss/agent/skills`). */
-  skillsRoot: string;
+  /** Skills roots in priority order (the app's own folder, then the shared one). */
+  skillRoots: readonly string[];
   /** Per-pass `SKILL.md` existence memo (skill names are cheap but repeated). */
   skillExistence: Map<string, boolean>;
   /**
@@ -155,7 +161,7 @@ export function loadKnownCatalog(): KnownCatalog {
     mcpKeys,
     builtinMcp: new Set(BUILTIN_TOOL_OPTIONS.map((option) => option.value)),
     builtinSkills: new Set<string>(BUILTIN_SKILL_NAMES),
-    skillsRoot: getAgentSkillsDir(),
+    skillRoots: [getAgentSkillsDir(), getAgentsSkillsDir()],
     skillExistence: new Map<string, boolean>(),
     providerIds: readConfiguredProviderIds(),
   };
@@ -182,8 +188,10 @@ export function isKnownMcpRef(
 }
 
 /**
- * True when `name` still names a skill: a built-in skill, or an installed
- * folder that contains a `SKILL.md`.
+ * True when `name` still names a skill: a built-in skill, or a folder that
+ * contains a `SKILL.md` in **any** skills root (the app's own folder or the
+ * shared read-only `~/.agents/skills`), because both are listable and
+ * selectable.
  *
  * The folder name is validated before it is used as a path (`SAFE_NAME_RE`),
  * and `.`/`..` are rejected explicitly — that regex accepts them, and a
@@ -198,7 +206,9 @@ export function isKnownSkillRef(
   if (!isValidSkillName(name) || name === "." || name === "..") return false;
   const cached = catalog.skillExistence.get(name);
   if (cached !== undefined) return cached;
-  const exists = existsSync(join(catalog.skillsRoot, name, SKILL_FILE));
+  const exists = catalog.skillRoots.some((root) =>
+    existsSync(join(root, name, SKILL_FILE)),
+  );
   catalog.skillExistence.set(name, exists);
   return exists;
 }

@@ -33,7 +33,7 @@ import type {
   EmployeeImportPreviewSkill,
   EmployeeImportResult,
 } from "@shared/types";
-import { isValidSkillName } from "../agent/skills";
+import { isValidSkillName, resolveSkillDir } from "../agent/skills";
 import { listAvailableModels } from "../agent/model-runtime";
 import { saveAvatar } from "../avatars";
 import { getAgentRoot, getAgentSkillsDir } from "../data-dir";
@@ -328,10 +328,10 @@ export async function applyEmployeeImport(
         skillLinks.push(name);
         continue;
       }
-      if (
-        isValidSkillName(name) &&
-        existsSync(join(skillsRoot, name, "SKILL.md"))
-      ) {
+      // A skill the package does not carry stays linked when *either* skills
+      // root provides it (the app's own folder or the shared read-only one),
+      // which is the same set the UI lists.
+      if (resolveSkillDir(name) !== null) {
         skillLinks.push(name);
         continue;
       }
@@ -591,10 +591,7 @@ async function buildPreview(args: {
   const missingSkills: string[] = [];
   for (const name of manifest.employee.skills) {
     if (packageSkills.has(name)) continue;
-    if (
-      isValidSkillName(name) &&
-      existsSync(join(skillsRoot, name, "SKILL.md"))
-    ) {
+    if (resolveSkillDir(name) !== null) {
       continue;
     }
     missingSkills.push(name);

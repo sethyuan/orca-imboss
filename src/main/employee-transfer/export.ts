@@ -1,5 +1,4 @@
 import {
-  existsSync,
   lstatSync,
   readFileSync,
   readdirSync,
@@ -25,8 +24,7 @@ import type {
   EmployeeExportResult,
   EmployeeExportSkillInfo,
 } from "@shared/types";
-import { isValidSkillName } from "../agent/skills";
-import { getAgentSkillsDir } from "../data-dir";
+import { isValidSkillName, resolveSkillDir } from "../agent/skills";
 import { readMcpRawEntries } from "../mcp-store";
 import { getAppInfo } from "../platform";
 import { writeZipArchive, type ZipWriteEntry } from "./archive";
@@ -40,7 +38,9 @@ import {
 /**
  * Employee → zip. The package carries the employee's own fields, the
  * `mcp.json` entries of the servers it links (credential **values** blanked,
- * keys kept) and the folders of the skills it links.
+ * keys kept) and the folders of the skills it links — taken from either skills
+ * root (a skill that only exists in the shared `~/.agents/skills` folder is
+ * packaged the same way and lands in the app's own folder on import).
  *
  * Nothing else travels: no conversations, no cron jobs, no provider
  * credentials. The archive is written under `<destination>.partial` and only
@@ -101,7 +101,9 @@ function buildExportPayload(employee: Employee): {
   }
 
   // --- Skill folders ------------------------------------------------------
-  const skillsRoot = getAgentSkillsDir();
+  // A skill may be provided by either skills root (the app's own folder or the
+  // shared `~/.agents/skills`); the package layout is unchanged, so an import
+  // always lands in the app's own folder (`EMPLOYEE_SKILLS_DIR/<name>/`).
   const entries: ZipWriteEntry[] = [];
   const skills: EmployeeExportSkillInfo[] = [];
   const includedSkills: string[] = [];
@@ -113,8 +115,8 @@ function buildExportPayload(employee: Employee): {
       );
       continue;
     }
-    const dir = join(skillsRoot, name);
-    if (!existsSync(join(dir, "SKILL.md"))) {
+    const dir = resolveSkillDir(name);
+    if (dir === null) {
       warnings.push(
         t("Skill “${name}” is linked but not installed; it was skipped.", {
           name,

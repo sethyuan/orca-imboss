@@ -28,18 +28,20 @@ Node-only logic (db, agent, integrations, rpc) is covered by
 
 ## What "isolated" means here (why this never touches the boss's data)
 
-`tests/e2e/helpers/app.ts` launches the app with two throw-away folders:
+`tests/e2e/helpers/app.ts` launches the app with three throw-away folders
+(and a throw-away home):
 
-| Env / flag                       | What it isolates                                                                                                           |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `IMBOSS_DATA_ROOT=<tmp>/data`    | the business data: SQLite, avatars, attachments, agent env (`auth.json`, skills, sessions), mini apps, the default workdir |
-| `--user-data-dir=<tmp>/userdata` | Electron's own state, **including the single-instance lock**                                                               |
-| `--lang=en-US`                   | the UI locale (the app otherwise derives it from the OS)                                                                   |
+| Env / flag                                   | What it isolates                                                                                                           |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `IMBOSS_DATA_ROOT=<tmp>/data`                | the business data: SQLite, avatars, attachments, agent env (`auth.json`, skills, sessions), mini apps, the default workdir |
+| `HOME=<tmp>/home` (`USERPROFILE` on Windows) | the user's home, i.e. the shared, read-only Agent Skills folder `~/.agents/skills` that the app also reads                 |
+| `--user-data-dir=<tmp>/userdata`             | Electron's own state, **including the single-instance lock**                                                               |
+| `--lang=en-US`                               | the UI locale (the app otherwise derives it from the OS)                                                                   |
 
 Both paths are asserted to live under `os.tmpdir()` _and_ to be what the app
 actually resolved, so the suite fails loudly if isolation ever breaks. That is why
 tests can run while the installed `imboss.app` is open, and why they never read or
-write `~/.imboss`.
+write `~/.imboss` or `~/.agents`.
 
 The folders are deleted when the app closes. Keep them for debugging with:
 
@@ -69,7 +71,7 @@ it.
 ## Writing a test
 
 - `tests/e2e/*.spec.ts` — one file per area (`smoke`, `chat`, `navigation`,
-  `settings`). Only `*.spec.ts` is collected; `helpers/**` is not.
+  `settings`, `skills`). Only `*.spec.ts` is collected; `helpers/**` is not.
 - Start with `launchApp()` (`helpers/app.ts`) and always `close()` it in
   `afterEach`, even if a test throws.
 - Build fixtures through the app's own IPC with `helpers/fixtures.ts`

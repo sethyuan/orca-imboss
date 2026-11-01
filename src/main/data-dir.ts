@@ -34,6 +34,18 @@ export function getAgentSkillsDir(): string {
 }
 
 /**
+ * Extra, **read-only** skills folder shared with other agent tools (the Agent
+ * Skills convention `~/.agents/skills`, which the Pi SDK also discovers on its
+ * own). It is home-based on purpose — it is a user-level location, so
+ * `IMBOSS_DATA_ROOT` does not move it — and the app never creates, writes or
+ * deletes anything there: skills in it are listed and usable, but they belong
+ * to whatever tool put them there.
+ */
+export function getAgentsSkillsDir(): string {
+  return join(homedir(), ".agents", "skills");
+}
+
+/**
  * Directory holding the app's built-in (code-shipped) Skills. Deliberately
  * separate from the user skills dir so they never appear under
  * Settings › Skills;

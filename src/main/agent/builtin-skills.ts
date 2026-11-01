@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import {
   getAgentSkillsDir,
+  getAgentsSkillsDir,
   getBuiltinSkillsDir,
   getMiniAppsDir,
 } from "../data-dir";
@@ -144,6 +145,7 @@ applies from the next session.
 
 function skillsManagementSkillBody(): string {
   const skillsDir = getAgentSkillsDir();
+  const agentsSkillsDir = getAgentsSkillsDir();
   const builtinDir = getBuiltinSkillsDir();
   return `# Skills management
 
@@ -159,6 +161,18 @@ description.
 
 Sessions pick up skills when they are built, so a new or changed skill applies on
 the next turn of an employee session.
+
+## Skills shared by other tools
+
+The app also *reads* the shared Agent Skills folder:
+
+    ${agentsSkillsDir}
+
+Skills from there appear in the Skills module and employees can select them, but
+that folder belongs to other agent tools and is read-only here: never write,
+edit, move or delete anything inside it, and never "fix" a skill by copying it
+out of there unless the boss explicitly asks for that. The app's own folder wins
+when both contain the same skill name.
 
 ## SKILL.md format
 
@@ -181,9 +195,9 @@ the next turn of an employee session.
 
 ## How to work
 
-1. To view skills, list the folders under ${skillsDir} that contain a SKILL.md and
-   read each SKILL.md. The folder name is the skill name and the frontmatter
-   "description" is its description.
+1. To view skills, list the folders under ${skillsDir} (and under
+   ${agentsSkillsDir}) that contain a SKILL.md and read each SKILL.md. The folder
+   name is the skill name and the frontmatter "description" is its description.
 2. To add a skill, write ${skillsDir}/<name>/SKILL.md with the frontmatter and
    instructions above. Use the write tool; it creates the parent folders. Add any
    supporting files under the same folder.
