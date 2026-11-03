@@ -27,6 +27,8 @@ import { Markdown } from "../../../markdown";
 import { useMentionResolver } from "../../../markdown/use-mention";
 import { Tooltip } from "../../../tooltip";
 import "../../chat/thread.css";
+import { SessionComposer } from "../session-composer";
+import "./index.css";
 import {
   addSentRow,
   applySteerStateRow,
@@ -37,8 +39,6 @@ import {
   type PendingFeedback,
   type PendingSend,
 } from "./pending-sends";
-import { SessionComposer } from "../session-composer";
-import "./index.css";
 
 export interface AgentSessionModuleProps {
   employeeId: number;
@@ -956,7 +956,6 @@ export function AgentSessionModule({
           onInterrupt={() => imb.agentSession.interruptTurn(employeeId, chatId)}
         >
           <IconHalt />
-          <span className="imb-session-interrupt-label">{interruptLabel}</span>
         </HaltButton>
       </div>
       {/* The thread and the floating jump control share a positioned wrapper so
