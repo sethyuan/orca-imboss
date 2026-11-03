@@ -117,6 +117,19 @@
   white-space: nowrap;
 }
 
+.imb-select-group {
+  margin-top: var(--imb-space-2);
+  padding: var(--imb-space-1) var(--imb-space-3) 0;
+  color: var(--imb-muted);
+  font-size: var(--imb-fs-ui);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.imb-select-option.imb-is-grouped {
+  padding-left: calc(var(--imb-space-3) + var(--imb-space-3));
+}
+
 .imb-select-check {
   color: var(--imb-accent);
   font-weight: 700;

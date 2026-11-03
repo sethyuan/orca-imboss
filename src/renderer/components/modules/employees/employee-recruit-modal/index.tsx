@@ -12,7 +12,7 @@ import { Textarea } from "../../../textarea";
 import {
   defaultModelSelectNote,
   defaultThinkingSelectNote,
-  modelRef,
+  groupedModelSelectOptions,
   thinkingLevelsFor,
   thinkingSelectOptions,
 } from "../../../../thinking-options";
@@ -166,17 +166,11 @@ export function EmployeeRecruitModal({
       <Field label={t("Model")}>
         <Select
           value={modelId}
-          options={[
-            {
-              value: "",
-              label: t("Default"),
-              note: defaultModelSelectNote(defaultModel, models),
-            },
-            ...models.map((model) => ({
-              value: modelRef(model),
-              label: modelRef(model),
-            })),
-          ]}
+          options={groupedModelSelectOptions(models, {
+            value: "",
+            label: t("Default"),
+            note: defaultModelSelectNote(defaultModel, models),
+          })}
           onChange={setModelId}
         />
       </Field>

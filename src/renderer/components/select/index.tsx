@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { cls } from "reactutils";
 import { useDropdownPosition } from "../../hooks/use-dropdown-position";
@@ -7,14 +14,28 @@ import { usePopupLayer } from "../../hooks/use-popup-layer";
 import { IconChevronDown } from "../icons";
 import "./index.css";
 
+function optionMatchesTypeahead(option: SelectOption, buffer: string): boolean {
+  const texts = [option.menuLabel ?? option.label, option.label];
+  if (option.group) texts.push(option.group);
+  return texts.some((text) => text.toLowerCase().startsWith(buffer));
+}
+
 export interface SelectOption {
   value: string;
+  /** Text in the closed control. */
   label: string;
   /**
    * Muted gloss after `label` on the same row. The closed control shows it
    * too, because that control repeats the selected option's text.
    */
   note?: string;
+  /**
+   * Text of the open row when it should be shorter than `label`.
+   * Type-ahead matches this, `label`, and `group`.
+   */
+  menuLabel?: string;
+  /** Non-selectable heading inserted before the first row of a run. */
+  group?: string;
 }
 
 export interface SelectProps {
@@ -182,7 +203,7 @@ export function Select({
             bufferRef.current = "";
           }, 500);
           const match = options.findIndex((o) =>
-            o.label.toLowerCase().startsWith(bufferRef.current),
+            optionMatchesTypeahead(o, bufferRef.current),
           );
           if (match >= 0) setActiveIndex(match);
         }
@@ -193,6 +214,13 @@ export function Select({
   function optionId(index: number): string {
     return `${listboxId}-opt-${index}`;
   }
+
+  useEffect(() => {
+    if (!open || activeIndex < 0) return;
+    document
+      .getElementById(optionId(activeIndex))
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, open]);
 
   return (
     <div
@@ -268,44 +296,61 @@ export function Select({
                 —
               </li>
             )}
-            {options.map((option, index) => (
-              <li
-                key={option.value}
-                id={optionId(index)}
-                role="option"
-                aria-selected={option.value === value}
-                className={cls(
-                  "imb-select-option imb-menu-row",
-                  index === activeIndex && "imb-is-active",
-                  option.value === value && "imb-is-selected",
-                )}
-                onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => commit(index)}
-              >
-                <span
-                  className={cls(
-                    "imb-select-option-label",
-                    option.note && "imb-has-note",
+            {options.map((option, index) => {
+              const showGroup =
+                !!option.group && option.group !== options[index - 1]?.group;
+              const menuText = option.menuLabel ?? option.label;
+              return (
+                <Fragment key={option.value}>
+                  {showGroup && (
+                    <li className="imb-select-group" role="presentation">
+                      {option.group}
+                    </li>
                   )}
-                >
-                  {option.note ? (
-                    <>
-                      <span className="imb-select-value-main">
-                        {option.label}
+                  <li
+                    id={optionId(index)}
+                    role="option"
+                    aria-selected={option.value === value}
+                    aria-label={
+                      option.menuLabel && option.menuLabel !== option.label
+                        ? option.label
+                        : undefined
+                    }
+                    className={cls(
+                      "imb-select-option imb-menu-row",
+                      option.group && "imb-is-grouped",
+                      index === activeIndex && "imb-is-active",
+                      option.value === value && "imb-is-selected",
+                    )}
+                    onMouseEnter={() => setActiveIndex(index)}
+                    onClick={() => commit(index)}
+                  >
+                    <span
+                      className={cls(
+                        "imb-select-option-label",
+                        option.note && "imb-has-note",
+                      )}
+                    >
+                      {option.note ? (
+                        <>
+                          <span className="imb-select-value-main">
+                            {menuText}
+                          </span>
+                          <span className="imb-select-note">{option.note}</span>
+                        </>
+                      ) : (
+                        menuText
+                      )}
+                    </span>
+                    {option.value === value && (
+                      <span className="imb-select-check" aria-hidden="true">
+                        ✓
                       </span>
-                      <span className="imb-select-note">{option.note}</span>
-                    </>
-                  ) : (
-                    option.label
-                  )}
-                </span>
-                {option.value === value && (
-                  <span className="imb-select-check" aria-hidden="true">
-                    ✓
-                  </span>
-                )}
-              </li>
-            ))}
+                    )}
+                  </li>
+                </Fragment>
+              );
+            })}
           </ul>,
           document.body,
         )}

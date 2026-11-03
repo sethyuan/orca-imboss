@@ -1,3 +1,4 @@
+import { CURATED_PROVIDERS_LABELS } from "@shared/constants/providers";
 import {
   isThinkingLevel,
   THINKING_LEVELS,
@@ -10,6 +11,43 @@ import type { SelectOption } from "./components/select";
 
 export function modelRef(model: ModelOption): string {
   return `${model.provider}/${model.id}`;
+}
+
+function providerMenuLabel(provider: string): string {
+  if (
+    Object.prototype.hasOwnProperty.call(CURATED_PROVIDERS_LABELS, provider)
+  ) {
+    return CURATED_PROVIDERS_LABELS[
+      provider as keyof typeof CURATED_PROVIDERS_LABELS
+    ];
+  }
+  return provider;
+}
+
+/**
+ * One model menu: `leading` stays a normal row (Default, None). Each provider
+ * is then a heading, and each row shows the model id. The closed control
+ * keeps `provider/id` via `label`.
+ */
+export function groupedModelSelectOptions(
+  models: readonly ModelOption[],
+  leading: SelectOption,
+): SelectOption[] {
+  const ordered = [...models].sort(
+    (a, b) =>
+      providerMenuLabel(a.provider).localeCompare(
+        providerMenuLabel(b.provider),
+      ) || a.id.localeCompare(b.id),
+  );
+  return [
+    leading,
+    ...ordered.map((model) => ({
+      value: modelRef(model),
+      label: modelRef(model),
+      menuLabel: model.id,
+      group: providerMenuLabel(model.provider),
+    })),
+  ];
 }
 
 /**

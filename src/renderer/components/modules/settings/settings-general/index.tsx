@@ -18,7 +18,7 @@ import { Input } from "../../../input";
 import { Select } from "../../../select";
 import { ShortcutInput, shortcutRejectMessage } from "../../../shortcut-input";
 import {
-  modelRef,
+  groupedModelSelectOptions,
   thinkingLevelsFor,
   thinkingSelectOptions,
 } from "../../../../thinking-options";
@@ -200,13 +200,10 @@ export function SettingsGeneral(): React.JSX.Element {
         >
           <Select
             value={defaultModel}
-            options={[
-              { value: "", label: t("None") },
-              ...models.map((model) => ({
-                value: modelRef(model),
-                label: modelRef(model),
-              })),
-            ]}
+            options={groupedModelSelectOptions(models, {
+              value: "",
+              label: t("None"),
+            })}
             onChange={changeDefaultModel}
           />
         </Field>
@@ -219,13 +216,10 @@ export function SettingsGeneral(): React.JSX.Element {
         >
           <Select
             value={imageModel}
-            options={[
-              { value: "", label: t("None") },
-              ...models.map((model) => ({
-                value: modelRef(model),
-                label: modelRef(model),
-              })),
-            ]}
+            options={groupedModelSelectOptions(models, {
+              value: "",
+              label: t("None"),
+            })}
             onChange={changeImageModel}
           />
         </Field>
