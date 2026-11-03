@@ -19,6 +19,7 @@ import { getChat, getRootChatId } from "../db/chats";
 import { getEmployee } from "../db/employees";
 import { validateMessageAttachments } from "../db/messages";
 import { agentPrompt, validateAttachmentsPayload } from "../attachment-prompt";
+import { withBossDirectHint } from "../agent/boss-direct-prompt";
 import { assertInteger, assertString } from "./helpers";
 
 /**
@@ -149,7 +150,15 @@ export function registerAgentSessionHandlers(rpc: Binder): void {
       if (safeText.length > MAX_MESSAGE_LENGTH) {
         throw new Error("Message is too long.");
       }
-      const prompt = agentPrompt(safeText, safeAttachments);
+      // The boss typing here is *the boss talking to this employee*: mark the
+      // turn so the answer comes back as the employee's final text instead of a
+      // posted chat message (see `boss-direct-prompt.ts` for why this is a
+      // per-turn suffix and for every ingress that deliberately does not get it).
+      // The assistant keeps its own contract ("post into the boss's chat").
+      const prompt =
+        safeEmployee === ASSISTANT_ID
+          ? agentPrompt(safeText, safeAttachments)
+          : agentPrompt(withBossDirectHint(safeText), safeAttachments);
       if (prompt.length > MAX_PROMPT_LENGTH) {
         throw new Error("Message is too long.");
       }

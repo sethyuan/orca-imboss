@@ -10,7 +10,10 @@ import type {
 } from "@shared/types";
 import type { Subscriber } from "../rpc/types";
 import * as dbChats from "../db/chats";
+import * as dbEmployees from "../db/employees";
 import * as dbMessages from "../db/messages";
+import { notifyAlert } from "../notifications";
+import { alertOneLine } from "./alert-text";
 import { errorEvent, sendEventTo, toStreamEvent } from "./agent-events";
 import { getAgentEnvironment } from "./environment";
 import { recordRunFailure } from "./run-failure";
@@ -1368,6 +1371,15 @@ function recordDirectChatReply(state: QueueState): void {
     if (!chat || chat.directEmployeeId !== state.employeeId) return;
     dbMessages.appendMessage(state.chatId, state.employeeId, text, {
       kind: "text",
+    });
+    // The reply is this conversation's only delivery to the boss, so it alerts
+    // like a `report` does — through the same alert path every other message
+    // uses, which keeps the existing gating intact: root chat only, never a
+    // muted conversation, never while the app window is in the foreground.
+    // The title is the employee's name: a direct chat's title is usually the
+    // boss's own first message, not who is answering.
+    notifyAlert(state.chatId, alertOneLine(text), {
+      title: dbEmployees.getEmployee(state.employeeId)?.name ?? undefined,
     });
   } catch (err) {
     console.error(

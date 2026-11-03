@@ -6,6 +6,7 @@ import type {
 } from "@shared/types";
 import { resolve } from "path";
 import { splitAttachmentPrompt } from "../attachment-prompt";
+import { splitBossDirectHint } from "./boss-direct-prompt";
 import { getAgentSessionsDir } from "../data-dir";
 import { getSession } from "../db/sessions";
 import { INTERRUPT_MARKER } from "./interrupt-marker";
@@ -129,7 +130,13 @@ function projectEntries(entries: SessionEntry[]): AgentSessionViewEntry[] {
         // and projected as chips. `splitAttachmentPrompt()` only reports
         // attachments when it could rebuild the block byte for byte; anything it
         // cannot fully understand stays in `text`, exactly as persisted.
-        const { text, attachments } = splitAttachmentPrompt(raw);
+        const { text: withoutAttachments, attachments } =
+          splitAttachmentPrompt(raw);
+        // A turn the boss typed himself in this session also carries the
+        // per-turn "answer me directly" hint (see `boss-direct-prompt.ts`). It
+        // is chrome added before the attachment block, so it is peeled off
+        // after it — and only when it rebuilds the text byte for byte.
+        const { text } = splitBossDirectHint(withoutAttachments);
         // A file-only send has no words at all: it is still a turn, and dropping
         // it here would make the boss's message disappear from the view.
         if (text.length === 0 && attachments.length === 0) break;

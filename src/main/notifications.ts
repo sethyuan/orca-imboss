@@ -40,7 +40,11 @@ export { sendToRenderer } from "./rpc/broadcast";
  * A muted chat stays silent too (it still counts unread; that bump happened in
  * `db/messages.ts`). Blank text is a no-op rather than an empty banner.
  */
-export function notifyAlert(chatId: number, text: string): void {
+export function notifyAlert(
+  chatId: number,
+  text: string,
+  options: NotifyAlertOptions = {},
+): void {
   const body = typeof text === "string" ? text.trim() : "";
   if (body.length === 0) return;
   const chat = dbChats.getChat(chatId);
@@ -52,9 +56,22 @@ export function notifyAlert(chatId: number, text: string): void {
   // notification support); a headless backend has nobody to interrupt.
   getOsNotifier().notify({
     chatId,
-    title: chatTitle(chatId),
+    title: options.title?.trim() || chatTitle(chatId),
     body,
   });
+}
+
+/** Optional copy overrides; the gating is not configurable on purpose. */
+export interface NotifyAlertOptions {
+  /**
+   * Notification title instead of the chat title.
+   *
+   * Used where the sender identifies the message better than the conversation
+   * does — an employee's reply in its **direct chat** is announced as that
+   * employee ("Ada"), because the conversation title there is usually the boss's
+   * own first message.
+   */
+  title?: string;
 }
 
 /** Notification title — the chat title when resolvable, otherwise the app name. */

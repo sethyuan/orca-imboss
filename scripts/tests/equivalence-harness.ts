@@ -34,7 +34,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import * as grpc from "@grpc/grpc-js";
 import protobuf from "protobufjs";
+import {
+  BOSS_DIRECT_HINT,
+  splitBossDirectHint,
+  withBossDirectHint,
+} from "../../src/main/agent/boss-direct-prompt";
 import { materializeBuiltinSkills } from "../../src/main/agent/builtin-skills";
+import {
+  agentPrompt,
+  splitAttachmentPrompt,
+} from "../../src/main/attachment-prompt";
 import { initDatabase } from "../../src/main/db";
 import { appendMessage } from "../../src/main/db/messages";
 import { sweepTransferTempRoot } from "../../src/main/file-browser";
@@ -104,6 +113,11 @@ async function main(): Promise<void> {
       subscribers.broadcast(channel, payload, payload !== undefined);
     });
 
+    // Pure prompt plumbing, independent of the transport suites below: the
+    // per-turn "the boss typed this" hint must compose and split byte-exactly,
+    // or the session view would either lose the boss's words or show the hint.
+    runBossDirectHintChecks();
+
     await seed(handlers);
 
     const server = await startRpcServer({
@@ -135,6 +149,68 @@ async function main(): Promise<void> {
       : `\n${failures} of ${checks} checks FAILED`,
   );
   process.exitCode = failures === 0 ? 0 : 1;
+}
+
+/**
+ * Composition ⇄ projection of the per-turn boss hint (`boss-direct-prompt.ts`).
+ *
+ * These are the properties the session view depends on, so they are asserted
+ * against the real functions rather than trusted:
+ */
+function runBossDirectHintChecks(): void {
+  const typed = "帮我把这份草稿整理成 SRT";
+  const composed = withBossDirectHint(typed);
+  check(
+    "the boss hint is appended after the typed text",
+    composed === `${typed}\n\n${BOSS_DIRECT_HINT}`,
+  );
+  check(
+    "the boss hint splits back to exactly what was typed",
+    JSON.stringify(splitBossDirectHint(composed)) ===
+      JSON.stringify({ text: typed, direct: true }),
+  );
+  check(
+    "composing twice does not stack two hints",
+    withBossDirectHint(composed) === composed,
+  );
+  check(
+    "a prompt without a hint is left untouched",
+    JSON.stringify(splitBossDirectHint(typed)) ===
+      JSON.stringify({ text: typed, direct: false }),
+  );
+  // The boss may paste our own hint text; only the appended copy is chrome.
+  const pasted = withBossDirectHint(BOSS_DIRECT_HINT);
+  check(
+    "a typed hint copy survives, only the appended one is stripped",
+    splitBossDirectHint(pasted).text === BOSS_DIRECT_HINT &&
+      splitBossDirectHint(pasted).direct === true,
+  );
+  check(
+    "a hint in the middle of the text is never removed",
+    splitBossDirectHint(`${BOSS_DIRECT_HINT}\n\n还有别的`).text ===
+      `${BOSS_DIRECT_HINT}\n\n还有别的`,
+  );
+  check(
+    "an empty prompt composes to the hint and splits back to empty",
+    withBossDirectHint("") === BOSS_DIRECT_HINT &&
+      splitBossDirectHint(BOSS_DIRECT_HINT).text === "",
+  );
+  // The contract with `agentPrompt()`: the hint goes BEFORE the `[Attachments]`
+  // block, so the existing attachment split still peels the block off first.
+  const path = "/tmp/imboss-checks/draft.md";
+  const prompt = agentPrompt(withBossDirectHint(typed), [
+    { name: "draft.md", size: 2048, type: "text/markdown", path },
+  ]);
+  const attachmentSplit = splitAttachmentPrompt(prompt);
+  check(
+    "the attachment block is still the trailing suffix",
+    attachmentSplit.attachments.length === 1 &&
+      attachmentSplit.attachments[0]?.name === "draft.md",
+  );
+  check(
+    "splitting attachments then the hint yields the typed text",
+    splitBossDirectHint(attachmentSplit.text).text === typed,
+  );
 }
 
 function readSuite(): "all" | "handlers" | "events" | "transfer" {

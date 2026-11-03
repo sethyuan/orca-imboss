@@ -46,6 +46,7 @@ import {
   normalizeImageSize,
 } from "../image-gen";
 import { readMcpServers } from "../mcp-store";
+import { alertOneLine } from "./alert-text";
 import { notifyAlert, sendToRenderer } from "../notifications";
 import { materializeSessionFile, sessionPathFor } from "./session-files";
 import {
@@ -724,9 +725,6 @@ function assertRawNotify(rawArgs: unknown): void {
  */
 const MAX_ALERT_LENGTH = 1000;
 
-/** Cap on the one-liner derived for a kind that alerts by default. */
-const ALERT_BODY_MAX = 200;
-
 /**
  * Kinds that alert the boss whether or not the caller said so.
  *
@@ -740,24 +738,10 @@ const ALERT_BODY_MAX = 200;
 const DEFAULT_ALERT_KINDS: ReadonlySet<string> = new Set(["report", "ask"]);
 
 /**
- * One readable line out of a message body: its first non-empty line, markdown
- * markers stripped, whitespace collapsed, length capped. Returns "" when there
- * is nothing readable to show.
+ * One readable line out of a message body (see `alert-text.ts`, shared with the
+ * employee-direct-chat reply mirror).
  */
-function oneLine(value: string, max = ALERT_BODY_MAX): string {
-  const line =
-    value
-      .split("\n")
-      .map((part) => part.trim())
-      .find((part) => part.length > 0) ?? "";
-  const plain = line
-    .replace(/^[#>*+\-\s]+/, "")
-    .replace(/[*_`]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (plain.length === 0) return "";
-  return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain;
-}
+const oneLine = alertOneLine;
 
 /**
  * The OS-notification text for a kind that alerts by default, or "" for a kind
