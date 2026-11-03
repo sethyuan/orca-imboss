@@ -1,0 +1,42 @@
+/* The trigger is icon-only (a 14px caret in a 30px hit area), so it stays
+   compact next to the New Chat button without ever squeezing it. */
+.imb-employee-picker-trigger {
+  flex: 0 0 auto;
+  display: inline-flex;
+  min-width: 0;
+}
+
+/* One option row: avatar, then the name, then the (muted) role. */
+.imb-employee-picker-option {
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-2);
+  min-width: 0;
+  width: 100%;
+}
+
+.imb-employee-picker-name {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imb-employee-picker-role {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--imb-muted);
+  font-size: var(--imb-fs-small);
+  font-weight: 400;
+}
+
+/* A failed pick gets its own line under the footer row (there is no room for
+   text in the row itself any more). */
+.imb-employee-picker-error {
+  margin: 0;
+  font-size: var(--imb-fs-small);
+}

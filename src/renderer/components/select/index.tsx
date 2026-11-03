@@ -1,10 +1,19 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { cls } from "reactutils";
 import { useDropdownPosition } from "../../hooks/use-dropdown-position";
 import { useEscapeKey } from "../../hooks/use-escape-key";
 import { usePopupLayer } from "../../hooks/use-popup-layer";
-import { IconChevronDown } from "../icons";
+import { IconChevronDown, IconSearch } from "../icons";
 import "./index.css";
 
 export interface SelectOption {
@@ -26,6 +35,56 @@ export interface SelectProps {
   disabled?: boolean;
   id?: string;
   label?: string;
+  /**
+   * Show a filter input at the top of the panel and narrow `options` by it.
+   *
+   * Off by default: a plain form select keeps its old behaviour (and stays
+   * keyboard-cyclable). The filter matches `label` and `note`, case-insensitive,
+   * unless `filterOption` says otherwise.
+   */
+  searchable?: boolean;
+  /** Placeholder (and accessible name) of that filter input. */
+  searchPlaceholder?: string;
+  /**
+   * Custom filter for `searchable` mode. Receives the trimmed, lower-cased
+   * query; the default matches `label` or `note`.
+   */
+  filterOption?: (option: SelectOption, query: string) => boolean;
+  /**
+   * Custom row content, for a richer option than a single line (an avatar, a
+   * trailing gloss). The row keeps the shared menu geometry and the selected
+   * check mark; `label` still drives the default filter and the trigger text.
+   */
+  renderOption?: (option: SelectOption) => ReactNode;
+  /** Text of the "nothing to offer" row, instead of the default `—`. */
+  emptyMessage?: ReactNode;
+  /**
+   * Minimum width of the portaled panel, for triggers narrower than the rows
+   * they open (see `useDropdownPosition`).
+   */
+  panelMinWidth?: number;
+  /**
+   * Trigger appearance.
+   *
+   * - `"field"` (default): the bordered form control — a value/placeholder plus
+   *   a caret that flips while open.
+   * - `"ghost"`: a borderless disclosure button (short label + an **upward**
+   *   caret, because such a control sits at the bottom of a pane and therefore
+   *   opens upward). Hover/focus use the ghost-button recipe from the design
+   *   system, so it reads as an action, not as a form field.
+   * - `"icon"`: the same ghost button reduced to its **caret only** (14px, still
+   *   pointing up) with no label; the hit area stays a full 30px control. `label`
+   *   is then the only accessible name, so a caller must pass one.
+   */
+  variant?: "field" | "ghost" | "icon";
+}
+
+/** Default `searchable` match: the label or its gloss, case-insensitive. */
+function matchesQuery(option: SelectOption, query: string): boolean {
+  return (
+    option.label.toLowerCase().includes(query) ||
+    (option.note ?? "").toLowerCase().includes(query)
+  );
 }
 
 /**
@@ -46,6 +105,13 @@ export function Select({
   disabled = false,
   id,
   label,
+  searchable = false,
+  searchPlaceholder = "",
+  filterOption,
+  renderOption,
+  emptyMessage,
+  panelMinWidth = 0,
+  variant = "field",
 }: SelectProps): React.JSX.Element {
   const uid = useId();
   const listboxId = `select-${uid}`;
@@ -53,7 +119,38 @@ export function Select({
   const panelRef = useRef<HTMLUListElement>(null);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
-  const { panelStyle, positionPanel } = useDropdownPosition(rootRef);
+  /** Filter text of `searchable` mode; cleared whenever the panel closes. */
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  /**
+   * Whether the highlighted row should be scrolled into view.
+   *
+   * The highlight moves for two very different reasons: keyboard navigation
+   * (where the row may be outside the panel's scrollport — it must be brought
+   * in) and a pointer hovering a row (where it is already visible, and scrolling
+   * would fight the pointer). Only the first sets this flag.
+   */
+  const scrollToActiveRef = useRef(false);
+  const { panelStyle, positionPanel } = useDropdownPosition(
+    rootRef,
+    panelMinWidth,
+  );
+
+  // The options the panel actually shows: all of them unless a searchable panel
+  // is being filtered. The highlight index always addresses this list.
+  const visible = useMemo((): SelectOption[] => {
+    if (!searchable) return options;
+    const needle = query.trim().toLowerCase();
+    if (needle.length === 0) return options;
+    const matches = filterOption ?? matchesQuery;
+    return options.filter((option) => matches(option, needle));
+  }, [filterOption, options, query, searchable]);
+  // Clamped highlight: filtering can shrink the list under the old index, and
+  // an empty result must never address `visible[NaN]`.
+  const active =
+    visible.length === 0
+      ? -1
+      : Math.min(Math.max(activeIndex, 0), visible.length - 1);
 
   // Type-ahead buffer.
   const bufferRef = useRef("");
@@ -82,27 +179,37 @@ export function Select({
     if (disabled) return;
     positionPanel();
     setOpen(true);
+    setQuery("");
+    // Opening highlights an option (the value, or the first one): make sure it
+    // is on screen even when it sits deep in a long list.
+    scrollToActiveRef.current = true;
     setActiveIndex(
-      selectedIndex >= 0
-        ? selectedIndex
-        : fallbackIndex >= 0
-          ? fallbackIndex
-          : 0,
+      // A searchable panel always starts at the top of an unfiltered list: the
+      // caller's value is not what the boss is hunting for there.
+      searchable
+        ? 0
+        : selectedIndex >= 0
+          ? selectedIndex
+          : fallbackIndex >= 0
+            ? fallbackIndex
+            : 0,
     );
-  }, [disabled, fallbackIndex, positionPanel, selectedIndex]);
+  }, [disabled, fallbackIndex, positionPanel, searchable, selectedIndex]);
 
   const closePanel = useCallback((): void => {
     setOpen(false);
     setActiveIndex(-1);
+    setQuery("");
+    scrollToActiveRef.current = false;
   }, []);
 
   const commit = useCallback(
     (index: number): void => {
-      if (index < 0 || index >= options.length) return;
-      onChange(options[index].value);
+      if (index < 0 || index >= visible.length) return;
+      onChange(visible[index].value);
       closePanel();
     },
-    [closePanel, onChange, options.length],
+    [closePanel, onChange, visible],
   );
 
   // Close on pointerdown outside the trigger OR the portaled panel.
@@ -130,6 +237,40 @@ export function Select({
     };
   }, [open, positionPanel]);
 
+  /**
+   * Keep the highlighted option inside the panel's scrollport.
+   *
+   * Runs after the panel exists (the effect only fires once `panelStyle` has
+   * positioned it, so the first frame measures a real scrollport) and after the
+   * list has grown/shrunk (filtering), and it scrolls **only as far as needed**:
+   * a row just below the fold comes up by exactly its overshoot, so the list
+   * never jumps to a centred position. Assignment is instant on purpose — an
+   * animated scroll would lag every key repeat.
+   *
+   * `scrollTo(..., { behavior: "auto" })` rather than a bare `scrollTop` write:
+   * it also overrides a `scroll-behavior: smooth` inherited from the page.
+   */
+  useLayoutEffect(() => {
+    if (!open || !scrollToActiveRef.current) return;
+    const panel = panelRef.current;
+    if (panel === null || active < 0) return;
+    const row = panel.querySelector<HTMLElement>(
+      `[data-select-option="${active}"]`,
+    );
+    if (row === null) return;
+    const panelRect = panel.getBoundingClientRect();
+    // The search row is sticky over the list, so the usable top edge starts
+    // below it; the bottom edge is the panel's own.
+    const sticky = panel.querySelector<HTMLElement>(".imb-ms-search");
+    const top = panelRect.top + (sticky?.offsetHeight ?? 0);
+    const bottom = panelRect.bottom;
+    const rowRect = row.getBoundingClientRect();
+    if (rowRect.top >= top && rowRect.bottom <= bottom) return;
+    const delta =
+      rowRect.top < top ? rowRect.top - top : rowRect.bottom - bottom;
+    panel.scrollTo({ top: panel.scrollTop + delta, behavior: "auto" });
+  }, [active, open, panelStyle, query, visible]);
+
   useEscapeKey(closePanel, open);
   // Leave Escape / the focus order to this panel while it is open, even when it
   // was opened from inside a `Modal` (its panel is portaled outside the dialog).
@@ -152,30 +293,43 @@ export function Select({
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
-        setActiveIndex((i) => (i + 1) % options.length);
+        scrollToActiveRef.current = true;
+        if (visible.length > 0) {
+          setActiveIndex((active + 1) % visible.length);
+        }
         break;
       case "ArrowUp":
         event.preventDefault();
-        setActiveIndex((i) => (i - 1 + options.length) % options.length);
+        scrollToActiveRef.current = true;
+        if (visible.length > 0) {
+          setActiveIndex((active - 1 + visible.length) % visible.length);
+        }
         break;
       case "Home":
         event.preventDefault();
-        setActiveIndex(0);
+        scrollToActiveRef.current = true;
+        if (visible.length > 0) setActiveIndex(0);
         break;
       case "End":
         event.preventDefault();
-        setActiveIndex(options.length - 1);
+        scrollToActiveRef.current = true;
+        if (visible.length > 0) setActiveIndex(visible.length - 1);
         break;
       case "Enter":
       case " ":
         event.preventDefault();
-        commit(activeIndex);
+        commit(active);
         break;
       case "Tab":
         closePanel();
         break;
       default: {
-        if (event.key.length === 1 && /[A-Za-z0-9]/.test(event.key)) {
+        // A searchable panel owns its own input; type-ahead would fight it.
+        if (
+          !searchable &&
+          event.key.length === 1 &&
+          /[A-Za-z0-9]/.test(event.key)
+        ) {
           bufferRef.current += event.key.toLowerCase();
           if (bufferTimerRef.current) clearTimeout(bufferTimerRef.current);
           bufferTimerRef.current = setTimeout(() => {
@@ -184,7 +338,10 @@ export function Select({
           const match = options.findIndex((o) =>
             o.label.toLowerCase().startsWith(bufferRef.current),
           );
-          if (match >= 0) setActiveIndex(match);
+          if (match >= 0) {
+            scrollToActiveRef.current = true;
+            setActiveIndex(match);
+          }
         }
       }
     }
@@ -201,14 +358,18 @@ export function Select({
     >
       <button
         type="button"
-        className="imb-select"
+        className={cls(
+          "imb-select",
+          variant === "ghost" && "imb-select-ghost",
+          variant === "icon" && "imb-select-icon",
+        )}
         id={id}
         role="combobox"
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-controls={open ? listboxId : undefined}
         aria-activedescendant={
-          open && activeIndex >= 0 ? optionId(activeIndex) : undefined
+          open && active >= 0 ? optionId(active) : undefined
         }
         aria-invalid={invalid || undefined}
         aria-label={label}
@@ -216,31 +377,38 @@ export function Select({
         onClick={() => (open ? closePanel() : openPanel())}
         onKeyDown={onTriggerKeyDown}
       >
-        <span
-          className={cls(
-            "imb-select-value",
-            !selected && "imb-is-placeholder",
-            selected?.note && "imb-has-note",
-          )}
-          title={selected?.note}
-        >
-          {selected?.note ? (
-            <>
-              <span className="imb-select-value-main">{selected.label}</span>
-              <span className="imb-select-note">{selected.note}</span>
-            </>
-          ) : selected ? (
-            selected.label
-          ) : (
-            placeholder
-          )}
-        </span>
+        {variant === "icon" ? null : (
+          <span
+            className={cls(
+              "imb-select-value",
+              !selected && "imb-is-placeholder",
+              selected?.note && "imb-has-note",
+            )}
+            title={selected?.note}
+          >
+            {selected?.note ? (
+              <>
+                <span className="imb-select-value-main">{selected.label}</span>
+                <span className="imb-select-note">{selected.note}</span>
+              </>
+            ) : selected ? (
+              selected.label
+            ) : (
+              placeholder
+            )}
+          </span>
+        )}
         <IconChevronDown
           className={cls(
             "imb-icon",
             "imb-sm",
             "imb-select-caret",
-            open && "imb-is-open",
+            // A ghost trigger opens upward, so its caret points up — always,
+            // in both states: it describes where the panel appears, and flipping
+            // it upside-down while open would contradict that.
+            variant === "ghost" || variant === "icon"
+              ? "imb-is-up"
+              : open && "imb-is-open",
           )}
         />
       </button>
@@ -263,42 +431,94 @@ export function Select({
               zIndex: 50,
             }}
           >
-            {options.length === 0 && (
-              <li className="imb-select-empty" role="presentation">
-                —
+            {searchable && (
+              // A filter row inside the panel: the same search recipe the
+              // multi-select panel uses, so every searchable dropdown looks
+              // and behaves the same. The input owns the keyboard while open.
+              <li className="imb-ms-search" role="presentation">
+                <IconSearch className="imb-icon imb-sm" />
+                <input
+                  ref={searchRef}
+                  type="text"
+                  value={query}
+                  placeholder={searchPlaceholder}
+                  aria-label={searchPlaceholder || label || undefined}
+                  autoFocus
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setActiveIndex(0);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      scrollToActiveRef.current = true;
+                      if (visible.length > 0) {
+                        setActiveIndex((active + 1) % visible.length);
+                      }
+                    } else if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      scrollToActiveRef.current = true;
+                      if (visible.length > 0) {
+                        setActiveIndex(
+                          (active - 1 + visible.length) % visible.length,
+                        );
+                      }
+                    } else if (event.key === "Enter") {
+                      event.preventDefault();
+                      commit(active);
+                    } else if (event.key === "Tab") {
+                      closePanel();
+                    }
+                  }}
+                />
               </li>
             )}
-            {options.map((option, index) => (
+            {visible.length === 0 && (
+              <li className="imb-select-empty" role="presentation">
+                {emptyMessage ?? "—"}
+              </li>
+            )}
+            {visible.map((option, index) => (
               <li
                 key={option.value}
                 id={optionId(index)}
+                data-select-option={index}
                 role="option"
                 aria-selected={option.value === value}
                 className={cls(
                   "imb-select-option imb-menu-row",
-                  index === activeIndex && "imb-is-active",
+                  index === active && "imb-is-active",
                   option.value === value && "imb-is-selected",
                 )}
-                onMouseEnter={() => setActiveIndex(index)}
+                onMouseEnter={() => {
+                  scrollToActiveRef.current = false;
+                  setActiveIndex(index);
+                }}
                 onClick={() => commit(index)}
               >
-                <span
-                  className={cls(
-                    "imb-select-option-label",
-                    option.note && "imb-has-note",
-                  )}
-                >
-                  {option.note ? (
-                    <>
-                      <span className="imb-select-value-main">
-                        {option.label}
-                      </span>
-                      <span className="imb-select-note">{option.note}</span>
-                    </>
-                  ) : (
-                    option.label
-                  )}
-                </span>
+                {renderOption !== undefined ? (
+                  <span className="imb-select-option-label imb-is-custom">
+                    {renderOption(option)}
+                  </span>
+                ) : (
+                  <span
+                    className={cls(
+                      "imb-select-option-label",
+                      option.note && "imb-has-note",
+                    )}
+                  >
+                    {option.note ? (
+                      <>
+                        <span className="imb-select-value-main">
+                          {option.label}
+                        </span>
+                        <span className="imb-select-note">{option.note}</span>
+                      </>
+                    ) : (
+                      option.label
+                    )}
+                  </span>
+                )}
                 {option.value === value && (
                   <span className="imb-select-check" aria-hidden="true">
                     ✓

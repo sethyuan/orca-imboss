@@ -88,7 +88,7 @@ export function getRootChatId(chatId: number): number {
  * must pass `PREVIEW_SKIP_KINDS` **first** in its parameter list.
  */
 const CHAT_SUMMARY_SELECT = `SELECT c.id, c.title, c.participants, c.unread, c.created_at, c.from_chat_id,
-        c.pinned, c.muted, c.source, c.last_message_at,
+        c.direct_employee_id, c.pinned, c.muted, c.source, c.last_message_at,
         m.kind AS last_kind, m.content AS last_content, m.steps AS last_steps,
         m.attachments AS last_attachments,
         m.image_status AS last_image_status, m.created_at AS last_at
@@ -251,6 +251,13 @@ export function bumpUnread(id: number): void {
 export interface CreateChatOptions {
   /** Id of the chat that spawned this one; `null`/omitted = root chat. */
   fromChatId?: number | null;
+  /**
+   * Employee this root chat is a direct conversation with. Ignored for a
+   * spawned (task group) chat — a direct chat is always a root chat — and
+   * dropped when the employee does not exist, so a stale id can never make a
+   * chat claim a conversation partner it cannot reach.
+   */
+  directEmployeeId?: number | null;
   /** Platform this conversation is bridged to (IM integrations). */
   source?: string | null;
   /** Platform conversation id, stable per (source, session). */
@@ -260,8 +267,14 @@ export interface CreateChatOptions {
 }
 
 /**
- * Create a group chat. Participants referencing unknown employees are
+ * Create a conversation. Participants referencing unknown employees are
  * dropped defensively (participants is a JSON column, not FK-enforced).
+ *
+ * A root chat (no `fromChatId`) with `directEmployeeId` is an **employee direct
+ * chat**: the boss talks to that one employee, the UI renders that employee's
+ * agent session in it and `chat:send` delivers to that employee instead of the
+ * assistant. Its `participants` may be just the employee — the assistant is
+ * deliberately not forced in (it has no role in a direct conversation).
  */
 export function createChat(
   title: string,
@@ -285,6 +298,15 @@ export function createChat(
     fromChatId != null && Number.isSafeInteger(fromChatId) && fromChatId > 0
       ? fromChatId
       : null;
+  // A direct chat is a root chat with exactly one employee to talk to. Both
+  // halves are enforced here so a caller cannot create a half-defined row.
+  const directEmployeeId =
+    safeFrom === null &&
+    options.directEmployeeId != null &&
+    Number.isSafeInteger(options.directEmployeeId) &&
+    knownIds.has(options.directEmployeeId)
+      ? options.directEmployeeId
+      : null;
   const safeSource =
     typeof options.source === "string" && options.source.length > 0
       ? options.source
@@ -307,13 +329,14 @@ export function createChat(
   // sorts to the top of the recency-ordered list.
   const result = db
     .prepare(
-      "INSERT INTO chats (title, participants, from_chat_id, source, source_session, source_context, created_at, last_message_at) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO chats (title, participants, from_chat_id, direct_employee_id, source, source_session, source_context, created_at, last_message_at) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
       safeTitle,
       stringifyArray(unique),
       safeFrom,
+      directEmployeeId,
       safeSource,
       safeSession,
       safeContext,
@@ -414,6 +437,7 @@ function toChat(row: ChatRow): Chat {
     unread: row.unread ?? 0,
     createdAt: row.created_at,
     fromChatId: row.from_chat_id ?? null,
+    directEmployeeId: row.direct_employee_id ?? null,
     source: normalizeSource(row.source),
     pinned: (row.pinned ?? 0) === 1,
     muted: (row.muted ?? 0) === 1,

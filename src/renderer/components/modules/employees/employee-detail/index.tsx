@@ -35,6 +35,11 @@ export interface EmployeeDetailProps {
   defaultThinking: string;
   onPatch: (input: EmployeeInput) => Promise<boolean>;
   onRemove: () => void;
+  /**
+   * Start a brand-new conversation with this employee and jump into it (the
+   * Employees module routes it through `appStore.openDirectChat`).
+   */
+  onNewChat?: () => Promise<void>;
   /** Called when the avatar file is replaced (keeps appStore in sync). */
   onAvatarUpdated?: (employee: Employee) => void;
 }
@@ -50,6 +55,7 @@ export function EmployeeDetail({
   defaultThinking,
   onPatch,
   onRemove,
+  onNewChat,
   onAvatarUpdated,
 }: EmployeeDetailProps): React.JSX.Element {
   const isAssistant = employee.id === 0;
@@ -87,8 +93,14 @@ export function EmployeeDetail({
   const [exporting, setExporting] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  /** "New chat" round-trip is in flight (also disables the button). */
+  const [startingChat, setStartingChat] = useState(false);
+  /** Failure of "New chat" (the jump itself lives in the app store). */
+  const [chatError, setChatError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Synchronous mirror of `startingChat` (guards double clicks in one frame). */
+  const startingChatRef = useRef(false);
 
   const scheduleSave = useCallback(
     (next: EmployeeInput): void => {
@@ -141,6 +153,28 @@ export function EmployeeDetail({
 
   const triggerPicker = (): void => fileRef.current?.click();
 
+  /**
+   * Create a fresh conversation with this employee and jump into it.
+   *
+   * Ref-guarded (not only `disabled`): two clicks in one frame would otherwise
+   * both pass the state check and create two conversations, while the boss asked
+   * for one.
+   */
+  const startNewChat = async (): Promise<void> => {
+    if (onNewChat === undefined || startingChatRef.current) return;
+    startingChatRef.current = true;
+    setStartingChat(true);
+    setChatError(null);
+    try {
+      await onNewChat();
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : String(err));
+    } finally {
+      startingChatRef.current = false;
+      setStartingChat(false);
+    }
+  };
+
   /** Write this employee (+ its MCP settings and skill folders) to a zip. */
   const runExport = async (): Promise<void> => {
     setExporting(true);
@@ -187,6 +221,16 @@ export function EmployeeDetail({
         actions={
           isAssistant ? undefined : (
             <>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={startingChat}
+                disabled={onNewChat === undefined}
+                title={t("Start a new conversation with this employee")}
+                onClick={() => void startNewChat()}
+              >
+                {t("New Chat")}
+              </Button>
               <Button
                 variant="secondary"
                 size="sm"
@@ -261,6 +305,9 @@ export function EmployeeDetail({
           <p className="imb-error-text imb-employee-export-note">
             {exportError}
           </p>
+        )}
+        {chatError !== null && (
+          <p className="imb-error-text imb-employee-export-note">{chatError}</p>
         )}
         {exportNotice !== null && (
           <p className="imb-employee-export-note imb-mono">{exportNotice}</p>

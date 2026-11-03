@@ -97,6 +97,14 @@ export interface BuildEmployeeSystemPromptArgs {
   /** Spawning chat for a group chat (`chats.from_chat_id`); null for root
    *  chats. When non-null, a second line in the identity block links back. */
   fromChatId: number | null;
+  /**
+   * `true` when this session IS the boss's direct conversation with that
+   * employee (`chats.direct_employee_id === employeeId`). It switches the
+   * delivery rule: the employee's final text is the reply the boss sees, instead
+   * of posting one with `imb_send_message`. Never true for the assistant or for
+   * a task group chat.
+   */
+  directChat: boolean;
   /** Active tools for this employee-session (core + MCP + team `imb_*`). */
   toolEntries: EmployeeToolEntry[];
   /**

@@ -29,6 +29,19 @@ interface TestBridge {
       title: string,
       participants: number[],
     ): Promise<{ id: number; title: string }>;
+    createDirect(
+      employeeId: number,
+    ): Promise<{ id: number; title: string; directEmployeeId: number | null }>;
+    summaries(): Promise<
+      Array<{ id: number; directEmployeeId: number | null }>
+    >;
+  };
+  employees: {
+    create(input: {
+      name: string;
+      role: string;
+      systemPrompt: string;
+    }): Promise<{ id: number; name: string }>;
   };
   messages: {
     append(
@@ -52,6 +65,41 @@ export async function createChat(window: Page, title: string): Promise<number> {
     const chat = await imb.chats.create(chatTitle, []);
     return chat.id;
   }, title);
+}
+
+/**
+ * Create an employee direct chat (a root chat whose conversation partner is one
+ * employee) and return its id.
+ */
+export async function createDirectChat(
+  window: Page,
+  employeeId: number,
+): Promise<number> {
+  return await window.evaluate(async (id: number) => {
+    const imb = (window as unknown as PageWindow).imb;
+    const chat = await imb.chats.createDirect(id);
+    return chat.id;
+  }, employeeId);
+}
+
+/** Create one regular employee (never the assistant) and return its id. */
+export async function createEmployee(
+  window: Page,
+  name: string,
+  role = "Researcher",
+): Promise<number> {
+  return await window.evaluate(
+    async (input: { name: string; role: string }) => {
+      const imb = (window as unknown as PageWindow).imb;
+      const employee = await imb.employees.create({
+        name: input.name,
+        role: input.role,
+        systemPrompt: "",
+      });
+      return employee.id;
+    },
+    { name, role },
+  );
 }
 
 /** Append one stored message; `senderEmployeeId: null` means the boss. */

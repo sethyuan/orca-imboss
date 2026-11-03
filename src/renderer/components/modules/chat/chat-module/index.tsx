@@ -26,13 +26,14 @@ import { useInfiniteList } from "../../../../hooks/use-infinite-list";
 import { useModuleFilter } from "../../../../hooks/use-module-filter";
 import { useMultiSelect } from "../../../../hooks/use-multi-select";
 import { ModuleView } from "../../../app-shell";
-import { Avatar } from "../../../avatar";
 import { Button } from "../../../button";
+import { ChatAvatar } from "../../../chat-avatar";
 import { ContextMenu, type ContextMenuState } from "../../../context-menu";
 import { EmployeeAvatar } from "../../../employee-avatar";
 import { FilterBar } from "../../../filter-bar";
+import { HaltButton } from "../../../halt-button";
 import { IconButton } from "../../../icon-button";
-import { IconSearch } from "../../../icons";
+import { IconHalt, IconSearch } from "../../../icons";
 import { Input } from "../../../input";
 import { ItemList } from "../../../item-list";
 import { ListPane } from "../../../list-pane";
@@ -45,8 +46,15 @@ import {
   TagSelect,
 } from "../../../tag-select";
 import { Tooltip } from "../../../tooltip";
+import { SessionThread } from "../../agent-session/agent-session-view/session-thread";
+import {
+  useSessionView,
+  type SessionView,
+} from "../../agent-session/agent-session-view/use-session-view";
+import { toSessionAttachment } from "../../agent-session/session-composer";
+import { EmployeeChatPicker } from "./employee-chat-picker";
 import { pairAskAnswers } from "../ask-answer";
-import { ChatInputBar } from "../chat-input-bar";
+import { ChatInputBar, type ComposerResetRequest } from "../chat-input-bar";
 import { CHAT_MUTE_ENABLED, chatMuteMenuItem, MuteGlyph } from "../chat-mute";
 import { MessageItem } from "../message-item";
 import {
@@ -63,7 +71,6 @@ import {
   formatChatTime,
   shouldShowTimeSeparator,
 } from "../relative-time";
-import "../thread.css";
 import { ThreadFindBar } from "../thread-find";
 import { useThreadFind } from "../thread-find/use-thread-find";
 import {
@@ -72,6 +79,7 @@ import {
   scrollThreadToRow,
   type ThreadAlign,
 } from "../thread-scroll";
+import "../thread.css";
 import { TimeSeparator } from "../time-separator";
 import { buildUnseenBatch, type UnseenBatch } from "../unseen-batch";
 import "./index.css";
@@ -671,8 +679,15 @@ export function ChatModule(): React.JSX.Element {
   // Subscribe this window to the selected chat's agent events. The session
   // itself is created lazily main-side on the first `chat:send` (via the
   // session queue), so merely selecting a chat does not build a Pi session.
+  //
+  // An employee direct chat is skipped: its answering session is the employee's,
+  // bound by the session view that renders its detail (see `DirectChatDetail`).
+  // Binding the assistant's session here would be a session the conversation
+  // never uses.
   useEffect(() => {
     if (selectedId === null) return;
+    const chat = chatsRef.current.find((item) => item.id === selectedId);
+    if (chat !== undefined && chat.directEmployeeId !== null) return;
     const chatId = selectedId;
     void imb.agentSession.bind(ASSISTANT_ID, chatId);
     return () => {
@@ -716,7 +731,8 @@ export function ChatModule(): React.JSX.Element {
     selectSelection(nextId);
   }, [chats, listLoading, clearSelection, selectSelection]);
 
-  // Jump to a focused chat (an OS notification click) once it is loaded.
+  // Jump to a focused chat (an OS notification click, or "New chat" from the
+  // employee detail page) once it is loaded.
   useEffect(() => {
     if (focusChatId === null) return;
     if (!chats.some((chat) => chat.id === focusChatId)) return;
@@ -726,6 +742,17 @@ export function ChatModule(): React.JSX.Element {
     // clear its unread explicitly to cover the notification-click path that
     // lands on the currently-open chat.
     clearSelectedUnread(focusChatId);
+    // A brand-new chat created elsewhere (employee detail page) also asks for
+    // the caret: consume the one-shot request (the same reset `newChat()`
+    // applies: transient composer UI + focus the textarea).
+    if (appStore.pendingComposerFocus === focusChatId) {
+      appStore.pendingComposerFocus = null;
+      composerResetSeqRef.current += 1;
+      setComposerReset({
+        chatId: focusChatId,
+        seq: composerResetSeqRef.current,
+      });
+    }
     appStore.focusChatId = null;
   }, [focusChatId, chats, selectChat, clearSelectedUnread]);
 
@@ -1595,9 +1622,17 @@ export function ChatModule(): React.JSX.Element {
         />
       }
       footer={
-        <Button block onClick={() => void newChat()}>
-          {t("New Chat")}
-        </Button>
+        // Two ways to start a conversation: the assistant (this button) and one
+        // employee (the picker beside it, which creates a direct chat on pick).
+        <div className="imb-chat-new-row">
+          <Button
+            className="imb-chat-new-button"
+            onClick={() => void newChat()}
+          >
+            {t("New Chat")}
+          </Button>
+          <EmployeeChatPicker />
+        </div>
       }
     >
       <ItemList
@@ -1642,10 +1677,14 @@ export function ChatModule(): React.JSX.Element {
               />
             }
             avatar={
-              <Avatar
-                letter={displayTitle(chat.title).slice(0, 1)}
-                name={displayTitle(chat.title)}
+              // Who the conversation is with: its employee, or the assistant for
+              // the boss's own chats (see `ChatAvatar`).
+              <ChatAvatar
+                participants={chat.participants}
+                fromChatId={chat.fromChatId}
+                directEmployeeId={chat.directEmployeeId}
                 size={30}
+                title={displayTitle(chat.title)}
               />
             }
             name={
@@ -1721,159 +1760,239 @@ export function ChatModule(): React.JSX.Element {
     </ListPane>
   );
 
-  const detail = selected ? (
-    <>
-      <div className="imb-chat-header">
-        <div className="imb-chat-header-avatar">
-          <EmployeeAvatar employeeId={0} size={30} />
-        </div>
-        {editingTitle ? (
-          <Input
-            className="imb-chat-title-input"
-            value={titleDraft}
-            maxLength={200}
-            autoFocus
-            aria-label={t("Double-click to rename chat")}
-            onChange={(event) => setTitleDraft(event.target.value)}
-            onFocus={(event) => event.currentTarget.select()}
-            onBlur={() => void commitTitleEdit()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void commitTitleEdit();
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                cancelTitleEdit();
-              }
-            }}
-          />
-        ) : (
-          <Tooltip
-            placement="bottom"
-            content={t("Double-click to rename chat")}
-          >
-            <div
-              className="imb-chat-title imb-chat-title-editable"
-              onDoubleClick={beginTitleEdit}
-            >
-              {selectedTitle}
-            </div>
-          </Tooltip>
-        )}
-        {selected.source && (
-          <span className="imb-chat-source">
-            {t(INTEGRATION_LABEL_KEYS[selected.source])}
-          </span>
-        )}
-        {/* Header trailing actions: the my-messages panel and the search entry.
-            One `margin-left: auto` on the group keeps both pinned right (two
-            auto margins would split the free space and float the group's first
-            button towards the middle). */}
-        <div className="imb-chat-header-actions">
-          <MyMessageJump
-            threadRef={threadRef}
-            entries={myMessages}
-            onSelect={handleMyMessageSelect}
-            onLatest={jumpToLatest}
-          />
-          {/* Header search entry: the same action as ⌘F (open + focus, or
-              re-select the term when the bar is already up). `aria-pressed`
-              states whether the bar is open; it never toggles it closed — that
-              would make the button behave differently from the shortcut. */}
-          <Tooltip
-            placement="bottom"
-            content={`${t("Find in chat")} · ${IS_MAC ? "⌘F" : "Ctrl+F"}`}
-          >
-            <IconButton
-              className="imb-chat-find"
-              label={t("Find in chat")}
-              aria-pressed={threadFind.open}
-              // The bubble above is the hint; an empty `title` suppresses the
-              // native (duplicate) one the component would otherwise add.
-              title=""
-              boxSize={28}
-              size={16}
-              onClick={threadFind.openFind}
-            >
-              <IconSearch />
-            </IconButton>
-          </Tooltip>
-        </div>
+  /**
+   * The detail header, shared by the two kinds of conversation the module can
+   * show (messages, or an employee's agent session in a direct chat).
+   *
+   * `trailing` is the right-hand action cluster: the my-messages panel and find
+   * for a normal chat, plus the interrupt chip for a direct chat. It is passed in
+   * because the direct chat's actions are driven by its session view state.
+   */
+  const renderHeader = (
+    chat: ChatSummary,
+    trailing: React.ReactNode,
+  ): React.ReactNode => (
+    <div className="imb-chat-header">
+      <div className="imb-chat-header-avatar">
+        {/* A direct chat shows the employee it is a conversation with; every
+              other chat is the boss's own conversation with the assistant. */}
+        <EmployeeAvatar
+          employeeId={chat.directEmployeeId ?? ASSISTANT_ID}
+          size={30}
+        />
       </div>
-      {/* The thread is the scroll container. The my-messages list lives in the
+      {editingTitle ? (
+        <Input
+          className="imb-chat-title-input"
+          value={titleDraft}
+          maxLength={200}
+          autoFocus
+          aria-label={t("Double-click to rename chat")}
+          onChange={(event) => setTitleDraft(event.target.value)}
+          onFocus={(event) => event.currentTarget.select()}
+          onBlur={() => void commitTitleEdit()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void commitTitleEdit();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              cancelTitleEdit();
+            }
+          }}
+        />
+      ) : (
+        <Tooltip placement="bottom" content={t("Double-click to rename chat")}>
+          <div
+            className="imb-chat-title imb-chat-title-editable"
+            onDoubleClick={beginTitleEdit}
+          >
+            {selectedTitle}
+          </div>
+        </Tooltip>
+      )}
+      {chat.source && (
+        <span className="imb-chat-source">
+          {t(INTEGRATION_LABEL_KEYS[chat.source])}
+        </span>
+      )}
+      {/* Header trailing actions. One `margin-left: auto` on the group keeps
+            them pinned right (two auto margins would split the free space and
+            float the group's first button towards the middle). */}
+      <div className="imb-chat-header-actions">{trailing}</div>
+    </div>
+  );
+
+  /** The my-messages panel + the find entry of a messages conversation. */
+  const messageHeaderActions = (
+    <>
+      <MyMessageJump
+        threadRef={threadRef}
+        entries={myMessages}
+        onSelect={handleMyMessageSelect}
+        onLatest={jumpToLatest}
+      />
+      {/* Header search entry: the same action as ⌘F (open + focus, or
+          re-select the term when the bar is already up). `aria-pressed`
+          states whether the bar is open; it never toggles it closed — that
+          would make the button behave differently from the shortcut. */}
+      <Tooltip
+        placement="bottom"
+        content={`${t("Find in chat")} · ${IS_MAC ? "⌘F" : "Ctrl+F"}`}
+      >
+        <IconButton
+          className="imb-chat-find"
+          label={t("Find in chat")}
+          aria-pressed={threadFind.open}
+          // The bubble above is the hint; an empty `title` suppresses the
+          // native (duplicate) one the component would otherwise add.
+          title=""
+          boxSize={28}
+          size={16}
+          onClick={threadFind.openFind}
+        >
+          <IconSearch />
+        </IconButton>
+      </Tooltip>
+    </>
+  );
+
+  const detail = selected ? (
+    selected.directEmployeeId !== null ? (
+      // An employee direct chat: the detail pane is that employee's agent
+      // session for this conversation, not the stored messages. Keyed by the
+      // session so switching conversations resets the live tail, the pin state
+      // and any find session (same contract as the Nav-opened session view).
+      <DirectChatDetail
+        key={`direct:${selected.directEmployeeId}/${selected.id}`}
+        chat={selected}
+        composerReset={composerReset}
+        onComposerResetApplied={applyComposerReset}
+        onTagsApplied={handleTagsApplied}
+        renderHeader={(view, employeeId) =>
+          renderHeader(
+            selected,
+            <>
+              {/* Interrupts the current turn of this conversation's employee —
+                  the same semantics as the agent-session header chip (the queued
+                  work is kept; simply talking again resumes it). Placement is
+                  the boss's call: rightmost in this header, where the mock points
+                  at it. */}
+              <HaltButton
+                className="imb-session-interrupt"
+                label={t("Interrupt current turn")}
+                confirm={false}
+                disabled={!view.streaming}
+                onInterrupt={() =>
+                  imb.agentSession.interruptTurn(employeeId, selected.id)
+                }
+              >
+                <IconHalt />
+              </HaltButton>
+              <MyMessageJump
+                threadRef={view.threadRef}
+                entries={view.myEntries}
+                onSelect={view.jumpToEntry}
+                onLatest={view.jumpToLatest}
+              />
+              <Tooltip
+                placement="bottom"
+                content={`${t("Find in chat")} · ${IS_MAC ? "⌘F" : "Ctrl+F"}`}
+              >
+                <IconButton
+                  className="imb-chat-find"
+                  label={t("Find in chat")}
+                  aria-pressed={view.threadFind.open}
+                  title=""
+                  boxSize={28}
+                  size={16}
+                  onClick={view.threadFind.openFind}
+                >
+                  <IconSearch />
+                </IconButton>
+              </Tooltip>
+            </>,
+          )
+        }
+      />
+    ) : (
+      <>
+        {renderHeader(selected, messageHeaderActions)}
+        {/* The thread is the scroll container. The my-messages list lives in the
           header (a floating control over the transcript was covering message
           text), so the thread needs no reserved space for it. */}
-      <div className="imb-chat-thread-wrap">
-        <div
-          className="imb-thread"
-          ref={threadRef}
-          // Focus target after the find bar closes when nothing better is
-          // available (a message row keeps `focus-within` styling intact).
-          tabIndex={-1}
-          onScroll={handleThreadScroll}
-        >
-          {visibleMessages.map((message, index) => {
-            const run = progressRuns.runByMessageId.get(message.id);
-            // A run renders once, at its anchor (oldest card): it shows the
-            // newest card and keeps the others in its history layer.
-            if (run !== undefined && run.anchorId !== message.id) return null;
-            return (
-              <Fragment key={`${message.chatId}-${message.id}`}>
-                {shouldShowTimeSeparator(
-                  visibleMessages[index - 1],
-                  message,
-                ) && <TimeSeparator secs={message.createdAt} />}
-                {run === undefined ? (
-                  <MessageItem
-                    message={message}
-                    onAnswered={handleAnswered}
-                    askAnswer={pairing.answerByAskId.get(message.id)}
-                  />
-                ) : (
-                  <ProgressGroup
-                    run={run}
-                    cards={run.ids
-                      .map((id) => messageById.get(id))
-                      .filter((card): card is Message => card !== undefined)}
-                    shownId={shownCardId(run)}
-                    revealId={
-                      revealTarget !== null &&
-                      revealTarget.anchorId === run.anchorId
-                        ? revealTarget.messageId
-                        : null
-                    }
-                    onPage={pageRun}
-                    onRevealed={handleRevealed}
-                  />
-                )}
-              </Fragment>
-            );
-          })}
-          {selectedRunStatus !== undefined && (
-            // Reserved, fixed-height slot: it is present for the whole run, so
-            // toggling the compaction text never shifts the messages above it.
-            <div className="imb-run-status" role="status">
-              {selectedRunStatus.compacting ? t("Compacting…") : ""}
-            </div>
-          )}
-        </div>
-        {threadFind.open && <ThreadFindBar find={threadFind} />}
-        {/* Messages that arrived while the boss was reading history: floating
+        <div className="imb-chat-thread-wrap">
+          <div
+            className="imb-thread"
+            ref={threadRef}
+            // Focus target after the find bar closes when nothing better is
+            // available (a message row keeps `focus-within` styling intact).
+            tabIndex={-1}
+            onScroll={handleThreadScroll}
+          >
+            {visibleMessages.map((message, index) => {
+              const run = progressRuns.runByMessageId.get(message.id);
+              // A run renders once, at its anchor (oldest card): it shows the
+              // newest card and keeps the others in its history layer.
+              if (run !== undefined && run.anchorId !== message.id) return null;
+              return (
+                <Fragment key={`${message.chatId}-${message.id}`}>
+                  {shouldShowTimeSeparator(
+                    visibleMessages[index - 1],
+                    message,
+                  ) && <TimeSeparator secs={message.createdAt} />}
+                  {run === undefined ? (
+                    <MessageItem
+                      message={message}
+                      onAnswered={handleAnswered}
+                      askAnswer={pairing.answerByAskId.get(message.id)}
+                    />
+                  ) : (
+                    <ProgressGroup
+                      run={run}
+                      cards={run.ids
+                        .map((id) => messageById.get(id))
+                        .filter((card): card is Message => card !== undefined)}
+                      shownId={shownCardId(run)}
+                      revealId={
+                        revealTarget !== null &&
+                        revealTarget.anchorId === run.anchorId
+                          ? revealTarget.messageId
+                          : null
+                      }
+                      onPage={pageRun}
+                      onRevealed={handleRevealed}
+                    />
+                  )}
+                </Fragment>
+              );
+            })}
+            {selectedRunStatus !== undefined && (
+              // Reserved, fixed-height slot: it is present for the whole run, so
+              // toggling the compaction text never shifts the messages above it.
+              <div className="imb-run-status" role="status">
+                {selectedRunStatus.compacting ? t("Compacting…") : ""}
+              </div>
+            )}
+          </div>
+          {threadFind.open && <ThreadFindBar find={threadFind} />}
+          {/* Messages that arrived while the boss was reading history: floating
             pill over the bottom-right corner of the transcript, above the
             composer. Centering the start of the batch keeps a slice of the
             older context visible, so the batch can be read forwards. */}
-        {unseen !== null && (
-          <NewMessagesJump count={unseen.count} onReveal={jumpToUnseen} />
-        )}
-      </div>
-      <ChatInputBar
-        chatId={selected.id}
-        composerReset={composerReset}
-        onComposerResetApplied={applyComposerReset}
-        onSend={handleSend}
-        onTagsApplied={handleTagsApplied}
-      />
-    </>
+          {unseen !== null && (
+            <NewMessagesJump count={unseen.count} onReveal={jumpToUnseen} />
+          )}
+        </div>
+        <ChatInputBar
+          chatId={selected.id}
+          composerReset={composerReset}
+          onComposerResetApplied={applyComposerReset}
+          onSend={handleSend}
+          onTagsApplied={handleTagsApplied}
+        />
+      </>
+    )
   ) : null;
 
   return (
@@ -1904,6 +2023,93 @@ export function ChatModule(): React.JSX.Element {
       {error !== null && (
         <p className="imb-error-text imb-chat-error">{error}</p>
       )}
+    </>
+  );
+}
+
+/**
+ * The detail pane of an **employee direct chat**: that employee's agent session
+ * for this conversation, not the stored messages.
+ *
+ * Deliberately its own component — `useSessionView` is a hook, so a conditional
+ * call inside the module would be illegal, and keying this by the session gives
+ * exactly the reset contract the Nav-opened session view relies on (switching
+ * conversations drops the live tail, the pin state and any find session).
+ *
+ * The session view is the **same** hook + `<SessionThread>` the agent-session
+ * module renders (no second implementation); only the chrome differs: the header
+ * comes from the chat module (rename, my messages, find, interrupt) and the
+ * composer is the chat composer, so tags, drafts and attachments behave like any
+ * other conversation.
+ */
+function DirectChatDetail({
+  chat,
+  composerReset,
+  onComposerResetApplied,
+  onTagsApplied,
+  renderHeader,
+}: {
+  chat: ChatSummary;
+  composerReset: ComposerResetRequest | null;
+  onComposerResetApplied: (seq: number) => void;
+  onTagsApplied: (chatId: number) => void;
+  /**
+   * Renders the module's detail header. It receives the session view state (the
+   * actions need it) and the conversation's employee id (a `number`, so the
+   * caller's branch guard does not have to survive a closure).
+   */
+  renderHeader: (view: SessionView, employeeId: number) => React.ReactNode;
+}): React.JSX.Element {
+  // `directEmployeeId` is guaranteed by the caller's branch; the fallback keeps
+  // the hook call unconditionally valid (the assistant id can never reach here).
+  const employeeId = chat.directEmployeeId ?? ASSISTANT_ID;
+  const view = useSessionView(employeeId, chat.id);
+  /** Failure of this conversation's own send (nothing typed is lost). */
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  const send = useCallback(
+    async (text: string, attachments: MessageAttachment[]): Promise<void> => {
+      setSendError(null);
+      try {
+        // Main routes it to the conversation's employee (see `chat:send`) and
+        // stores the message, so the list preview/unread/search keep working.
+        await imb.chat.send(chat.id, text, attachments);
+        // The transcript only carries the message once the employee's turn
+        // starts, which can be minutes away while it is busy: the placeholder
+        // row is the boss's feedback until then.
+        view.addPendingChatSend(
+          text,
+          attachments.map((attachment) => toSessionAttachment(attachment)),
+        );
+      } catch (err) {
+        setSendError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [chat.id, view.addPendingChatSend],
+  );
+
+  const error = view.error ?? view.runError ?? sendError;
+
+  return (
+    <>
+      {renderHeader(view, employeeId)}
+      <SessionThread view={view} />
+      {error !== null ? (
+        // In flow, above the composer: the shared `.imb-chat-error` is a fixed
+        // toast that would land on top of the composer here.
+        <p className="imb-error-text imb-session-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <ChatInputBar
+        chatId={chat.id}
+        composerReset={composerReset}
+        onComposerResetApplied={onComposerResetApplied}
+        onSend={(text, attachments) => void send(text, attachments)}
+        onTagsApplied={onTagsApplied}
+        // Only this one employee is reachable in a direct chat.
+        mentions={false}
+      />
     </>
   );
 }

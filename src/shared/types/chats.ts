@@ -12,6 +12,15 @@ export interface Chat {
   /** Id of the user chat that spawned this group chat, or null for a root chat. */
   fromChatId: number | null;
   /**
+   * Employee this root chat is a **direct conversation** with
+   * (`chats.direct_employee_id`), or null for any other conversation (the
+   * boss ↔ assistant chat, a bridged chat, a task group chat). Its presence —
+   * not the `participants` shape — is what makes the UI render that employee's
+   * agent session instead of the chat's `messages`, and what routes
+   * `chat:send` to that employee.
+   */
+  directEmployeeId: number | null;
+  /**
    * Platform this conversation is bridged to (`null` for local-only chats).
    * Doubles as the conversation's platform label in the UI.
    */
@@ -58,6 +67,7 @@ export interface ChatRow {
   unread: number;
   created_at: number;
   from_chat_id: number | null;
+  direct_employee_id: number | null;
   source: string | null;
   pinned: number;
   muted: number;

@@ -107,6 +107,10 @@ interface SessionSpec {
   /** Spawning chat for a group chat; null for root chats. Immutable after
    *  `createChat` (no update path touches `from_chat_id`). */
   fromChatId: number | null;
+  /** This session IS the boss's direct conversation with this employee
+   *  (`chats.direct_employee_id`); switches the delivery rule in the prompt.
+   *  Immutable after `createChat` (no update path touches the column). */
+  directChat: boolean;
   /** Employee display name; injected into the generated non-assistant role block. */
   employeeName: string;
   /** Employee role; injected into the generated non-assistant role block. */
@@ -497,13 +501,17 @@ export class AgentSession {
       }))
       .sort((a, b) => a.path.localeCompare(b.path));
 
+    // Defensive: a chat row that vanished between queueing and composing
+    // degrades to nulls rather than failing the whole run.
+    const chat = getChat(this.context.chatId);
     const spec: SessionSpec = {
       employeeId,
       isAssistant,
-      // Defensive: a chat row that vanished between queueing and composing
-      // degrades to a null `from` rather than failing the whole run.
       chatId: this.context.chatId,
-      fromChatId: getChat(this.context.chatId)?.fromChatId ?? null,
+      fromChatId: chat?.fromChatId ?? null,
+      // Only the conversation's own employee answers there; the assistant never
+      // runs in a direct chat (see `chat:send`).
+      directChat: chat?.directEmployeeId === employeeId,
       employeeName: employee?.name ?? "",
       employeeRole: employee?.role ?? "",
       modelRef: `${model.provider}/${model.id}`,
@@ -647,6 +655,7 @@ export class AgentSession {
         employeeId: spec.employeeId,
         chatId: spec.chatId,
         fromChatId: spec.fromChatId,
+        directChat: spec.directChat,
         toolEntries,
         toolsGuidelines,
       });

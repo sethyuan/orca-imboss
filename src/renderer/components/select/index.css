@@ -89,6 +89,12 @@
   transition: transform var(--imb-motion-fast) var(--imb-ease-standard);
 }
 
+/* A ghost trigger opens upward (it lives at the bottom of a pane): its caret
+   points up, and it must not flip while open. */
+.imb-select-caret.imb-is-up {
+  transform: translateY(-50%) rotate(180deg);
+}
+
 .imb-select-caret.imb-is-open {
   transform: translateY(-50%) rotate(180deg);
 }
@@ -96,7 +102,7 @@
 .imb-select-panel {
   /* Surface/border/shadow come from the shared menu recipe in base.css. */
   overflow-y: auto;
-  padding: 4px;
+  padding: 0;
   margin: 0;
   list-style: none;
 }
@@ -128,4 +134,111 @@
   color: var(--imb-muted);
   text-align: center;
   font-size: var(--imb-fs-ui);
+}
+
+/* A searchable panel's filter row reuses the multi-select search recipe; the
+   select panel's padding is 4px, so the recipe's negative margins are re-tuned
+   to keep the row flush with the panel edges. */
+.imb-select-panel .imb-ms-search {
+  margin: -4px -4px 4px;
+}
+
+/* A custom `renderOption` row fills the option (the row is `space-between`) and
+   truncates its own children, so the single-line label's ellipsis box is off. */
+.imb-select-option-label.imb-is-custom {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Ghost trigger: a borderless disclosure button, not a form field.
+ *
+ * The recipe is the design system's `.imb-btn-ghost` (transparent surface, no
+ * border, `--imb-fg-soft` on hover, the shared focus ring, one 30px control
+ * height) — only the layout differs, because this one is a combobox with a
+ * caret and a placeholder. */
+.imb-select.imb-select-ghost {
+  width: auto;
+  min-height: var(--imb-control-h-large);
+  padding: 0 calc(var(--imb-space-2) + 14px) 0 var(--imb-space-2);
+  border-color: transparent;
+  background: transparent;
+  color: var(--imb-fg);
+  font-size: var(--imb-fs-ui);
+  font-weight: var(--imb-fw-medium);
+  transition:
+    background var(--imb-motion-fast) var(--imb-ease-standard),
+    color var(--imb-motion-fast) var(--imb-ease-standard);
+}
+
+.imb-select.imb-select-ghost:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--imb-fg-soft);
+}
+
+/* Keep the border a real box for the focus ring, but never draw it. */
+.imb-select.imb-select-ghost:focus-visible,
+.imb-select.imb-select-ghost[aria-expanded="true"] {
+  border-color: transparent;
+  background: var(--imb-fg-soft);
+  box-shadow: var(--imb-focus-ring);
+}
+
+.imb-select.imb-select-ghost[aria-expanded="true"]:hover:not(:disabled) {
+  background: var(--imb-fg-soft);
+}
+
+.imb-select.imb-select-ghost .imb-select-caret {
+  right: var(--imb-space-2);
+}
+
+.imb-select-ghost .imb-select-value.imb-is-placeholder {
+  color: var(--imb-fg);
+}
+
+/* Icon trigger: the ghost disclosure button reduced to its caret.
+ *
+ * The visual is a 14px glyph, but the hit area stays a full 30px control (the
+ * boss's rule: small visual, big target). No label, no border, no fill — the
+ * accessible name comes from `label`, which a caller of this variant must pass.
+ */
+.imb-select.imb-select-icon {
+  width: var(--imb-control-h-large);
+  min-width: var(--imb-control-h-large);
+  height: var(--imb-control-h-large);
+  min-height: var(--imb-control-h-large);
+  padding: 0;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+  color: var(--imb-fg);
+}
+
+.imb-select.imb-select-icon:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--imb-fg-soft);
+}
+
+.imb-select.imb-select-icon:focus-visible,
+.imb-select.imb-select-icon[aria-expanded="true"] {
+  border-color: transparent;
+  background: var(--imb-fg-soft);
+  box-shadow: var(--imb-focus-ring);
+}
+
+/* The caret is centred instead of absolutely parked at the right edge, and it
+   is the only content: keep it at full text contrast, not the muted grey a
+   trailing caret uses (that would read as "disabled"). */
+.imb-select.imb-select-icon .imb-select-caret {
+  position: static;
+  right: auto;
+  top: auto;
+  transform: rotate(180deg);
+  width: 14px;
+  height: 14px;
+  color: var(--imb-fg);
+}
+
+.imb-select.imb-select-icon .imb-select-caret svg {
+  width: 100%;
+  height: 100%;
 }

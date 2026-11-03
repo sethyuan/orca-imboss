@@ -29,7 +29,7 @@ import {
   type ComposerDraftView,
   type PendingAttachment,
 } from "../../../../chat-draft";
-import { Avatar } from "../../../avatar";
+import { ChatAvatar } from "../../../chat-avatar";
 import { IconChat, IconSend } from "../../../icons";
 import { useMentionResolver } from "../../../markdown/use-mention";
 import { Modal } from "../../../modal";
@@ -683,7 +683,13 @@ export function ComposerCard({
                   className="imb-chat-picker-item"
                   onClick={() => attachChat(chat)}
                 >
-                  <Avatar letter={title.slice(0, 1)} name={title} size={30} />
+                  <ChatAvatar
+                    participants={chat.participants}
+                    fromChatId={chat.fromChatId}
+                    directEmployeeId={chat.directEmployeeId}
+                    size={30}
+                    title={title}
+                  />
                   <span className="imb-chat-picker-text">
                     <span className="imb-chat-picker-title">{title}</span>
                     {preview.length > 0 && (

@@ -136,6 +136,28 @@ Do not send a separate plain answer for the same assigned task.
 \`kind: "report"\` is only for finished results: questions and answers between teammates go directly to each other (plain \`text\` messages with @-mention + \`notify\`).`;
 
 /**
+ * Delivery rule for an **employee direct chat** (`chats.direct_employee_id`) —
+ * the boss's own conversation with one employee. It REPLACES
+ * `EMPLOYEE_REPORT_PROMPT` for that session: posting a reply with
+ * `imb_send_message` is exactly what the boss does not want there, because the
+ * conversation renders the employee's agent session and its final text is
+ * already visible.
+ *
+ * Everything else (task group chats, reporting to whoever assigned the work, the
+ * assistant ↔ boss chat) keeps the old rule — see `EMPLOYEE_REPORT_PROMPT` and
+ * `ASSISTANT_SYSTEM_PROMPT`.
+ */
+export const EMPLOYEE_DIRECT_CHAT_PROMPT = `## Talking to the Boss Directly
+
+This is the boss's own conversation with you: he is writing to you, not relaying through the assistant, and everything you produce shows up in this conversation's session.
+
+- **Your final text is the reply.** Answer as you normally would — the boss reads your final output directly. Do NOT post the same answer with \`imb_send_message\`; that tool is for task group chats and for reporting results to whoever assigned the work, and a second copy here is only noise.
+- **You do not need \`imb_read_chat\` here.** The boss's messages reach your session directly.
+- Work still happens the same way: use your tools, then finish with what the boss needs — what you did, the key result, and anything that needs his decision. Be concise and concrete.
+- Attachments the boss sends are described in the message with their on-disk paths; read them like any other file.
+- Work the assistant assigns you in a task group is still done and reported there, in that group's session. This conversation changes nothing about it.`;
+
+/**
  * Shared "never block waiting" rule for every employee (assistant included):
  * always end the turn instead of sleeping/polling, since blocking prevents the
  * employee from processing incoming messages.

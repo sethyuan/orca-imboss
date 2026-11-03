@@ -2,7 +2,7 @@ import { t } from "@shared/l10n";
 import type { Message } from "@shared/types";
 import { appStore } from "../../../../app-store";
 import { EmployeeAvatar } from "../../../employee-avatar";
-import { GroupAvatar } from "../../../group-avatar";
+import { ChatAvatar } from "../../../chat-avatar";
 import { HaltButton } from "../halt-button";
 import { MessageTime } from "../message-time";
 import { useChatSummary } from "../use-chat-summary";
@@ -49,8 +49,10 @@ export function ChatCard({
           className="imb-chat-card"
           onClick={() => appStore.openChat(summary)}
         >
-          <GroupAvatar
+          <ChatAvatar
             participants={summary.participants}
+            fromChatId={summary.fromChatId}
+            directEmployeeId={summary.directEmployeeId}
             size={40}
             title={summary.title}
           />

@@ -7,6 +7,7 @@ import { integrationManager } from "../integrations";
 import { maybeGenerateChatTitle } from "../agent/title-gen";
 import * as cron from "../cron";
 import * as dbChats from "../db/chats";
+import * as dbEmployees from "../db/employees";
 import * as dbMessages from "../db/messages";
 import * as dbTags from "../db/tags";
 import { listByChat, unlinkSessionFile } from "../db/sessions";
@@ -190,8 +191,39 @@ export function registerChatHandlers(bind: Binder): void {
   });
 
   /**
-   * Chat pipeline: append the user message → run the assistant's agent turn
+   * Create an **employee direct chat**: a root chat the boss talks to one
+   * employee in (see `Chat.directEmployeeId`).
+   *
+   * Deliberately its own channel instead of a `chats:create` option: the two
+   * differ in more than a flag — a direct chat must NOT force the assistant in
+   * (it has no role in a one-to-one conversation), and `chats:create` keeps
+   * that behavior for every other chat. The employee is validated here so a
+   * stale/disabled id never produces a conversation nobody can answer in.
+   */
+  bind("chats:createDirect", (_ctx, employeeId: unknown) => {
+    const safeId = assertInteger(employeeId, "employee id");
+    if (safeId === ASSISTANT_ID) {
+      throw new Error(
+        "The assistant has no direct conversation: it already talks to the boss in " +
+          "every chat it runs in.",
+      );
+    }
+    const employee = dbEmployees.getEmployee(safeId);
+    if (!employee || employee.disabled) {
+      throw new Error("Employee not found.");
+    }
+    // Untitled on purpose: the first message generates the title (see
+    // `maybeGenerateChatTitle`), exactly like the chat module's own new chat.
+    return dbChats.createChat("", [safeId], { directEmployeeId: safeId });
+  });
+
+  /**
+   * Chat pipeline: append the user message → run the agent turn that answers it
    * (serialized per session queue).
+   *
+   * The answering session is the conversation's own: the assistant for a normal
+   * chat, the conversation's employee for an employee direct chat
+   * (`chats.direct_employee_id`). Everything else about the send is shared.
    */
   bind(
     "chat:send",
@@ -200,6 +232,21 @@ export function registerChatHandlers(bind: Binder): void {
       const safeContent = assertString(content, "content");
       const safeAttachments = validateAttachmentsPayload(attachments);
 
+      const chat = dbChats.getChat(safeChatId);
+      if (chat === null) throw new Error("Conversation not found.");
+      // A direct chat the boss is typing into: the employee answers, and it must
+      // still be able to (a soft-deleted employee stays a participant but never
+      // runs again, so the message would silently reach nobody).
+      const directEmployeeId = chat.directEmployeeId;
+      if (directEmployeeId !== null) {
+        const employee = dbEmployees.getEmployee(directEmployeeId);
+        if (!employee || employee.disabled) {
+          throw new Error(
+            "This employee is no longer available, so the message was not sent.",
+          );
+        }
+      }
+
       const userMessage = dbMessages.appendMessage(
         safeChatId,
         null,
@@ -207,28 +254,37 @@ export function registerChatHandlers(bind: Binder): void {
         !!safeAttachments?.length ? { attachments: safeAttachments } : {},
       );
 
-      // Immediate, app-generated receipt so the user sees an acknowledgement
-      // before the (slow) agent turn produces anything. Defensive: a failure
-      // here must never break the send — the user message is already stored.
-      try {
-        dbMessages.appendMessage(safeChatId, ASSISTANT_ID, "", {
-          kind: "ack",
-          silent: true,
-        });
-      } catch (err) {
-        console.error(
-          "[chat:send] failed to append receipt ack:",
-          err instanceof Error ? err.message : err,
-        );
+      if (directEmployeeId === null) {
+        // Immediate, app-generated receipt so the user sees an acknowledgement
+        // before the (slow) agent turn produces anything. Defensive: a failure
+        // here must never break the send — the user message is already stored.
+        //
+        // A direct chat skips it: its thread is the agent session (the ack row
+        // would never be rendered), and the session view's own pending row is
+        // the "sent, not yet visible" feedback there.
+        try {
+          dbMessages.appendMessage(safeChatId, ASSISTANT_ID, "", {
+            kind: "ack",
+            silent: true,
+          });
+        } catch (err) {
+          console.error(
+            "[chat:send] failed to append receipt ack:",
+            err instanceof Error ? err.message : err,
+          );
+        }
       }
 
-      // Serialized run; the agent posts its own reply via `imb_send_message`.
+      // Serialized run. In a normal chat the agent posts its own reply via
+      // `imb_send_message`; in a direct chat the employee's final text IS the
+      // reply and main mirrors it into `messages` when the run settles (see
+      // `session-queue.recordDirectChatReply`).
       // Deliver the text plus the attachment locations so the model can read
       // the files (a file-only send would otherwise be an empty prompt).
       // A human send that lands mid-turn steers the live run instead of
       // waiting for it to settle.
       void deliver(
-        ASSISTANT_ID,
+        directEmployeeId ?? ASSISTANT_ID,
         safeChatId,
         agentPrompt(safeContent, safeAttachments),
         { mode: "steer" },

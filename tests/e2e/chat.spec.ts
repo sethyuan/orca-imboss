@@ -58,6 +58,25 @@ test("lists conversations newest first with their latest message as preview", as
   await expect(rows.nth(1)).toContainText("alpha answer from the assistant");
 });
 
+test("a conversation with the assistant shows the assistant's avatar", async () => {
+  const session = app!;
+  const { window } = session;
+  await seedTwoChats(window);
+  // An untitled conversation is still a conversation with the assistant.
+  await createChat(window, "");
+  await session.reload();
+
+  const rows = listRows(window);
+  await expect(rows).toHaveCount(3);
+  for (let index = 0; index < 3; index += 1) {
+    // The bundled assistant image, not a letter block taken from the title.
+    await expect(rows.nth(index).locator(".imb-avatar img")).toHaveAttribute(
+      "alt",
+      "Assistant",
+    );
+  }
+});
+
 test("opens a conversation and renders both sides of the thread", async () => {
   const session = app!;
   const { window } = session;

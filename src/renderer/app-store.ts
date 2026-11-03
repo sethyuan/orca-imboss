@@ -54,6 +54,13 @@ export interface OpenedChat {
    * conversation's title (see `GroupChatModule`).
    */
   fromChatId: number | null;
+  /**
+   * Employee of an employee direct chat (`null` for any other conversation).
+   * Snapshotted with the rest so the Nav entry and the group-chat header can
+   * render the conversation's real avatar (`ChatAvatar`): a chat card may point
+   * at a root conversation, which is not a group.
+   */
+  directEmployeeId: number | null;
 }
 
 /** An employee/assistant agent session opened from a chat avatar, shown in the Nav. */
@@ -225,6 +232,12 @@ export const appStore = proxy({
   // Pending chat to select when the chat module is mounted (set by an OS
   // notification click). Cleared once consumed.
   focusChatId: null as number | null,
+
+  // Pending "land the caret in this chat's composer" request (set right after a
+  // brand-new chat was created from outside the chat module, e.g. the employees
+  // module's "New chat"). One-shot: the chat module consumes it together with
+  // `focusChatId` and clears it, so a later remount can never steal focus.
+  pendingComposerFocus: null as number | null,
 
   // Pending employee to select when the employees module is mounted (set by the
   // agent-session header's name link). Cleared once consumed.
@@ -775,6 +788,14 @@ export const appStore = proxy({
     if (appStore.focusChatId !== null && deleted.has(appStore.focusChatId)) {
       appStore.focusChatId = null;
     }
+    if (
+      appStore.pendingComposerFocus !== null &&
+      deleted.has(appStore.pendingComposerFocus)
+    ) {
+      // A chat deleted before the chat module consumed its one-shot focus
+      // request must not steal the caret from whatever is open next.
+      appStore.pendingComposerFocus = null;
+    }
     // Close opened group chats and agent sessions bound to deleted chats
     // (close* picks a merged-list neighbour / the chat module fallback when the
     // active one is removed).
@@ -1018,6 +1039,7 @@ export const appStore = proxy({
       existing.title = chat.title;
       existing.participants = participants;
       existing.fromChatId = chat.fromChatId;
+      existing.directEmployeeId = chat.directEmployeeId;
     } else {
       appStore.openedItems.push({
         kind: "chat",
@@ -1025,6 +1047,7 @@ export const appStore = proxy({
         title: chat.title,
         participants,
         fromChatId: chat.fromChatId,
+        directEmployeeId: chat.directEmployeeId,
       });
     }
     appStore.activeChatId = chat.id;
@@ -1067,6 +1090,33 @@ export const appStore = proxy({
       appStore.openChat(summary);
     }
     return true;
+  },
+
+  /**
+   * Create a brand-new chat with one employee and land the boss in it: the Chat
+   * module is opened, the new conversation is selected, its filters are dropped
+   * and the caret goes into its composer.
+   *
+   * `"New chat"` on the employee detail page is the only caller. Every new
+   * conversation is a separate chat (its title comes from the first message),
+   * so pressing it twice yields two independent threads.
+   *
+   * Returns the new chat id, or `null` when the employee cannot be messaged
+   * (deleted/disabled) — the caller reports that. IPC failures are thrown, like
+   * every other store helper.
+   */
+  async openDirectChat(employeeId: number): Promise<number | null> {
+    if (!Number.isSafeInteger(employeeId) || employeeId <= 0) return null;
+    const chat = await imb.chats.createDirect(employeeId);
+    // The list renders `data.chats.items`; the new chat sorts to the top
+    // (`last_message_at` = creation time). `focusChat` then selects it and
+    // persists the module choice; `pendingComposerFocus` is what the chat
+    // module turns into `composerReset` (reset transient UI + focus the
+    // textarea) — the same path `newChat()` takes inside the module.
+    await appStore.reloadChats();
+    appStore.pendingComposerFocus = chat.id;
+    await appStore.focusChat(chat.id);
+    return chat.id;
   },
 
   /** Close an opened group chat; activate the merged-list neighbour or Chat. */
@@ -1432,6 +1482,9 @@ function applyChatSummaryToOpenedItems(summary: ChatSummary): void {
       if (item.title !== title) item.title = title;
       if (item.fromChatId !== summary.fromChatId) {
         item.fromChatId = summary.fromChatId;
+      }
+      if (item.directEmployeeId !== summary.directEmployeeId) {
+        item.directEmployeeId = summary.directEmployeeId;
       }
       const current = item.participants;
       const same =

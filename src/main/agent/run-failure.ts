@@ -1,5 +1,6 @@
 import { ASSISTANT_ID } from "@shared/constants/employees";
 import { readChatPrompt } from "@shared/constants/prompts";
+import * as dbChats from "../db/chats";
 import * as dbEmployees from "../db/employees";
 import * as dbMessages from "../db/messages";
 
@@ -131,6 +132,18 @@ export function recordRunFailure(
       return outcome;
     }
 
+    try {
+      const chatRow = dbChats.getChat(chatId);
+      // An employee direct chat is the boss's own conversation with one
+      // employee: waking the assistant there would materialize a session in a
+      // chat it has no role in (and post a message the UI never renders). The
+      // `error` notice stays — the session view shows the run error to the boss.
+      if (chatRow === null || chatRow.directEmployeeId !== null) {
+        return outcome;
+      }
+    } catch {
+      // A lookup failure must not suppress the record: fall through and wake.
+    }
     outcome.woken = wakeAssistant(failure, wake, now);
 
     console.error(

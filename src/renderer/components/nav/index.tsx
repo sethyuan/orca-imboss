@@ -33,7 +33,7 @@ import {
   type ContextMenuState,
 } from "../context-menu";
 import { EmployeeAvatar } from "../employee-avatar";
-import { GroupAvatar } from "../group-avatar";
+import { ChatAvatar } from "../chat-avatar";
 import {
   IconApp,
   IconChat,
@@ -126,6 +126,10 @@ interface NavChat {
   readonly id: number;
   readonly title: string;
   readonly participants: readonly number[];
+  /** `null` when the opened chat is a root conversation (see `ChatAvatar`). */
+  readonly fromChatId: number | null;
+  /** Employee of an employee direct chat, `null` otherwise. */
+  readonly directEmployeeId: number | null;
 }
 
 /** Read-only shape of a registered mini app (valtio snapshots are readonly). */
@@ -394,7 +398,13 @@ function NavChatButton({
           {...(listeners ?? {})}
         >
           <span className="imb-nav-avatar">
-            <GroupAvatar participants={chat.participants} size={24} />
+            <ChatAvatar
+              participants={chat.participants}
+              fromChatId={chat.fromChatId}
+              directEmployeeId={chat.directEmployeeId}
+              size={24}
+              title={chat.title}
+            />
             {/*
              * Group-chat marker. A 24px avatar next to a 24px employee avatar is
              * hard to tell apart at rail size, and a bare dot would say nothing;

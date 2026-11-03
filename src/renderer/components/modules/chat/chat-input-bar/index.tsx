@@ -48,6 +48,14 @@ export interface ChatInputBarProps {
   onComposerResetApplied?: (seq: number) => void;
   onSend: (text: string, attachments: MessageAttachment[]) => void;
   /**
+   * Whether the `@`-mention popup is offered (default `true`).
+   *
+   * An employee direct chat targets exactly one employee, so mentioning a third
+   * one would do nothing; that composer turns the popup off and an `@` stays
+   * plain text.
+   */
+  mentions?: boolean;
+  /**
    * Called after the composer wrote tags to the conversation (a common-project
    * pick). Lets the chat module refresh its tag candidates and paged list.
    */
@@ -77,6 +85,7 @@ export function ChatInputBar({
   onComposerResetApplied,
   onSend,
   onTagsApplied,
+  mentions = true,
 }: ChatInputBarProps): React.JSX.Element {
   // The draft is per chat and lives on appStore so it survives the chat module
   // being unmounted on a module switch.
@@ -251,6 +260,7 @@ export function ChatInputBar({
   };
 
   const checkMentionTrigger = (val: string, cursor: number): void => {
+    if (!mentions) return;
     const before = val.slice(0, cursor);
     const match = /(?:^|\s)@([^\s@]*)$/.exec(before);
     if (match) {
@@ -266,6 +276,7 @@ export function ChatInputBar({
   };
 
   const onCaretMove = (): void => {
+    if (!mentions) return;
     const textarea = cardRef.current?.textarea() ?? null;
     if (textarea) {
       checkMentionTrigger(textarea.value, textarea.selectionStart ?? 0);
@@ -343,13 +354,15 @@ export function ChatInputBar({
       attachMenuExtra={attachMenuExtra}
       attachMenuOpenChange={setProjectsMenuOpen}
       overlay={
-        <MentionPopup
-          open={mentionOpen}
-          employees={filteredEmployees}
-          selectedIndex={mentionIndex}
-          onSelect={insertMention}
-          onHoverIndex={setMentionIndex}
-        />
+        mentions ? (
+          <MentionPopup
+            open={mentionOpen}
+            employees={filteredEmployees}
+            selectedIndex={mentionIndex}
+            onSelect={insertMention}
+            onHoverIndex={setMentionIndex}
+          />
+        ) : null
       }
       onKeyDown={onKeyDown}
       onTextChanged={(value, caret) => checkMentionTrigger(value, caret)}

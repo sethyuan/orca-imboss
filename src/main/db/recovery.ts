@@ -122,6 +122,10 @@ export function listUnansweredRootChats(
         "JOIN chats c ON c.id = lh.chatId " +
         "JOIN messages m ON m.id = lh.anchorId " +
         "WHERE c.from_chat_id IS NULL " +
+        // An employee direct chat is not an assistant conversation: waking the
+        // assistant there would build a session in a chat it has no role in (see
+        // `agent/run-recovery.ts`).
+        "  AND c.direct_employee_id IS NULL " +
         "  AND m.created_at >= ? " +
         `  AND NOT EXISTS ( SELECT 1 FROM messages r WHERE ${SETTLED_PREDICATE} ) ` +
         "ORDER BY lh.anchorId DESC LIMIT ?",

@@ -1,6 +1,7 @@
 import {
   ASSISTANT_REPORT_PROMPT,
   buildEmployeeRolePrompt,
+  EMPLOYEE_DIRECT_CHAT_PROMPT,
   EMPLOYEE_REPORT_PROMPT,
   MENTION_HANDLING_PROMPT,
   NEVER_BLOCK_WAITING_PROMPT,
@@ -18,11 +19,12 @@ import { BuildEmployeeSystemPromptArgs } from "@shared/types";
  * order). The exact template shape:
  *
  * ```
- * This is your working session as employee {ID}[( {name}) — assistant only] in chat {chatId}[, the boss's chat].
+ * This is your working session as employee {ID}[( {name}) — assistant only] in chat {chatId}[, the boss's chat][, your direct conversation with the boss — direct chat only].
  * [This task group chat was created from chat {fromChatId}, the boss's chat.  — only when fromChatId is set]
  * [role: generated for non-assistants; baked into ASSISTANT_SYSTEM_PROMPT for the assistant]
  * [employeePrompt: persona]
- * [report skill: assistant aggregation/progress/summary OR employee result report]
+ * [report skill: assistant aggregation/progress/summary OR employee result report
+ *  OR — in an employee direct chat — the "your final text is the reply" rule]
  * [@-mention handling]
  * [never block waiting]
  * [builtinSkills]
@@ -40,6 +42,7 @@ export function buildEmployeeSystemPrompt({
   employeeId,
   chatId,
   fromChatId,
+  directChat,
   toolEntries,
   toolsGuidelines,
 }: BuildEmployeeSystemPromptArgs): string {
@@ -73,10 +76,16 @@ export function buildEmployeeSystemPrompt({
   // which case the parenthetical is omitted and the line stays as before.
   const assistantName = isAssistant ? name.trim() : "";
   const assistantNameSuffix = assistantName ? ` (${assistantName})` : "";
+  // A direct chat is the boss's own conversation with this employee: name that
+  // explicitly, since it is what makes the delivery rule below mean "answer
+  // here" instead of "post a message".
+  const directSuffix = directChat
+    ? ", your direct conversation with the boss"
+    : "";
   const identityLines = [
     isAssistant
       ? `This is your working session as employee ${employeeId}${assistantNameSuffix} in chat ${chatId}, the boss's chat.`
-      : `This is your working session as employee ${employeeId} in chat ${chatId}.`,
+      : `This is your working session as employee ${employeeId} in chat ${chatId}${directSuffix}.`,
   ];
   if (fromChatId != null) {
     identityLines.push(
@@ -87,10 +96,14 @@ export function buildEmployeeSystemPrompt({
 
   // Role-specific reporting skill: the assistant aggregates employee reports into
   // boss-facing progress + a summary; a non-assistant reports finished work to its
-  // assigner.
+  // assigner. In an employee direct chat the boss is the one being answered, so
+  // "post your result with imb_send_message" would be the wrong rule there — the
+  // employee's final text IS the reply and replaces that block.
   const reportBlock = isAssistant
     ? ASSISTANT_REPORT_PROMPT
-    : EMPLOYEE_REPORT_PROMPT;
+    : directChat
+      ? EMPLOYEE_DIRECT_CHAT_PROMPT
+      : EMPLOYEE_REPORT_PROMPT;
 
   const sections = [
     identityBlock,

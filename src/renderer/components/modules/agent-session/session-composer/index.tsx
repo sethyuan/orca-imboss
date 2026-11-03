@@ -106,7 +106,11 @@ export function SessionComposer({
         // The placeholder row shows the same chips the transcript will, so a
         // file-only send is not an empty bubble (and the row still matches its
         // projection, which strips the prompt's attachment block to `""`).
-        onSent(value, result, attachments.map(toSessionAttachment));
+        onSent(
+          value,
+          result,
+          attachments.map((item) => toSessionAttachment(item.attachment)),
+        );
         cardRef.current?.focus();
       } catch (err) {
         // Keep the text (nothing typed may be lost) and surface the reason: only
@@ -175,18 +179,18 @@ export function SessionComposer({
  * reference its chat id, a file its name/type/size label. (The prompt's own
  * `[Attachments]` block is what the session view parses; this is the same data
  * from the renderer's side, so the two paths agree without duplicating text.)
+ *
+ * Exported because the chat module's **direct chat** composer feeds the same
+ * placeholder row from a stored-message attachment (`MessageAttachment`).
  */
-function toSessionAttachment(item: {
-  attachment: {
-    name: string;
-    size: number;
-    type: string;
-    kind?: "file" | "folder" | "chat";
-    path?: string;
-    chatId?: number;
-  };
+export function toSessionAttachment(source: {
+  name: string;
+  size: number;
+  type: string;
+  kind?: "file" | "folder" | "chat";
+  path?: string;
+  chatId?: number;
 }): AgentSessionAttachment {
-  const source = item.attachment;
   const kind =
     source.kind === "folder" || source.kind === "chat" ? source.kind : "file";
   const attachment: AgentSessionAttachment = { name: source.name, kind };

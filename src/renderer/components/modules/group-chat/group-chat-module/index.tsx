@@ -11,7 +11,7 @@ import {
 import { cls } from "reactutils";
 import { IS_MAC, appStore, useApp } from "../../../../app-store";
 import { ModuleView } from "../../../app-shell";
-import { GroupAvatar } from "../../../group-avatar";
+import { ChatAvatar } from "../../../chat-avatar";
 import { IconButton } from "../../../icon-button";
 import { IconChevronDown, IconChevronUp, IconSearch } from "../../../icons";
 import { Tooltip } from "../../../tooltip";
@@ -305,8 +305,10 @@ export function GroupChatModule({
     <>
       <div className="imb-chat-header">
         <div className="imb-chat-header-avatar">
-          <GroupAvatar
+          <ChatAvatar
             participants={chat?.participants ?? []}
+            fromChatId={chat?.fromChatId ?? null}
+            directEmployeeId={chat?.directEmployeeId ?? null}
             size={30}
             title={chat?.title}
           />

@@ -41,12 +41,18 @@
   /* -- 1a. palette primitives (light) ------------------------------------- */
 
   /* Backdrops and fills, darkest to lightest role. */
-  --imb-p-window: #ededed; /* window/chrome backdrop */
-  --imb-p-grouped: #e6e6e6; /* grouped-content backdrop */
-  --imb-p-raised: #f7f7f7; /* content + control fill */
-  --imb-p-ink: #1a1a1a; /* primary text */
-  --imb-p-ink-2: #888888; /* secondary text */
-  --imb-p-line: #e0e0e0; /* hairline + control stroke */
+  --imb-p-window: #ededed;
+  /* window/chrome backdrop */
+  --imb-p-grouped: #e6e6e6;
+  /* grouped-content backdrop */
+  --imb-p-raised: #f7f7f7;
+  /* content + control fill */
+  --imb-p-ink: #1a1a1a;
+  /* primary text */
+  --imb-p-ink-2: #888888;
+  /* secondary text */
+  --imb-p-line: #e0e0e0;
+  /* hairline + control stroke */
 
   /* Specular cue for the top edge of raised/glass surfaces. It imitates light
      falling on a bevel, so it is a theme value: bright on light, faint on dark. */
@@ -109,8 +115,10 @@
   --imb-fw-regular: 400;
   --imb-fw-medium: 500;
   --imb-fw-semibold: 600;
-  --imb-leading-ui: 1.3; /* single-line chrome */
-  --imb-leading-text: 1.5; /* flowing text (CJK needs ≥1.5) */
+  --imb-leading-ui: 1.3;
+  /* single-line chrome */
+  --imb-leading-text: 1.5;
+  /* flowing text (CJK needs ≥1.5) */
 
   /* -- 1c. spacing, sizing ------------------------------------------------ */
 
@@ -125,12 +133,16 @@
 
   /* Control heights, from the macOS desktop scale. */
   --imb-control-h-mini: 22px;
-  --imb-control-h: 26px; /* menus, segmented segments, small buttons */
-  --imb-control-h-large: 30px; /* buttons, inputs, selects, search */
+  --imb-control-h: 30px;
+  /* menus, segmented segments, small buttons */
+  --imb-control-h-large: 30px;
+  /* buttons, inputs, selects, search */
   --imb-control-h-xl: 36px;
   /* Row pitch. */
-  --imb-row-h: 30px; /* sidebar / source-list row */
-  --imb-row-h-list: 48px; /* conversation / item row */
+  --imb-row-h: 30px;
+  /* sidebar / source-list row */
+  --imb-row-h-list: 48px;
+  /* conversation / item row */
   --imb-icon-sm: 16px;
   --imb-icon: 20px;
   /* Knockout ring behind the rail's group-chat badge: the chrome surface colour,
@@ -151,10 +163,14 @@
      by the padding between them. */
   --imb-radius-window: 12px;
   --imb-radius-sheet: 14px;
-  --imb-radius-bubble: 12px; /* chat bubbles; the tail corner uses `inner` */
-  --imb-radius-card: 10px; /* cards, popovers, menus */
-  --imb-radius-control: 7px; /* buttons, fields, rows */
-  --imb-radius-chip: 5px; /* chips, tags, tooltips, code spans */
+  --imb-radius-bubble: 12px;
+  /* chat bubbles; the tail corner uses `inner` */
+  --imb-radius-card: 10px;
+  /* cards, popovers, menus */
+  --imb-radius-control: 7px;
+  /* buttons, fields, rows */
+  --imb-radius-chip: 5px;
+  /* chips, tags, tooltips, code spans */
   --imb-radius-inner: 3px;
   --imb-radius-pill: 9999px;
 
@@ -184,11 +200,9 @@
      the chrome needs to give more of itself up. Tuning band for a second pass:
      55–65% (too transparent → text on busy wallpapers loses contrast; too solid
      → back to an opaque rail). */
-  --imb-material-chrome: color-mix(
-    in oklab,
-    var(--imb-p-window) 60%,
-    transparent
-  );
+  --imb-material-chrome: color-mix(in oklab,
+      var(--imb-p-window) 60%,
+      transparent);
   /* Sheen: the faint top-lit gradient that makes an opaque surface read as a
      material when there is no real backdrop to sample. */
   --imb-chrome-sheen: none;
@@ -202,18 +216,19 @@
   --imb-dur-2: 200ms;
   --imb-dur-3: 240ms;
   --imb-ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
-  --imb-ease-emphasized: cubic-bezier(
-    0.22,
-    1,
-    0.36,
-    1
-  ); /* selection slides in */
-  --imb-ease-exit: cubic-bezier(0.4, 0, 1, 1); /* dismissals get out fast */
+  --imb-ease-emphasized: cubic-bezier(0.22,
+      1,
+      0.36,
+      1);
+  /* selection slides in */
+  --imb-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  /* dismissals get out fast */
 
   /* -- 2. semantics -------------------------------------------------------- */
 
   --imb-bg-window: var(--imb-p-window);
-  --imb-bg-chrome: var(--imb-p-window); /* P2: becomes the glass surface */
+  --imb-bg-chrome: var(--imb-p-window);
+  /* P2: becomes the glass surface */
   --imb-bg-content: var(--imb-p-raised);
   --imb-bg-group: var(--imb-p-grouped);
   --imb-bg-control: var(--imb-p-raised);
@@ -233,16 +248,12 @@
   --imb-row-hover: color-mix(in oklch, var(--imb-p-ink) 6%, transparent);
   /* Track fill for capsule controls (segmented control, switch off-state). */
   --imb-track-bg: color-mix(in oklab, var(--imb-p-ink) 8%, transparent);
-  --imb-row-active: color-mix(
-    in oklch,
-    var(--imb-accent) 15%,
-    var(--imb-bg-content)
-  );
-  --imb-row-selected: color-mix(
-    in oklch,
-    var(--imb-accent) 12%,
-    var(--imb-bg-content)
-  );
+  --imb-row-active: color-mix(in oklch,
+      var(--imb-accent) 15%,
+      var(--imb-bg-content));
+  --imb-row-selected: color-mix(in oklch,
+      var(--imb-accent) 12%,
+      var(--imb-bg-content));
   /* Sidebar selection: on mac it is a tinted capsule, not a solid accent block. */
   --imb-sel-bg: var(--imb-row-selected);
   --imb-sel-fg: var(--imb-fg);
@@ -266,11 +277,9 @@
 
   /* Two danger tints: a soft *fill* for banners, and a translucent one for
      hover states that must sit on any surface. */
-  --imb-danger-soft: color-mix(
-    in oklch,
-    var(--imb-p-danger) 12%,
-    var(--imb-bg-content)
-  );
+  --imb-danger-soft: color-mix(in oklch,
+      var(--imb-p-danger) 12%,
+      var(--imb-bg-content));
   --imb-danger-tint: color-mix(in oklch, var(--imb-p-danger) 14%, transparent);
 
   --imb-success: var(--imb-p-success);
@@ -299,7 +308,8 @@
   --imb-text-xs: var(--imb-fs-caption);
   --imb-text-sm: var(--imb-fs-small);
   --imb-text-base: var(--imb-fs-ui);
-  --imb-text-lg: var(--imb-fs-ui); /* button labels are body-sized on the mac */
+  --imb-text-lg: var(--imb-fs-ui);
+  /* button labels are body-sized on the mac */
   --imb-text-xl: var(--imb-fs-title-3);
   --imb-text-2xl: var(--imb-fs-title-1);
   --imb-text-3xl: var(--imb-fs-large-title);
@@ -387,11 +397,9 @@
 
 :root:not([data-platform="darwin"]) {
   --imb-material-chrome: var(--imb-p-window);
-  --imb-chrome-sheen: linear-gradient(
-    180deg,
-    color-mix(in oklab, var(--imb-p-specular) 55%, transparent),
-    transparent
-  );
+  --imb-chrome-sheen: linear-gradient(180deg,
+      color-mix(in oklab, var(--imb-p-specular) 55%, transparent),
+      transparent);
 }
 
 /* ============================================================================
@@ -419,11 +427,9 @@
        transparent": the chrome collapses onto its solid backdrop and keeps the
        sheen (a gradient is not a transparency effect). */
     --imb-material-chrome: var(--imb-p-window);
-    --imb-chrome-sheen: linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--imb-p-specular) 55%, transparent),
-      transparent
-    );
+    --imb-chrome-sheen: linear-gradient(180deg,
+        color-mix(in oklab, var(--imb-p-specular) 55%, transparent),
+        transparent);
   }
 }
 
@@ -433,10 +439,8 @@
     --imb-fg-muted: color-mix(in oklab, var(--imb-p-ink) 70%, transparent);
     --imb-sep: color-mix(in oklab, var(--imb-p-ink) 22%, transparent);
     --imb-sep-strong: color-mix(in oklab, var(--imb-p-ink) 34%, transparent);
-    --imb-control-border: color-mix(
-      in oklab,
-      var(--imb-p-ink) 34%,
-      transparent
-    );
+    --imb-control-border: color-mix(in oklab,
+        var(--imb-p-ink) 34%,
+        transparent);
   }
 }

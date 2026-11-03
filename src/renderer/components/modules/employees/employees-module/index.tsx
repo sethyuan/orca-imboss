@@ -504,6 +504,15 @@ export function EmployeesModule(): React.JSX.Element {
       defaultThinking={defaultThinking}
       onPatch={(input) => patch(selected.id, input)}
       onRemove={() => void remove(selected.id)}
+      // Only employees have a direct conversation; the assistant is not offered
+      // one (it already talks to the boss in every chat it runs in).
+      onNewChat={
+        selected.id === 0
+          ? undefined
+          : async () => {
+              await appStore.openDirectChat(selected.id);
+            }
+      }
       onAvatarUpdated={(employee) => appStore.replaceEmployee(employee)}
     />
   ) : null;

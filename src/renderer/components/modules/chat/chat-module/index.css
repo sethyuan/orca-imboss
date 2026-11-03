@@ -147,3 +147,21 @@
 .imb-chat-tag-select .imb-ms-caret {
   display: none;
 }
+
+/* List footer: the "chat with an employee" picker and the New Chat button share
+   one row. `.imb-pane-footer .imb-btn` stretches a button to the full width by
+   default, so this module's button opts out and the picker takes the rest. */
+.imb-pane-footer .imb-chat-new-row {
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-1);
+}
+
+/* The New Chat button keeps the row's free width; the picker beside it is an
+   auto-sized ghost trigger that must never shrink or push the button out. */
+.imb-pane-footer .imb-chat-new-row .imb-btn {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}

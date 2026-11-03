@@ -373,6 +373,13 @@ const api = {
       on<{ chatIds: number[] }>("chats:deleted", cb),
     create: (title: string, participants: number[]) =>
       ipcRenderer.invoke("chats:create", title, participants) as Promise<Chat>,
+    /**
+     * Create an employee direct chat (a root chat the boss talks to one
+     * employee in). Its `participants` is just that employee — the assistant is
+     * not added.
+     */
+    createDirect: (employeeId: number) =>
+      ipcRenderer.invoke("chats:createDirect", employeeId) as Promise<Chat>,
     update: (id: number, title: string) =>
       ipcRenderer.invoke("chats:update", id, title) as Promise<Chat | null>,
     updateParticipants: (id: number, changes: ChatParticipantUpdate) =>

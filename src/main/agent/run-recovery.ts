@@ -37,6 +37,15 @@ import { getModelRuntime, resolveModel } from "./model-runtime";
  *   no `initCron()` / `runNow()`, no `next_run_at` change, and no cron `content`
  *   is ever replayed. The only thing it sends is `readChatPrompt()`.
  *
+ * ## Employee direct chats are out of scope too
+ *
+ * A direct chat (`chats.direct_employee_id`, see `Chat.directEmployeeId`) is not
+ * an assistant conversation: recovering one would wake the assistant into a chat
+ * it has no role in. The scan therefore skips them (`listUnansweredRootChats`),
+ * so a turn that died there simply has no reply — the boss sees the missing
+ * answer in the session view and can send again. (Recovering the *employee*
+ * instead would need a per-chat wake target; deliberately not done.)
+ *
  * ## Why the read cursor has to be rewound
  *
  * `imb_read_chat` persists the assistant's cursor *when it reads* — and the run

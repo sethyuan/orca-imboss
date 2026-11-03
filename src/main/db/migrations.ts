@@ -197,6 +197,21 @@ const MIGRATIONS: Array<(db: Database) => void> = [
       );
     `);
   },
+  // 7 — employee direct chats: a root chat the boss talks to **one employee**
+  // in. The column (not a `participants` shape) is what identifies such a
+  // conversation, because `participants` is an editable JSON list (see
+  // `imb_add_participant`), so "only one non-assistant member" cannot tell a
+  // direct chat from a conversation an employee was added to. NULL for every
+  // other conversation (assistant ↔ boss chats, bridged chats, task groups).
+  //
+  // Deliberately **no foreign key**: like `participants`, this is not
+  // FK-enforced, and a deleted employee must not silently rewrite a chat row.
+  // Readers treat an id that no longer resolves as "employee unavailable".
+  (db) => {
+    db.exec(`
+      ALTER TABLE chats ADD COLUMN direct_employee_id INTEGER;
+    `);
+  },
 ];
 
 export function migrate(db: Database): void {

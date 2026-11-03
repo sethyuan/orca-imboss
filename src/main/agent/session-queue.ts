@@ -44,9 +44,12 @@ import {
  * that on every `prepare()`). It is disposed after a 5-minute idle period.
  *
  * Messages are plain text — no reply is captured or persisted; the agent
- * posts its own output through `imb_*` tools. A failed run is reported to the
- * windows bound to the key as an `error` event and never loses the caller's
- * already-persisted message.
+ * posts its own output through `imb_*` tools. The single exception is an
+ * **employee direct chat** (`chats.direct_employee_id`): there the employee's
+ * final text *is* the reply, so the run's last text is mirrored into
+ * `messages` when it settles (see `recordDirectChatReply`). A failed run is
+ * reported to the windows bound to the key as an `error` event and never loses
+ * the caller's already-persisted message.
  *
  * A human message that arrives while the key's run is streaming can be handed
  * to that live run as a Pi **steering** message (`deliver(..., { mode:
@@ -152,6 +155,18 @@ interface QueueState {
    * run start.
    */
   lastAssistantStop?: { stopReason: string; errorMessage?: string };
+  /**
+   * Text blocks of the **last** assistant message of the run in flight that
+   * carried any text.
+   *
+   * Only used by an employee direct chat: there the employee's final text *is*
+   * its reply (it is told not to post with `imb_send_message`), so the run's
+   * last text is mirrored into the conversation when the run settles — see
+   * `recordDirectChatReply()`. A stray empty (or aborted) message at the end of
+   * a run must not erase the actual answer, hence "last non-empty". Reset at
+   * every run start.
+   */
+  lastAssistantText?: string;
   /** Automatic retries Pi announced during the run in flight (for the notice). */
   retryAttempts: number;
   /**
@@ -979,6 +994,7 @@ async function drain(state: QueueState): Promise<void> {
         state.openTools.clear();
         state.toolCallsThisRun = 0;
         state.lastAssistantStop = undefined;
+        state.lastAssistantText = undefined;
         state.retryAttempts = 0;
         state.abortRequested = false;
         await state.session?.prompt(text);
@@ -987,6 +1003,7 @@ async function drain(state: QueueState): Promise<void> {
         // event stream and make the failure durable (chat notice + assistant).
         const failure = runFailureOf(state);
         if (failure !== null) reportRunFailure(state, failure);
+        else recordDirectChatReply(state);
       } catch (err) {
         emitError(state, err);
       }
@@ -1175,6 +1192,11 @@ function forwardEvent(state: QueueState, event: AgentSessionEvent): void {
           ? message.errorMessage
           : undefined;
       state.lastAssistantStop = { stopReason, errorMessage };
+      // The reply of an employee direct chat (see `recordDirectChatReply`).
+      // Only a non-empty message replaces the remembered text: a turn may end
+      // with an empty/aborted assistant message after the real answer.
+      const text = extractTextContent(message.content).trim();
+      if (text.length > 0) state.lastAssistantText = text;
     }
     // Only an assistant `message_end` means the last streamed message is now
     // part of the transcript (a user message is persisted before its answer) —
@@ -1317,6 +1339,42 @@ function runFailureOf(state: QueueState): string | null {
   if (stop?.stopReason !== "error") return null;
   const message = (stop.errorMessage ?? "").trim();
   return message.length > 0 ? message : "Unknown error";
+}
+
+/**
+ * Mirror a finished run's reply into an **employee direct chat**.
+ *
+ * In a direct chat the employee is told its final text *is* the reply (see
+ * `EMPLOYEE_DIRECT_CHAT_PROMPT`) — nothing is posted with `imb_send_message`,
+ * so without this the conversation would hold only the boss's own messages: no
+ * list preview, no unread badge, nothing for full-text search or backup, and a
+ * pending turn that startup recovery would consider unanswered.
+ *
+ * One stored `text` message from the employee is therefore written when its run
+ * settles, which drives every existing mechanism (unread bump, preview,
+ * `last_message_at` ordering, FTS triggers, the recovery settle predicate). The
+ * session view never renders `messages`, so the reply is not shown twice.
+ *
+ * Skipped when: the run was aborted, the chat is not this employee's direct
+ * chat, or the turn produced no text (a tool-only turn). Never throws — reply
+ * bookkeeping must not affect the queue.
+ */
+function recordDirectChatReply(state: QueueState): void {
+  if (state.disposed || state.abortRequested) return;
+  const text = state.lastAssistantText;
+  if (text === undefined || text.length === 0) return;
+  try {
+    const chat = dbChats.getChat(state.chatId);
+    if (!chat || chat.directEmployeeId !== state.employeeId) return;
+    dbMessages.appendMessage(state.chatId, state.employeeId, text, {
+      kind: "text",
+    });
+  } catch (err) {
+    console.error(
+      `[session-queue] failed to record the reply of ${state.employeeId} in chat ${state.chatId}:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
 }
 
 /**
