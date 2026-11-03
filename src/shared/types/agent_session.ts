@@ -6,6 +6,29 @@
  * the content the read-only session view renders crosses the IPC boundary
  * (see `readSessionView` in the main process).
  */
+/**
+ * One attachment recovered from a persisted user prompt's trailing
+ * `[Attachments]` block (see `splitAttachmentPrompt` in the main process).
+ *
+ * Deliberately **display-shaped**, not a `MessageAttachment`: the prompt is a
+ * lossy, already-sanitized rendering (a size is the string `1.5 KB`, a name may
+ * have been truncated), so nothing here pretends to be the original metadata.
+ * The view only renders these — it never sends them anywhere.
+ */
+export interface AgentSessionAttachment {
+  /** Chip label: the name exactly as the prompt carried it. */
+  name: string;
+  kind: "file" | "folder" | "chat";
+  /** MIME-ish type (files only) — needed to decide on an image thumbnail. */
+  type?: string;
+  /** Human-readable size (`1.5 KB` / `unknown size`), files only. */
+  sizeLabel?: string;
+  /** Absolute on-disk path, when the prompt could carry one. */
+  path?: string;
+  /** Referenced conversation, `kind: "chat"` only. */
+  chatId?: number;
+}
+
 export type AgentSessionViewEntry =
   | {
       /**
@@ -14,7 +37,18 @@ export type AgentSessionViewEntry =
        */
       kind: "user";
       id: string;
+      /**
+       * What the boss typed. Empty when the send carried only attachments — the
+       * prompt's `[Attachments]` block is stripped and projected as
+       * `attachments` instead (never rendered as raw text).
+       */
       text: string;
+      /**
+       * Attachments the prompt carried, recovered from its trailing block.
+       * Absent when the prompt had none, or when the block could not be read back
+       * byte-for-byte (a historical / hand-edited prompt keeps its raw text).
+       */
+      attachments?: AgentSessionAttachment[];
     }
   | {
       /**

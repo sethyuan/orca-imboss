@@ -257,7 +257,7 @@ export function appendMessage(
       .get(groupChatId);
     if (!linked) throw new Error("Linked group chat does not exist.");
   }
-  const attachments = validateAttachments(options.attachments);
+  const attachments = validateMessageAttachments(options.attachments);
   const attachmentTotal = validateAttachmentTotal(
     options.attachmentTotal,
     attachments,
@@ -610,7 +610,17 @@ function validateSteps(
   return result;
 }
 
-function validateAttachments(
+/**
+ * Validate a renderer-supplied attachment list and rebuild it field by field.
+ *
+ * The single source of truth for "what an attachment may contain": the
+ * composer's `chat:send` path calls it before storing the message, and
+ * `agentSession:send` calls it before handing the list to the model — a session
+ * prompt is never stored, but the same trust boundary applies to what reaches
+ * the agent (cap, name/type lengths, size, kind, an absolute-ish path, and a
+ * conversation reference that still exists).
+ */
+export function validateMessageAttachments(
   attachments: MessageAttachment[] | undefined,
 ): MessageAttachment[] | undefined {
   if (attachments === undefined) return undefined;

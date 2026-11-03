@@ -179,6 +179,17 @@ export interface DeliverOptions {
    * manual `runNow`) keep the default queue.
    */
   mode?: "steer" | "queue";
+  /**
+   * What the boss typed, when it differs from the text handed to the model.
+   *
+   * An attachment send composes the model prompt (`text` + an `[Attachments]`
+   * block), but the interjection's **display** copy — the pending row, the
+   * `steer_state` payload, the text a withdrawal hands back — must stay what
+   * the boss actually wrote. Only `SteerRecord.text` uses it: `effectiveText`,
+   * the queue entry, the interrupt re-queue and the withdrawal lookup all keep
+   * the real prompt, so an attachment send behaves exactly like a plain one.
+   */
+  displayText?: string;
 }
 
 /**
@@ -223,7 +234,8 @@ export async function deliver(
           state.steerSeq += 1;
           const record: SteerRecord = {
             id: `st${state.steerSeq}`,
-            text,
+            // Display copy only (see `DeliverOptions.displayText`).
+            text: opts?.displayText ?? text,
             effectiveText,
             phase: "pending",
           };

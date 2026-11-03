@@ -1,4 +1,5 @@
 import type {
+  AgentSessionAttachment,
   AgentSessionDeliveryMode,
   AgentSessionSteerPhase,
   AgentSessionSteerState,
@@ -37,7 +38,14 @@ import type {
 export interface PendingSend {
   /** Stable React key (local to the view, never the main-process identity). */
   id: number;
+  /** What the boss typed; empty for a file-only send. */
   text: string;
+  /**
+   * Attachments the send carried, in the same display shape the transcript uses
+   * (the composer already has them). Rendered as chips instead of text, and what
+   * makes a file-only row match its projection (both sides key on `""`).
+   */
+  attachments?: AgentSessionAttachment[];
   /** How the main process routed it (copy only). */
   mode: AgentSessionDeliveryMode;
   /** `runEndSeq` when it was sent; a later run end without a match = lost. */
@@ -81,7 +89,10 @@ export type PendingFeedback =
 export interface SentRowInput {
   /** Fresh local id, supplied by the view (React key). */
   id: number;
+  /** What the boss typed; empty for a file-only send. */
   text: string;
+  /** Attachments the send carried (see `PendingSend.attachments`). */
+  attachments?: AgentSessionAttachment[];
   mode: AgentSessionDeliveryMode;
   /** Present for an interjection: the row identity from here on. */
   steerId?: string;
@@ -100,10 +111,19 @@ export function addSentRow(
   rows: readonly PendingSend[],
   input: SentRowInput,
 ): PendingSend[] {
+  const attachmentField =
+    input.attachments !== undefined && input.attachments.length > 0
+      ? { attachments: input.attachments }
+      : {};
   if (input.steerId === undefined) {
     return [
       ...rows,
-      { ...input, runEndSeqAtSend: input.runEndSeq, id: input.id },
+      {
+        ...input,
+        runEndSeqAtSend: input.runEndSeq,
+        id: input.id,
+        ...attachmentField,
+      },
     ];
   }
   const index = rows.findIndex((row) => row.steerId === input.steerId);
@@ -117,6 +137,7 @@ export function addSentRow(
         runEndSeqAtSend: input.runEndSeq,
         steerId: input.steerId,
         phase: "pending",
+        ...attachmentField,
       },
     ];
   }
@@ -127,6 +148,7 @@ export function addSentRow(
     text: input.text,
     mode: input.mode,
     runEndSeqAtSend: input.runEndSeq,
+    ...attachmentField,
   };
   return next;
 }

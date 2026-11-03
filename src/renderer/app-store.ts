@@ -245,9 +245,10 @@ export const appStore = proxy({
   chatDrafts: {} as Record<number, ChatDraft>,
 
   // Composer drafts of the agent-session view, keyed by `"<employee>/<chat>"`
-  // (the session identity, see `sessionKey`). Text only: that composer has no
+  // (the session identity, see `sessionKey`). Same shape as `chatDrafts` — that
+  // composer renders the same card, so a draft carries text *and* pending
   // attachments. Session-only, like `chatDrafts`.
-  sessionDrafts: {} as Record<string, string>,
+  sessionDrafts: {} as Record<string, ChatDraft>,
 
   // Root chat currently selected in the chat module. Distinct from
   // `activeChatId` (an opened *group* chat). Written by `ChatModule` so the
@@ -735,6 +736,14 @@ export const appStore = proxy({
   },
   removeChat(id: number): void {
     appStore.clearChatDraft(id);
+    // Agent-session drafts are keyed by `<employee>/<chat>`; a deleted chat's
+    // drafts can never be shown again, and their chips own on-disk pasted files
+    // (revoked by `clearSessionDraft`).
+    for (const key of Object.keys(appStore.sessionDrafts)) {
+      if (parseSessionKey(key)?.chatId === id) {
+        appStore.clearSessionDraft(key);
+      }
+    }
     // The conversation's ask messages are cascade-deleted with it, so their
     // retained (unsubmitted) card drafts can never be shown again.
     clearAskDraftsForChat(id);
@@ -830,17 +839,55 @@ export const appStore = proxy({
   },
   // --- Agent-session composer drafts (session-only, per session key) ---------
   /**
-   * Store one agent-session composer's text. An empty text deletes the entry so
-   * the map only ever holds real drafts (the composer reads `?? ""`).
+   * Draft for one agent-session composer, allocating an empty one on demand so
+   * callers can mutate it in place. In render, prefer the allocation-free read
+   * path `appStore.sessionDrafts[key] ?? EMPTY_DRAFT`.
+   */
+  ensureSessionDraft(key: string): ChatDraft {
+    const existing = appStore.sessionDrafts[key];
+    if (existing) return existing;
+    // Same rule as `ensureChatDraft`: write through the store so mutations go
+    // through valtio's proxy (a raw object would never notify subscribers).
+    appStore.sessionDrafts[key] = { text: "", attachments: [] };
+    return appStore.sessionDrafts[key];
+  },
+  /**
+   * Store one agent-session composer's text. The entry is dropped only when the
+   * draft is empty in **both** text and attachments, so the map holds no empty
+   * shapes (the composer reads `?? EMPTY_DRAFT`).
    */
   setSessionDraftText(key: string, text: string): void {
+    const existing = appStore.sessionDrafts[key];
     if (text.length === 0) {
-      delete appStore.sessionDrafts[key];
-      return;
+      if (!existing || existing.attachments.length === 0) {
+        delete appStore.sessionDrafts[key];
+        return;
+      }
     }
-    appStore.sessionDrafts[key] = text;
+    appStore.ensureSessionDraft(key).text = text;
+  },
+  addSessionDraftAttachments(key: string, items: PendingAttachment[]): void {
+    if (items.length === 0) return;
+    appStore.ensureSessionDraft(key).attachments.push(...items);
+  },
+  removeSessionDraftAttachment(key: string, index: number): void {
+    const draft = appStore.sessionDrafts[key];
+    if (!draft) return;
+    const [removed] = draft.attachments.splice(index, 1);
+    if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+    // Delete the on-disk copy of a pasted attachment. Main verifies ownership,
+    // so a disk-backed user file (original path) is never removed.
+    if (removed?.attachment.path) {
+      void imb.files.deletePastedFile(removed.attachment.path);
+    }
+    // Drop the entry entirely once it is empty so the store holds only real
+    // drafts and `EMPTY_DRAFT` remains the only empty shape.
+    if (draft.text.length === 0 && draft.attachments.length === 0) {
+      delete appStore.sessionDrafts[key];
+    }
   },
   clearSessionDraft(key: string): void {
+    revokeDraftUrls(appStore.sessionDrafts[key]);
     delete appStore.sessionDrafts[key];
   },
   setActiveRootChat(chatId: number | null): void {

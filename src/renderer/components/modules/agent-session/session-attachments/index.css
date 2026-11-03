@@ -1,0 +1,28 @@
+/*
+ * Attachments of one prompt in the agent-session transcript.
+ *
+ * The block itself is the chat message's recipe (`.imb-bubble-attachments` +
+ * `.imb-bubble-chips` + the shared `ImageStack`), imported from
+ * `chat/message-attachments/index.css` and `chat/image-stack` — a prompt's
+ * attachments must look exactly like a chat message's. This file only carries
+ * what a session bubble adds on top.
+ */
+
+/* The prompt bubble is right-aligned (the boss's own message), so the block
+   aligns to its outer edge like a self chat bubble does. */
+.imb-session-attachments {
+  align-items: flex-end;
+}
+
+/* With no text under it (a file-only send) the block is the whole bubble
+   content, so the chat's trailing gap is dropped. */
+.imb-session-attachments:last-child {
+  margin-bottom: 0;
+}
+
+/* The transcript bubble wraps text (`white-space: pre-wrap`), which a chip row
+   must not inherit line breaks from. */
+.imb-session-attachments .imb-bubble-chip-name,
+.imb-session-attachments .imb-bubble-chip-size {
+  white-space: nowrap;
+}

@@ -1,5 +1,6 @@
 import { t } from "@shared/l10n";
 import type {
+  AgentSessionAttachment,
   AgentSessionLiveBlock,
   AgentSessionSendResult,
   AgentSessionSteerState,
@@ -27,6 +28,10 @@ import { Markdown } from "../../../markdown";
 import { useMentionResolver } from "../../../markdown/use-mention";
 import { Tooltip } from "../../../tooltip";
 import "../../chat/thread.css";
+import {
+  isMediaOnlyAttachments,
+  SessionAttachments,
+} from "../session-attachments";
 import { SessionComposer } from "../session-composer";
 import "./index.css";
 import {
@@ -617,7 +622,11 @@ export function AgentSessionModule({
    * process owns its phase from here on (withdrawable until Pi injects it).
    */
   const handleSent = useCallback(
-    (text: string, result: AgentSessionSendResult): void => {
+    (
+      text: string,
+      result: AgentSessionSendResult,
+      attachments: AgentSessionAttachment[],
+    ): void => {
       pendingSeqRef.current += 1;
       const id = pendingSeqRef.current;
       // An interjection **upserts on its `steerId`**: the main process pushed
@@ -629,6 +638,7 @@ export function AgentSessionModule({
           text,
           mode: result.mode,
           runEndSeq: runEndSeqRef.current,
+          ...(attachments.length > 0 ? { attachments } : {}),
           ...(result.steerId !== undefined ? { steerId: result.steerId } : {}),
         }),
       );
@@ -680,7 +690,8 @@ export function AgentSessionModule({
         // Hand the text back to the composer, so it can be edited and sent again
         // — but never overwrite a draft the boss is typing into.
         const draftKey = sessionKey(employeeId, chatId);
-        if ((appStore.sessionDrafts[draftKey] ?? "").length === 0) {
+        const draft = appStore.sessionDrafts[draftKey];
+        if ((draft?.text ?? "").length === 0) {
           refillSeqRef.current += 1;
           setRefill({ text: item.text, token: refillSeqRef.current });
         }
@@ -726,6 +737,14 @@ export function AgentSessionModule({
       if (!disposedRef.current) setLinkBusy(false);
     }
   }, [chatId]);
+
+  /**
+   * Open the conversation a `kind: "chat"` attachment chip references. The
+   * session view stays in the Nav — this only routes the *click*.
+   */
+  const openConversationById = useCallback((targetChatId: number): void => {
+    void appStore.openConversationById(targetChatId);
+  }, []);
 
   // --- Jump to previous / next "new message" divider -------------------------
   /**
@@ -984,6 +1003,8 @@ export function AgentSessionModule({
                   entry={entry}
                   first={index === 0}
                   resolveMention={resolveMention}
+                  employeeId={employeeId}
+                  chatId={chatId}
                 />
               ))}
               {liveBlocks.map((block) => (
@@ -1001,6 +1022,7 @@ export function AgentSessionModule({
               item={item}
               onDismiss={dismissPending}
               onWithdraw={withdrawPending}
+              onOpenConversation={openConversationById}
             />
           ))}
         </div>
@@ -1036,18 +1058,25 @@ function SessionEntry({
   entry,
   first,
   resolveMention,
+  employeeId,
+  chatId,
 }: {
   entry: AgentSessionViewEntry;
   /** True for the first rendered entry (some markers are skipped there). */
   first: boolean;
   resolveMention: (id: number) => string | null;
+  /** Session identity, for the user row's attachment reveal IPC. */
+  employeeId: number;
+  chatId: number;
 }): React.JSX.Element | null {
   switch (entry.kind) {
     case "wake":
       // A batch boundary above the first entry has nothing to separate.
       return first ? null : <SessionDivider />;
     case "user":
-      return <div className="imb-session-user">{entry.text}</div>;
+      return (
+        <SessionUserRow entry={entry} employeeId={employeeId} chatId={chatId} />
+      );
     case "text":
       return (
         <div className="imb-session-text">
@@ -1078,6 +1107,84 @@ function SessionEntry({
 }
 
 /**
+ * One prompt in the transcript: what the boss wrote plus the attachments it
+ * carried.
+ *
+ * The attachments are chips, not the `[Attachments]` text block the model reads
+ * (the main process splits that block off and only reports it when it can be
+ * read back byte-for-byte — see `splitAttachmentPrompt`). A file-only send has
+ * no text at all, so the chips are then the whole bubble.
+ *
+ * A chip that points at the disk reveals in the OS file manager through the
+ * trusted `sessions:revealAttachment` (main resolves the path from its own
+ * transcript; the renderer never passes one), so a failure shows inline here.
+ */
+function SessionUserRow({
+  entry,
+  employeeId,
+  chatId,
+}: {
+  entry: Extract<AgentSessionViewEntry, { kind: "user" }>;
+  employeeId: number;
+  chatId: number;
+}): React.JSX.Element {
+  const [revealError, setRevealError] = useState<string | null>(null);
+  const attachments = entry.attachments ?? [];
+
+  const reveal = useCallback(
+    (index: number): void => {
+      setRevealError(null);
+      // Wrapped in an async IIFE (not `.catch()` on the returned value) so a
+      // bridge that is missing the method degrades to the inline error instead
+      // of throwing out of the click handler.
+      void (async (): Promise<void> => {
+        try {
+          await imb.sessions.revealAttachment(
+            employeeId,
+            chatId,
+            entry.id,
+            index,
+          );
+        } catch (err) {
+          setRevealError(err instanceof Error ? err.message : String(err));
+        }
+      })();
+    },
+    [chatId, employeeId, entry.id],
+  );
+
+  const openConversation = useCallback((targetChatId: number): void => {
+    void appStore.openConversationById(targetChatId);
+  }, []);
+
+  // An attachment-only prompt shows just the image deck, so the bubble chrome
+  // is dropped exactly like an image-only chat bubble does.
+  const mediaOnly = isMediaOnlyAttachments(attachments, entry.text.length);
+
+  return (
+    <div
+      className={cls("imb-session-user", mediaOnly && "imb-session-user-media")}
+    >
+      {attachments.length > 0 && (
+        <SessionAttachments
+          attachments={attachments}
+          onReveal={reveal}
+          onOpenConversation={openConversation}
+        />
+      )}
+      {entry.text.length > 0 && (
+        <div className="imb-session-user-text">{entry.text}</div>
+      )}
+      {revealError !== null && (
+        <div className="imb-session-attachment-error" role="alert">
+          {revealError}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Placeholder for a message sent from the composer that the transcript cannot
  * show yet: nothing is written to the conversation (by design) and Pi persists
  * a steer only at the next turn boundary, so without this row a successful send
@@ -1097,10 +1204,14 @@ function PendingSendRow({
   item,
   onDismiss,
   onWithdraw,
+  onOpenConversation,
 }: {
   item: PendingSend;
   onDismiss: (id: number) => void;
   onWithdraw: (item: PendingSend) => void;
+  /** A `kind: "chat"` chip opens its conversation (no reveal: the row has no
+   *  session entry to address yet). */
+  onOpenConversation: (chatId: number) => void;
 }): React.JSX.Element {
   const feedback = item.feedback;
   // A one-shot line must not stay forever: the row is only there to report one
@@ -1132,7 +1243,15 @@ function PendingSendRow({
           (item.unconfirmed || feedback !== undefined) && "imb-is-unconfirmed",
         )}
       >
-        {item.text}
+        {item.attachments !== undefined && item.attachments.length > 0 && (
+          <SessionAttachments
+            attachments={item.attachments}
+            onOpenConversation={onOpenConversation}
+          />
+        )}
+        {item.text.length > 0 && (
+          <div className="imb-session-user-text">{item.text}</div>
+        )}
       </div>
       {withdrawable ? (
         <div className="imb-session-pending-hint">

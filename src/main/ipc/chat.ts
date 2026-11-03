@@ -15,7 +15,7 @@ import {
   agentPrompt,
   userMessageContent,
   validateAttachmentsPayload,
-} from "./attachment-prompt";
+} from "../attachment-prompt";
 import { assertInteger, assertString, parsePageQuery } from "./helpers";
 import type { Binder } from "../rpc/types";
 

@@ -240,6 +240,21 @@
   word-break: break-word;
 }
 
+/* The prompt text, when the row also carries attachment chips above it (a
+   file-only send has no text at all, so the chips are the whole bubble). */
+.imb-session-user-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* A chip's reveal failed (attachment file gone, or the prompt no longer parses
+   to an attachment at that index). */
+.imb-session-attachment-error {
+  margin-top: 4px;
+  font-size: var(--imb-text-xs);
+  color: var(--imb-danger);
+}
+
 /* Assistant free-form text: styled like the group-chat "other" message bubble. */
 .imb-session-text {
   flex: none;
@@ -476,7 +491,6 @@ button.imb-session-tool-head:hover {
 }
 
 @keyframes imb-session-pulse {
-
   0%,
   100% {
     opacity: 1;
@@ -488,54 +502,12 @@ button.imb-session-tool-head:hover {
 }
 
 /* --- Composer -------------------------------------------------------------
-   The composer reuses the chat composer's card/textarea/send-button classes
-   (imported by `session-composer`), so only the view-specific pieces live here.
-   `.imb-chat-input-wrap` is a `flex: none` block child of the content pane. */
-
-/* One row: input left, send button right. `align-items: flex-end` keeps the
-   button on the input's last line when a multi-line draft grows the textarea. */
-.imb-session-composer-row {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--imb-space-2);
-  min-width: 0;
-  padding-right: 8px;
-}
-
-/* The shared chat textarea is `width: 100%`, which would push the button out of
-   the row; make it the flexible child and let it shrink in a narrow pane.
-
-   Taller than the chat composer's field (one line + 10/6px padding ≈ 38px): this
-   is the view's main affordance, so it gets room to breathe — one line +
-   symmetric 18px padding ≈ 59px. `field-sizing: content` still grows it line by
-   line up to the shared `max-height: 50cqh`. The selector is one class heavier
-   than the shared `.imb-textarea.imb-chat-input-textarea` rule so the paddings
-   win regardless of stylesheet order. */
-.imb-session-composer-row .imb-textarea.imb-chat-input-textarea {
-  flex: 1 1 auto;
-  width: auto;
-  min-width: 0;
-  min-height: 59px;
-  padding: 18px 12px;
-}
-
-/* `margin-bottom` lifts the 36px button off the row's bottom edge, so with the
-   single-line field (≈59px) it reads as vertically centred, and with a tall
-   multi-line draft it settles at the bottom-right (Telegram-style inset). */
-.imb-session-composer-row .imb-session-composer-send {
-  flex: none;
-  margin-bottom: 10px;
-}
-
-/* A rejected send (invalid request only — run failures arrive as events). */
-.imb-session-composer-error {
-  margin: 0;
-  padding: 8px 12px 0;
-  color: var(--imb-danger);
-  font-size: var(--imb-text-sm);
-  line-height: var(--imb-leading-body);
-  word-break: break-word;
-}
+   The composer *is* the shared `ComposerCard` (chips + textarea + attach/send
+   row), which imports the chat composer's stylesheet — so `.imb-chat-input-*
+   classes and the geometry are the chat composer's, by design (the boss wanted
+   the same input in both views). Nothing composer-specific is left to style
+   here: `.imb-chat-input-wrap` is a `flex: none` block child of the content
+   pane and the error line uses the shared `.imb-composer-error`. */
 
 /* --- Messages sent from the composer that the transcript cannot show yet --- */
 
@@ -643,7 +615,8 @@ button.imb-session-tool-head:hover {
   flex: none;
   margin: 0;
   padding: var(--imb-space-2) var(--imb-space-5);
-  border-top: 1px solid color-mix(in oklch, var(--imb-danger) 40%, var(--imb-border));
+  border-top: 1px solid
+    color-mix(in oklch, var(--imb-danger) 40%, var(--imb-border));
   background: color-mix(in oklch, var(--imb-danger) 12%, var(--imb-surface));
   color: var(--imb-danger);
   font-size: var(--imb-text-sm);
@@ -656,4 +629,13 @@ button.imb-session-tool-head:hover {
   .imb-session-tool.imb-is-running .imb-session-tool-dot {
     animation: none;
   }
+}
+
+/* A prompt that is nothing but images: drop the bubble frame, exactly like an
+   image-only chat bubble (`.imb-bubble-media`) — the pictures speak for
+   themselves and a green border around them reads as a stray box. */
+.imb-session-user-media {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
 }

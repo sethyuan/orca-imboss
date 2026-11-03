@@ -13,13 +13,30 @@ export interface PendingAttachment {
 }
 
 /**
- * One chat's composer draft. Stored per chat in `appStore.chatDrafts` so it
- * survives a module switch (the chat module is unmounted when another nav
- * module is active).
+ * One composer's draft: the text the boss typed plus the chips attached to it.
+ *
+ * Stored per chat in `appStore.chatDrafts` (the chat composer) and per
+ * `(employee, chat)` in `appStore.sessionDrafts` (the agent-session composer),
+ * so a module switch never loses input. Both composers render the same shared
+ * `ComposerCard`, which is why they share this shape.
  */
 export interface ChatDraft {
   text: string;
   attachments: PendingAttachment[];
+}
+
+/**
+ * Read-only view of a draft — what a composer *renders*.
+ *
+ * The composers read their draft through a valtio snapshot, where every nested
+ * array and object is deeply readonly. Typing the render path against this view
+ * keeps a component from mutating the store by accident: every write goes
+ * through an explicit store method (`setChatDraftText`, `addSessionDraft…`, …),
+ * which is also what notifies the subscribers.
+ */
+export interface ComposerDraftView {
+  readonly text: string;
+  readonly attachments: readonly PendingAttachment[];
 }
 
 /**

@@ -29,6 +29,18 @@
   color: var(--imb-danger);
 }
 
+/* A send the main process rejected (the agent-session composer's only error
+   path: run failures arrive as events, not as a rejected send). Rendered above
+   the textarea by the shared card; the chat composer never sets it. */
+.imb-composer-error {
+  margin: 0;
+  padding: 8px 12px 0;
+  color: var(--imb-danger);
+  font-size: var(--imb-text-sm);
+  line-height: var(--imb-leading-body);
+  word-break: break-word;
+}
+
 .imb-textarea.imb-chat-input-textarea {
   display: block;
   width: 100%;
@@ -168,4 +180,5 @@
   font-size: var(--imb-text-xs);
 }
 
-.imb-attach-popup-opts {}
+.imb-attach-popup-opts {
+}

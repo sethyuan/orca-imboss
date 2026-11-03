@@ -1,14 +1,17 @@
+import { formatAttachmentSize } from "@shared/attachment-size";
 import { t } from "@shared/l10n";
-import type { AgentSessionSendResult } from "@shared/types";
+import type {
+  AgentSessionAttachment,
+  AgentSessionSendResult,
+} from "@shared/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { appStore, sessionKey, useAppSync } from "../../../../app-store";
-import { IconSend } from "../../../icons";
-import { Textarea } from "../../../textarea";
-// The chat composer's card/textarea/send-button styles are reused verbatim so
-// this composer has identical geometry and states; only the pieces that are
-// specific to this view (hint line, "to" label, error line) live in the
-// module's own stylesheet.
-import "../../chat/chat-input-bar/index.css";
+import { EMPTY_DRAFT, toPlainAttachment } from "../../../../chat-draft";
+import {
+  ComposerCard,
+  type ComposerDraftBinding,
+  type ComposerHandle,
+} from "../../chat/composer-card";
 
 export interface SessionComposerProps {
   employeeId: number;
@@ -29,21 +32,35 @@ export interface SessionComposerProps {
    * withdrawal of equal text a fresh request.
    */
   refill: { text: string; token: number } | null;
-  /** Called after the main process accepted the text (cleared from the draft). */
-  onSent: (text: string, result: AgentSessionSendResult) => void;
+  /**
+   * Called after the main process accepted the send (the draft is already
+   * cleared). `text` is what the boss typed — empty for a file-only send, which
+   * the placeholder row renders as chips instead.
+   */
+  onSent: (
+    text: string,
+    result: AgentSessionSendResult,
+    attachments: AgentSessionAttachment[],
+  ) => void;
 }
 
 /**
  * Bottom composer of the read-only agent-session view: the boss types a message
- * and it is injected into **this** `(employee, chat)` Pi session only.
+ * (with optional attachments) and it is injected into **this** `(employee,
+ * chat)` Pi session only.
  *
- * Deliberately not the chat composer: no attachments, no tag/mention pickers,
- * no tags or title side effects, and it stays a single row (input + send). The
- * draft lives on the app store per session key so switching modules does not
- * lose it, and the textarea is uncontrolled (React never rewrites the DOM
- * value, so IME composition and the first keystrokes are never disturbed).
- * The only run-state affordance is the send button's label/title
- * (`Send` vs `Interject`).
+ * It renders the same `ComposerCard` as the chat composer — same chips, same
+ * attach menu (File / Folder / Conversation), same drop and paste handling, so
+ * "what you can add and how" cannot drift between the two views. What it does
+ * **not** have is everything chat-specific: no common-project rows (those also
+ * write tags into a conversation), no `@`-mention popup, no tags or title side
+ * effects.
+ *
+ * The draft lives on the app store per session key (`sessionDrafts`) so
+ * switching modules does not lose it; the card's textarea is uncontrolled
+ * (React never rewrites the DOM value, so IME composition and the first
+ * keystrokes are never disturbed). The only run-state affordance is the send
+ * button's label (`Send` vs `Interject`).
  */
 export function SessionComposer({
   employeeId,
@@ -55,108 +72,135 @@ export function SessionComposer({
 }: SessionComposerProps): React.JSX.Element {
   const snap = useAppSync();
   const draftKey = sessionKey(employeeId, chatId);
-  const text = snap.sessionDrafts[draftKey] ?? "";
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const draft = snap.sessionDrafts[draftKey] ?? EMPTY_DRAFT;
+  const attachments = draft.attachments;
+  const cardRef = useRef<ComposerHandle>(null);
   /** Guards a double submit before the first render lands (`sending` is async). */
   const sendingRef = useRef(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const send = useCallback(async (): Promise<void> => {
-    if (sendingRef.current) return;
-    // The DOM owns the live value (uncontrolled), so read it rather than the
-    // store: the store may be one input event behind on the very first paste.
-    const textarea = textareaRef.current;
-    const value = textarea?.value ?? text;
-    if (value.trim().length === 0) return;
+  const send = useCallback(
+    async (live: string): Promise<void> => {
+      if (sendingRef.current) return;
+      // `live` is what the card read from the DOM (uncontrolled textarea): the
+      // store may be one input event behind on the very first paste.
+      const value = live;
+      if (value.trim().length === 0 && attachments.length === 0) return;
 
-    sendingRef.current = true;
-    setSending(true);
-    setError(null);
-    try {
-      const result = await imb.agentSession.send(employeeId, chatId, value);
-      // Accepted: clear the DOM and the draft together, otherwise a remount
-      // would resurrect text that is already on its way to the agent.
-      if (textarea) textarea.value = "";
-      appStore.clearSessionDraft(draftKey);
-      onSent(value, result);
-      textarea?.focus();
-    } catch (err) {
-      // Keep the text (nothing typed may be lost) and surface the reason: only
-      // an invalid request reaches here — run failures arrive as events.
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      sendingRef.current = false;
-      setSending(false);
-    }
-  }, [chatId, draftKey, employeeId, onSent, text]);
-
-  const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (event.key !== "Enter" || event.shiftKey) return;
-    // Never send mid-composition (Enter commits an IME candidate). `Textarea`
-    // already swallows keydowns while composing; this is a second guard.
-    if (event.nativeEvent.isComposing) return;
-    event.preventDefault();
-    void send();
-  };
+      sendingRef.current = true;
+      setSending(true);
+      setError(null);
+      try {
+        const result = await imb.agentSession.send(
+          employeeId,
+          chatId,
+          value,
+          attachments.length > 0
+            ? attachments.map((item) => toPlainAttachment(item.attachment))
+            : undefined,
+        );
+        // Accepted: clear the DOM and the draft together, otherwise a remount
+        // would resurrect text that is already on its way to the agent.
+        cardRef.current?.clear();
+        // The placeholder row shows the same chips the transcript will, so a
+        // file-only send is not an empty bubble (and the row still matches its
+        // projection, which strips the prompt's attachment block to `""`).
+        onSent(value, result, attachments.map(toSessionAttachment));
+        cardRef.current?.focus();
+      } catch (err) {
+        // Keep the text (nothing typed may be lost) and surface the reason: only
+        // an invalid request reaches here — run failures arrive as events.
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        sendingRef.current = false;
+        setSending(false);
+      }
+    },
+    [attachments, chatId, employeeId, onSent],
+  );
 
   const actionLabel = streaming ? t("Interject") : t("Send");
-  const disabled = sending || text.trim().length === 0;
 
   // A withdrawn interjection comes back here. The textarea is uncontrolled (its
   // DOM value is the source of truth), so the value is written imperatively and
   // mirrored into the store — exactly like a paste would. Done in an effect so
   // the write happens after React commits, and guarded by `token` so a re-render
-  // never repeats it.
+  // never repeats it. Attachments are not restored (a withdrawal only hands the
+  // text back; the interjection record carries no attachment list).
   const refillTokenRef = useRef(0);
   useEffect(() => {
     if (!refill || refill.token === refillTokenRef.current) return;
     refillTokenRef.current = refill.token;
-    const textarea = textareaRef.current;
-    if (textarea) textarea.value = refill.text;
-    appStore.setSessionDraftText(draftKey, refill.text);
-    textarea?.focus();
-  }, [refill, draftKey]);
+    cardRef.current?.setText(refill.text, refill.text.length);
+  }, [refill]);
+
+  const binding: ComposerDraftBinding = {
+    draft,
+    storageChatId: chatId,
+    setText: (value) => appStore.setSessionDraftText(draftKey, value),
+    addAttachments: (items) =>
+      appStore.addSessionDraftAttachments(draftKey, items),
+    removeAttachment: (index) =>
+      appStore.removeSessionDraftAttachment(draftKey, index),
+    clearDraft: () => appStore.clearSessionDraft(draftKey),
+    // Live store read (never the snapshot): a cap re-check must see a chip that
+    // an async add committed after this render.
+    attachmentCount: () =>
+      appStore.sessionDrafts[draftKey]?.attachments.length ?? 0,
+  };
 
   return (
-    <div className="imb-chat-input-wrap imb-session-composer">
-      <div className="imb-chat-input-card">
-        {error !== null && (
-          <p className="imb-session-composer-error" role="alert">
-            {error}
-          </p>
-        )}
-        {/* One row: the input grows left, the send button sits right, flush with
-            the input's last line (so a multi-line draft never moves the button
-            into the middle of the text). */}
-        <div className="imb-session-composer-row">
-          <Textarea
-            ref={textareaRef}
-            className="imb-chat-input-textarea"
-            rows={1}
-            minHeight={0}
-            defaultValue={text}
-            placeholder={t("Message ${name} directly", { name: employeeName })}
-            onInput={(event) =>
-              appStore.setSessionDraftText(draftKey, event.currentTarget.value)
-            }
-            onValueCommit={(value) =>
-              appStore.setSessionDraftText(draftKey, value)
-            }
-            onKeyDown={onKeyDown}
-          />
-          <button
-            type="button"
-            className="imb-send-btn-circle imb-session-composer-send"
-            aria-label={actionLabel}
-            title={actionLabel}
-            disabled={disabled}
-            onClick={() => void send()}
-          >
-            <IconSend />
-          </button>
-        </div>
-      </div>
-    </div>
+    <ComposerCard
+      ref={cardRef}
+      binding={binding}
+      className="imb-session-composer"
+      placeholder={t("Message ${name} directly", { name: employeeName })}
+      actionLabel={actionLabel}
+      // Not `disabled`: the boss may keep typing while a send is in flight, so
+      // only the send button is held back.
+      sendDisabled={sending}
+      error={error}
+      resetKey={draftKey}
+      onSend={(live) => void send(live)}
+    />
   );
+}
+
+/**
+ * The composer's chip metadata in the transcript's display shape, so the
+ * placeholder row renders exactly like the row that replaces it.
+ *
+ * Only the fields the view draws: a folder contributes its name, a conversation
+ * reference its chat id, a file its name/type/size label. (The prompt's own
+ * `[Attachments]` block is what the session view parses; this is the same data
+ * from the renderer's side, so the two paths agree without duplicating text.)
+ */
+function toSessionAttachment(item: {
+  attachment: {
+    name: string;
+    size: number;
+    type: string;
+    kind?: "file" | "folder" | "chat";
+    path?: string;
+    chatId?: number;
+  };
+}): AgentSessionAttachment {
+  const source = item.attachment;
+  const kind =
+    source.kind === "folder" || source.kind === "chat" ? source.kind : "file";
+  const attachment: AgentSessionAttachment = { name: source.name, kind };
+  if (kind === "file") {
+    if (source.type.length > 0) attachment.type = source.type;
+    // Same formatter the prompt uses, so the label never changes when the
+    // placeholder row is replaced by the transcription.
+    attachment.sizeLabel = formatAttachmentSize(source.size);
+  }
+  if (typeof source.path === "string" && source.path.length > 0) {
+    attachment.path = source.path;
+  }
+  if (kind === "chat" && typeof source.chatId === "number") {
+    attachment.chatId = source.chatId;
+  }
+  return attachment;
 }

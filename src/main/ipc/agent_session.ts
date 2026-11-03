@@ -3,6 +3,7 @@ import type {
   AgentSessionRunState,
   AgentSessionSendResult,
   AgentSessionSteerRevokeResult,
+  MessageAttachment,
 } from "@shared/types";
 import type { Binder } from "../rpc/types";
 import {
@@ -16,6 +17,8 @@ import {
 } from "../agent/session-queue";
 import { getChat, getRootChatId } from "../db/chats";
 import { getEmployee } from "../db/employees";
+import { validateMessageAttachments } from "../db/messages";
+import { agentPrompt, validateAttachmentsPayload } from "../attachment-prompt";
 import { assertInteger, assertString } from "./helpers";
 
 /**
@@ -23,6 +26,14 @@ import { assertInteger, assertString } from "./helpers";
  * but one bound keeps an unbounded string from ever reaching the model.
  */
 const MAX_MESSAGE_LENGTH = 100_000;
+
+/**
+ * Hard bound on the **composed** prompt (typed text + the `[Attachments]`
+ * block). The per-field caps already bound each attachment (≤16 entries, name
+ * ≤256, path ≤4096), so this is a belt-and-braces ceiling on what a single
+ * steer/injection may carry.
+ */
+const MAX_PROMPT_LENGTH = 200_000;
 
 /**
  * Mirrors the app-generated interjection ids (`st<N>`): a bound keeps an
@@ -97,12 +108,19 @@ export function registerAgentSessionHandlers(rpc: Binder): void {
    * Send a message into exactly one `(employee, chat)` agent session — the
    * agent-session view's composer.
    *
-   * The text is injected into that employee's Pi session **only**: nothing is
-   * written to the conversation and no `read_cursors` row moves, so the chat
-   * transcript stays untouched (boss's explicit decision). `deliver()` decides
-   * between steering the live run and queueing, and never throws for a run
-   * failure (those surface as `error` events on the bound windows), so a
-   * rejection here only ever means the request itself was invalid.
+   * The text (plus an optional attachment list, exactly like `chat:send`) is
+   * injected into that employee's Pi session **only**: nothing is written to the
+   * conversation and no `read_cursors` row moves, so the chat transcript stays
+   * untouched (boss's explicit decision). Attachments therefore travel the same
+   * way they do for a chat send — as absolute paths described to the model by
+   * `agentPrompt()` — instead of as stored rows.
+   *
+   * `deliver()` decides between steering the live run and queueing, and never
+   * throws for a run failure (those surface as `error` events on the bound
+   * windows), so a rejection here only ever means the request itself was
+   * invalid. The interjection records what the boss typed as its display copy
+   * (`displayText`) while Pi's queue and every withdrawal / interrupt path keep
+   * the composed prompt.
    */
   rpc(
     "agentSession:send",
@@ -111,14 +129,28 @@ export function registerAgentSessionHandlers(rpc: Binder): void {
       employeeId: unknown,
       chatId: unknown,
       text: unknown,
+      attachments: unknown,
     ): Promise<AgentSessionSendResult> => {
       const safeEmployee = assertInteger(employeeId, "employee id");
       const safeChat = assertInteger(chatId, "chat id");
       const safeText = assertString(text, "message");
-      if (safeText.trim().length === 0) {
+      // One definition of what an attachment may contain, shared with the stored
+      // message path (`validateMessageAttachments`). A session prompt is never
+      // stored, but the same trust boundary applies to what reaches the model.
+      const safeAttachments: MessageAttachment[] | undefined =
+        validateMessageAttachments(validateAttachmentsPayload(attachments));
+      const hasAttachments =
+        safeAttachments !== undefined && safeAttachments.length > 0;
+      // A file-only send is legitimate (chat's composer allows it too); only an
+      // entirely empty request is rejected.
+      if (safeText.trim().length === 0 && !hasAttachments) {
         throw new Error("Message must not be empty.");
       }
       if (safeText.length > MAX_MESSAGE_LENGTH) {
+        throw new Error("Message is too long.");
+      }
+      const prompt = agentPrompt(safeText, safeAttachments);
+      if (prompt.length > MAX_PROMPT_LENGTH) {
         throw new Error("Message is too long.");
       }
 
@@ -153,8 +185,11 @@ export function registerAgentSessionHandlers(rpc: Binder): void {
         );
       }
 
-      return await deliver(safeEmployee, safeChat, safeText, {
+      return await deliver(safeEmployee, safeChat, prompt, {
         mode: "steer",
+        // The interjection is displayed (and handed back on withdrawal) as what
+        // the boss typed, never as the composed prompt.
+        displayText: safeText,
       });
     },
   );

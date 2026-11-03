@@ -524,17 +524,24 @@ const api = {
       ) as Promise<boolean>,
     /**
      * Send a message into exactly one `(employee, chat)` agent session (the
-     * session view's composer). The main process decides between steering the
-     * live run and queueing; nothing is written to the conversation. A steered
-     * text also comes back with a `steerId`, which is what
-     * `revokeSteer` addresses.
+     * session view's composer), optionally with attachments — the same
+     * `MessageAttachment[]` the chat composer sends, described to the model as
+     * absolute paths. The main process decides between steering the live run
+     * and queueing; nothing is written to the conversation. A steered text also
+     * comes back with a `steerId`, which is what `revokeSteer` addresses.
      */
-    send: (employeeId: number, chatId: number, text: string) =>
+    send: (
+      employeeId: number,
+      chatId: number,
+      text: string,
+      attachments?: MessageAttachment[],
+    ) =>
       ipcRenderer.invoke(
         "agentSession:send",
         employeeId,
         chatId,
         text,
+        attachments,
       ) as Promise<AgentSessionSendResult>,
     /**
      * Withdraw one interjection of one session (its text never reaches the
@@ -587,6 +594,27 @@ const api = {
         employeeId,
         chatId,
       ) as Promise<boolean>,
+    /**
+     * Reveal one attachment of a persisted user prompt in the OS file manager.
+     *
+     * The renderer passes the session identity, the session **entry id** and an
+     * index — never a path: main re-reads the prompt and splits its attachment
+     * block itself (trust model of `messages:revealAttachment`). Throws when the
+     * entry/attachment does not exist or the file is gone.
+     */
+    revealAttachment: (
+      employeeId: number,
+      chatId: number,
+      entryId: string,
+      index: number,
+    ) =>
+      ipcRenderer.invoke(
+        "sessions:revealAttachment",
+        employeeId,
+        chatId,
+        entryId,
+        index,
+      ) as Promise<void>,
   },
 
   providers: {

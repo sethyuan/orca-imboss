@@ -4,7 +4,7 @@ import { existsSync } from "fs";
 import { isAbsolute } from "path";
 import { wakeAgent } from "../agent/session-queue";
 import * as dbMessages from "../db/messages";
-import { agentPrompt, validateAttachmentsPayload } from "./attachment-prompt";
+import { agentPrompt, validateAttachmentsPayload } from "../attachment-prompt";
 import { getRevealer } from "../platform";
 import { assertInteger, assertObject, assertString } from "./helpers";
 import type { Binder } from "../rpc/types";

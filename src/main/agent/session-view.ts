@@ -5,6 +5,7 @@ import type {
   AgentSessionViewEntry,
 } from "@shared/types";
 import { resolve } from "path";
+import { splitAttachmentPrompt } from "../attachment-prompt";
 import { getAgentSessionsDir } from "../data-dir";
 import { getSession } from "../db/sessions";
 import { INTERRUPT_MARKER } from "./interrupt-marker";
@@ -105,9 +106,9 @@ function projectEntries(entries: SessionEntry[]): AgentSessionViewEntry[] {
     };
     switch (message.role) {
       case "user": {
-        const text = extractTextContent(message.content);
-        if (text.length === 0) break;
-        const wake = classifyWakePrompt(text);
+        const raw = extractTextContent(message.content);
+        if (raw.length === 0) break;
+        const wake = classifyWakePrompt(raw);
         if (wake !== null) {
           // One separator per batch boundary: two adjacent wakes (nothing
           // rendered between them) collapse into a single marker.
@@ -122,7 +123,22 @@ function projectEntries(entries: SessionEntry[]): AgentSessionViewEntry[] {
           }
           break;
         }
-        out.push({ kind: "user", id: entry.id, text });
+        // The prompt the agent received carries its attachments as a trailing
+        // `[Attachments]` block (see `agentPrompt()`). That block is the model's
+        // addressing scheme, not something the boss wrote, so it is split off
+        // and projected as chips. `splitAttachmentPrompt()` only reports
+        // attachments when it could rebuild the block byte for byte; anything it
+        // cannot fully understand stays in `text`, exactly as persisted.
+        const { text, attachments } = splitAttachmentPrompt(raw);
+        // A file-only send has no words at all: it is still a turn, and dropping
+        // it here would make the boss's message disappear from the view.
+        if (text.length === 0 && attachments.length === 0) break;
+        out.push({
+          kind: "user",
+          id: entry.id,
+          text,
+          ...(attachments.length > 0 ? { attachments } : {}),
+        });
         break;
       }
       case "assistant":
