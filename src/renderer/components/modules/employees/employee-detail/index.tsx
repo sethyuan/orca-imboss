@@ -6,7 +6,7 @@ import { cls } from "reactutils";
 import {
   defaultModelSelectNote,
   defaultThinkingSelectNote,
-  modelRef,
+  groupedModelSelectOptions,
   thinkingLevelsFor,
   thinkingSelectOptions,
 } from "../../../../thinking-options";
@@ -33,6 +33,9 @@ export interface EmployeeDetailProps {
   defaultModel: string;
   /** App default thinking level, inherited when this employee leaves it unset. */
   defaultThinking: string;
+  /** Favorite `provider/id`s, oldest first. */
+  favoriteModels: readonly string[];
+  onToggleFavorite: (ref: string) => void;
   onPatch: (input: EmployeeInput) => Promise<boolean>;
   onRemove: () => void;
   /** Called when the avatar file is replaced (keeps appStore in sync). */
@@ -48,6 +51,8 @@ export function EmployeeDetail({
   models,
   defaultModel,
   defaultThinking,
+  favoriteModels,
+  onToggleFavorite,
   onPatch,
   onRemove,
   onAvatarUpdated,
@@ -348,17 +353,16 @@ export function EmployeeDetail({
         <Field label={t("Model")}>
           <Select
             value={form.modelId ?? ""}
-            options={[
+            options={groupedModelSelectOptions(
+              models,
               {
                 value: "",
                 label: t("Default"),
                 note: defaultModelSelectNote(defaultModel, models),
               },
-              ...models.map((model) => ({
-                value: modelRef(model),
-                label: modelRef(model),
-              })),
-            ]}
+              favoriteModels,
+            )}
+            onToggleStar={onToggleFavorite}
             placeholder={t("Default")}
             onChange={(modelId) =>
               scheduleSave({ ...form, modelId: modelId || null })

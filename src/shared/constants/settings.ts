@@ -3,6 +3,12 @@ export const SettingKeys = {
   Locale: "app.locale",
   DefaultModel: "agent.defaultModel",
   /**
+   * JSON array of `provider/id`, oldest favorite first. Entries that are not
+   * in the current model list stay stored and reappear when that provider
+   * is available again.
+   */
+  FavoriteModels: "agent.favoriteModels",
+  /**
    * `"<provider>/<modelId>"` of the model that generates chat images (empty =
    * not configured, and `imb_generate_image` then reports that clearly).
    */
