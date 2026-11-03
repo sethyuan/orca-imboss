@@ -4,7 +4,8 @@
 .imb-session-heading {
   min-width: 0;
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  gap: var(--imb-space-2);
   line-height: 1.25;
 }
 
@@ -72,7 +73,6 @@
    affordance as the chat link below it, so the two links in this header read as
    one language. */
 .imb-session-employee-link {
-  align-self: flex-start;
   max-width: 100%;
   min-width: 0;
   padding: 0;
@@ -109,7 +109,6 @@
    `min-width: 0` keep a long title ellipsized instead of pushing the interrupt
    chip out of the row. */
 .imb-session-subtitle {
-  align-self: flex-start;
   max-width: 100%;
   min-width: 0;
   padding: 0;
@@ -117,7 +116,6 @@
   background: transparent;
   color: var(--imb-muted);
   font: inherit;
-  font-size: var(--imb-text-sm);
   text-align: start;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -478,6 +476,7 @@ button.imb-session-tool-head:hover {
 }
 
 @keyframes imb-session-pulse {
+
   0%,
   100% {
     opacity: 1;
@@ -644,8 +643,7 @@ button.imb-session-tool-head:hover {
   flex: none;
   margin: 0;
   padding: var(--imb-space-2) var(--imb-space-5);
-  border-top: 1px solid
-    color-mix(in oklch, var(--imb-danger) 40%, var(--imb-border));
+  border-top: 1px solid color-mix(in oklch, var(--imb-danger) 40%, var(--imb-border));
   background: color-mix(in oklch, var(--imb-danger) 12%, var(--imb-surface));
   color: var(--imb-danger);
   font-size: var(--imb-text-sm);
