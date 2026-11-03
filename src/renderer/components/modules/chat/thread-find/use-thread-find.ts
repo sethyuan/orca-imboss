@@ -1,4 +1,3 @@
-import type { Message } from "@shared/types";
 import {
   useCallback,
   useEffect,
@@ -12,8 +11,8 @@ import { useDebouncedValue } from "../../../../hooks/use-debounced-value";
 import { scrollThreadToRect, scrollThreadToRow } from "../thread-scroll";
 
 /**
- * In-thread search engine (⌘F / Ctrl+F) for the interactive chat module and the
- * read-only group-chat module.
+ * In-thread search engine (⌘F / Ctrl+F) for the interactive chat module, the
+ * read-only group-chat module and the agent-session view.
  *
  * How it works: the thread renders every message of the conversation (both
  * views hold the full history — `imb.messages.list` is not paged), so there is
@@ -26,6 +25,11 @@ import { scrollThreadToRect, scrollThreadToRow } from "../thread-scroll";
  * Highlights use the CSS Custom Highlight API, i.e. no DOM is inserted into the
  * React-managed tree (see `index.css`). Where the API is unavailable the bar
  * still jumps and flashes the landing row — only the inline tint is lost.
+ *
+ * The engine only knows about *rendered* text, so any content its host keeps
+ * unmounted (the agent session's folded thinking blocks) is invisible to it.
+ * Such a host is expected to mount that content while the bar is open (see
+ * `agent-session-module`), not the engine.
  */
 
 /** Registry names; keep in sync with `index.css`. */
@@ -39,7 +43,7 @@ const HIGHLIGHT_ACTIVE = "imb-find-active";
  * a hit. Chat card titles are deliberately absent (they are a link to another
  * conversation, not this one's content).
  */
-const SEARCHABLE_SELECTOR = [
+export const SEARCHABLE_SELECTOR = [
   ".imb-markdown",
   ".imb-bubble-text",
   ".imb-progress-card-title",
@@ -47,6 +51,14 @@ const SEARCHABLE_SELECTOR = [
   ".imb-pname-task",
   ".imb-image-gen-prompt",
 ].join(", ");
+
+/**
+ * Row class of the chat threads: the element a hit belongs to (landing flash /
+ * fallback scroll target). See the row contract in `message-item`. The agent
+ * session has no `.imb-msg`; it addresses its rows by `data-message-id`
+ * instead, so the selector is an option.
+ */
+const DEFAULT_ROW_SELECTOR = ".imb-msg";
 
 /**
  * Cap on highlighted occurrences. Building one `Range` per hit is the real
@@ -98,7 +110,7 @@ const FIND_TOP_GAP = 64;
 interface ThreadMatch {
   /** The exact span: highlighted, and the rect the jump scrolls to. */
   range: Range;
-  /** The `.imb-msg` row the span lives in, for the landing flash. */
+  /** The row the span lives in, for the landing flash (`rowSelector` hit). */
   row: HTMLElement | null;
 }
 
@@ -116,13 +128,28 @@ export interface ThreadFindOptions {
   /** The conversation on screen; changing it resets (and closes) the find state. */
   chatId: number | null;
   /**
-   * The messages the thread renders, in order. Only used as a change signal
-   * (and as the "there is nothing to search" case): any change re-scans, so a
-   * message that arrives (or reloads) is immediately searchable.
+   * The rows the thread renders, in order. Only used as a change signal (and as
+   * the "long conversation" measure): any change re-scans, so a message that
+   * arrives (or reloads) is immediately searchable. Never read as content — the
+   * engine searches the rendered DOM.
    */
-  messages: Message[];
+  messages: readonly unknown[];
   /** The thread's scroll container (the only scrolling element). */
   threadRef: RefObject<HTMLDivElement | null>;
+  /**
+   * Content containers to search (default {@link SEARCHABLE_SELECTOR}). Only
+   * text inside one of these can produce a hit, so a host with its own content
+   * shapes (the agent session's plain-text prompt and thinking bodies) extends
+   * the list instead of widening the default for every view.
+   */
+  searchableSelector?: string;
+  /**
+   * Selector of the row a hit belongs to (default `.imb-msg`): the element that
+   * flashes when a jump lands and that a jump falls back to when the hit's Range
+   * no longer reports a rect. Every view must have such a row per rendered
+   * entry.
+   */
+  rowSelector?: string;
   /**
    * False while the owner wants the shortcuts to stay inert (e.g. one of its
    * own dialogs is open and owns the keyboard).
@@ -131,9 +158,26 @@ export interface ThreadFindOptions {
   /**
    * Called with the computed `scrollTop` right before a jump, so the module can
    * drop its "pinned to the bottom" flag and record the position (new messages
-   * must not yank the view back to the tail while reading a match).
+   * must not yank the view back to the tail while reading a match). `match.row`
+   * identifies the row being jumped to, for hosts whose rendering depends on it
+   * (the agent session expands the thinking block it lands in).
    */
-  onBeforeJump?: (targetTop: number) => void;
+  onBeforeJump?: (
+    targetTop: number,
+    match: { row: HTMLElement | null },
+  ) => void;
+  /**
+   * Called when the bar is closed by the user (Esc / ×) — never when the view is
+   * torn down or switched to another conversation. `lastActiveRow` is the row of
+   * the match the cursor was on (the highlighted one), `null` when there was no
+   * match at all.
+   *
+   * Exists for hosts whose rendering depends on what is highlighted: the agent
+   * session keeps exactly that block expanded after the close (a folded thinking
+   * block has no body, so its match could not be highlighted in the first
+   * place).
+   */
+  onClose?: (lastActiveRow: HTMLElement | null) => void;
 }
 
 export interface ThreadFind {
@@ -149,6 +193,13 @@ export interface ThreadFind {
   truncated: boolean;
   /** A non-empty query with no hit at all. */
   noMatch: boolean;
+  /**
+   * The query the current match list was built for (debounced, trimmed, original
+   * case). A host that has to mount unmounted content to make it searchable
+   * (the agent session's folded thinking) derives that from this value, so the
+   * mounted content and the scan can never disagree.
+   */
+  scannedQuery: string;
   openFind: () => void;
   closeFind: () => void;
   next: () => void;
@@ -236,17 +287,19 @@ function applyHighlights(matches: ThreadMatch[], activeIndex: number): void {
 function collectMatches(
   thread: HTMLElement,
   query: string,
+  searchableSelector: string,
+  rowSelector: string,
 ): { matches: ThreadMatch[]; truncated: boolean } {
   const matches: ThreadMatch[] = [];
   const needle = query.toLowerCase();
   if (needle.length === 0) return { matches, truncated: false };
 
-  const roots = thread.querySelectorAll<HTMLElement>(SEARCHABLE_SELECTOR);
+  const roots = thread.querySelectorAll<HTMLElement>(searchableSelector);
   for (const root of roots) {
     // Defensive: a whitelisted container nested in another one would be walked
     // twice, producing duplicate hits for the same text.
-    if (root.parentElement?.closest(SEARCHABLE_SELECTOR) != null) continue;
-    const row = root.closest<HTMLElement>(".imb-msg");
+    if (root.parentElement?.closest(searchableSelector) != null) continue;
+    const row = root.closest<HTMLElement>(rowSelector);
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (
       let node = walker.nextNode();
@@ -297,8 +350,11 @@ export function useThreadFind({
   chatId,
   messages,
   threadRef,
+  searchableSelector = SEARCHABLE_SELECTOR,
+  rowSelector = DEFAULT_ROW_SELECTOR,
   hotkeysEnabled = true,
   onBeforeJump,
+  onClose,
 }: ThreadFindOptions): ThreadFind {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -332,6 +388,10 @@ export function useThreadFind({
   // Latest jump hook, read without re-creating `jumpTo`.
   const onBeforeJumpRef = useRef(onBeforeJump);
   onBeforeJumpRef.current = onBeforeJump;
+  // Latest close hook, read from `reset` (which must not re-create on every
+  // render).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   // Timestamp of the previous jump, for burst detection (see `JUMP_BURST_MS`).
   const lastJumpAtRef = useRef(0);
 
@@ -347,7 +407,7 @@ export function useThreadFind({
       const options = {
         topGap: FIND_TOP_GAP,
         beforeScroll: (targetTop: number) =>
-          onBeforeJumpRef.current?.(targetTop),
+          onBeforeJumpRef.current?.(targetTop, { row: match.row }),
         flash: match.row,
         // A held Enter / ⌘G must not stack smooth animations (each new one
         // restarts from the current, still-moving position, so the view ends up
@@ -394,6 +454,13 @@ export function useThreadFind({
   /** Drop every match / highlight and (optionally) restore the focus. */
   const reset = useCallback(
     (restoreFocus: boolean): void => {
+      // A user-initiated close tells the host which match was highlighted at
+      // that moment; a reset for another reason (conversation switch, mount) has
+      // no such meaning.
+      if (restoreFocus) {
+        const active = matchesRef.current[activeIndexRef.current];
+        onCloseRef.current?.(active?.row ?? null);
+      }
       matchesRef.current = [];
       scannedQueryRef.current = null;
       activeIndexRef.current = -1;
@@ -496,7 +563,12 @@ export function useThreadFind({
    */
   const scan = useCallback(
     (thread: HTMLElement, reseed: boolean): void => {
-      const scanned = collectMatches(thread, debouncedQuery);
+      const scanned = collectMatches(
+        thread,
+        debouncedQuery,
+        searchableSelector,
+        rowSelector,
+      );
       matchesRef.current = scanned.matches;
       setCount(scanned.matches.length);
       setTruncated(scanned.truncated);
@@ -524,7 +596,7 @@ export function useThreadFind({
         if (!isFullyVisible(thread, rect)) jumpTo(nextIndex);
       }
     },
-    [debouncedQuery, jumpTo],
+    [debouncedQuery, jumpTo, searchableSelector, rowSelector],
   );
 
   // Re-scan whenever the bar opens, the (debounced) query changes, or the
@@ -598,6 +670,8 @@ export function useThreadFind({
     count,
     truncated,
     noMatch: debouncedQuery.trim().length > 0 && count === 0,
+    // Empty while the bar is closed: nothing is mounted / highlighted then.
+    scannedQuery: open ? debouncedQuery.trim() : "",
     openFind,
     closeFind,
     next,

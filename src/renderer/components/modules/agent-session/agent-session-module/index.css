@@ -9,14 +9,34 @@
   line-height: 1.25;
 }
 
-/* Header action: interrupt the current turn of this session.
-   `margin-left: auto` pins it to the header's right edge (`.imb-chat-header` has
-   no `justify-content` and `.imb-session-heading` is not `flex: 1`). Icon +
-   text, muted until hovered, where it picks up the danger tint shared with the
-   card Halt. Always rendered — an idle session's interrupt is a no-op. */
-.imb-session-interrupt {
+/* Header trailing actions: the boss's messages, find, and interrupt. One
+   `margin-left: auto` on the group pins the group to the header's right edge
+   (`.imb-chat-header` has no `justify-content` and `.imb-session-heading` is
+   not `flex: 1`); two auto margins would split the free space and float the
+   group's first control towards the middle. Same arrangement as the chat
+   views, so the panel + find pair reads identically everywhere. */
+.imb-session-header-actions {
   flex: none;
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-2);
+}
+
+/* Both children carry their own auto margin for the standalone case (the
+   shared `.imb-chat-find` rule in `thread.css`, and the interrupt chip above);
+   inside the group the group owns the position. */
+.imb-session-header-actions .imb-session-interrupt,
+.imb-session-header-actions .imb-chat-find {
+  margin-left: 0;
+}
+
+/* Header action: interrupt the current turn of this session.
+   Icon + text, muted until hovered, where it picks up the danger tint shared
+   with the card Halt. Always rendered — an idle session's interrupt is a
+   no-op. */
+.imb-session-interrupt {
+  flex: none;
   display: flex;
   align-items: center;
   gap: var(--imb-space-2);
@@ -638,4 +658,31 @@ button.imb-session-tool-head:hover {
   padding: 0;
   background: transparent;
   border-radius: 0;
+}
+
+/* Landing flash of a jump (a find match, one of the boss's own prompts picked in
+   the my-messages panel): the jump helper tags the row with `data-quote-target`
+   (see `chat/thread-scroll`), and here every session surface flashes itself —
+   this view has no `.imb-msg` wrapper (the shared rule in `thread.css` is the
+   chat's). Reduced motion is handled in JS (no tag is set at all); the media
+   query below is a belt.
+
+   `overflow: hidden` on the thinking block does not clip its own box-shadow
+   (only descendants), so the same keyframe works on every surface. */
+[data-quote-target].imb-session-user,
+[data-quote-target].imb-session-text,
+[data-quote-target].imb-session-thinking,
+[data-quote-target].imb-session-tool,
+[data-quote-target].imb-session-compaction {
+  animation: imb-quote-flash 700ms var(--imb-ease-standard);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-quote-target].imb-session-user,
+  [data-quote-target].imb-session-text,
+  [data-quote-target].imb-session-thinking,
+  [data-quote-target].imb-session-tool,
+  [data-quote-target].imb-session-compaction {
+    animation: none;
+  }
 }

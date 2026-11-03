@@ -55,7 +55,7 @@ import {
   type MyMessageEntry,
 } from "../my-message-jump";
 import { NewMessagesJump } from "../new-messages-jump";
-import { formatChatPreview } from "../preview-text";
+import { collapseWhitespace, formatChatPreview } from "../preview-text";
 import { ProgressGroup } from "../progress-group";
 import { groupProgressRuns, type ProgressRun } from "../progress-runs";
 import {
@@ -125,14 +125,6 @@ function progressCardText(message: Message): string {
     parts.push(step.name, step.task);
   }
   return parts.join(" ").toLowerCase();
-}
-
-/**
- * Collapse every whitespace run (newlines included) to one space — the "my
- * messages" list is one line per entry, so the raw text is never shown.
- */
-function collapseWhitespace(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -887,7 +879,10 @@ export function ChatModule(): React.JSX.Element {
         continue;
       }
       const text = collapseWhitespace(message.content);
-      if (text.length > 0) entries.push({ id: message.id, text });
+      // The panel ids are strings (the agent session's entry ids are); the chat's
+      // numeric ids are stringified here and parsed back in
+      // `handleMyMessageSelect`.
+      if (text.length > 0) entries.push({ id: String(message.id), text });
     }
     return entries;
   }, [visibleMessages]);
@@ -1402,6 +1397,20 @@ export function ChatModule(): React.JSX.Element {
     [pageRun, scrollToMessageRow, scrollToRunRow],
   );
 
+  /**
+   * A pick in the "my messages" panel. The panel works with string ids (the
+   * agent session's entry ids are strings), so this parses back into the chat's
+   * numeric message id and delegates to the normal jump.
+   */
+  const handleMyMessageSelect = useCallback(
+    (id: string): void => {
+      const messageId = Number(id);
+      if (!Number.isSafeInteger(messageId)) return;
+      jumpToMessage(messageId);
+    },
+    [jumpToMessage],
+  );
+
   const handleSend = useCallback(
     async (text: string, attachments: MessageAttachment[]): Promise<void> => {
       if (selectedId === null) return;
@@ -1764,7 +1773,7 @@ export function ChatModule(): React.JSX.Element {
           <MyMessageJump
             threadRef={threadRef}
             entries={myMessages}
-            onSelect={jumpToMessage}
+            onSelect={handleMyMessageSelect}
             onLatest={jumpToLatest}
           />
           {/* Header search entry: the same action as ⌘F (open + focus, or

@@ -35,8 +35,12 @@ const PANEL_ID = "imb-my-jump-panel";
 
 /** One entry of the list: a message the boss wrote, flattened to one line. */
 export interface MyMessageEntry {
-  /** Global message id; the row in the thread carries `data-message-id`. */
-  id: number;
+  /**
+   * Row id of the message in the host's thread; the row carries it as
+   * `data-message-id`. A string because the agent session's entry ids are
+   * strings (the root chat's numeric message ids are stringified by its host).
+   */
+  id: string;
   /** Whitespace-collapsed text, used for the single-line row and its tooltip. */
   text: string;
 }
@@ -51,7 +55,7 @@ export interface MyMessageJumpProps {
   /** The boss's messages, oldest first (transcript order). */
   entries: MyMessageEntry[];
   /** Scroll to a message (the module does the scrolling and the landing flash). */
-  onSelect: (messageId: number) => void;
+  onSelect: (id: string) => void;
   /**
    * Scroll to the newest message and resume following it (the panel's
    * 「Latest message」 row). Owned by the module: re-pinning is the same thing
@@ -93,7 +97,7 @@ export function MyMessageJump({
 }: MyMessageJumpProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
   // The message nearest the top of the viewport; highlighted in the list.
-  const [currentId, setCurrentId] = useState<number | null>(null);
+  const [currentId, setCurrentId] = useState<string | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   // Timestamp until which a focus event is ignored: Escape moves the focus back
   // to the button and must not re-open the list it just closed. A short window
@@ -129,17 +133,17 @@ export function MyMessageJump({
    * `querySelectorAll` + one rect read per row, and only while the list is open,
    * so scrolling never costs a layout read.
    */
-  const readCurrentId = useCallback((): number | null => {
+  const readCurrentId = useCallback((): string | null => {
     const thread = threadRef.current;
     if (!thread || entries.length === 0) return null;
     const ids = new Set(entries.map((entry) => entry.id));
     const anchor = thread.getBoundingClientRect().top + MY_JUMP_TOP_GAP;
-    let above: number | null = null;
+    let above: string | null = null;
     for (const row of thread.querySelectorAll<HTMLElement>(
       "[data-message-id]",
     )) {
-      const id = Number(row.dataset.messageId);
-      if (!ids.has(id)) continue;
+      const id = row.dataset.messageId;
+      if (id === undefined || !ids.has(id)) continue;
       if (row.getBoundingClientRect().top >= anchor - 1) return id;
       above = id;
     }
@@ -167,7 +171,7 @@ export function MyMessageJump({
    * *downwards* to a still-correct position. No entry ⇒ nothing to reveal.
    */
   const revealEntry = useCallback(
-    (messageId: number | null): void => {
+    (messageId: string | null): void => {
       const list = listRef.current;
       if (!list || messageId === null) return;
       const row = list.querySelector<HTMLElement>(
@@ -277,7 +281,7 @@ export function MyMessageJump({
     items[next]?.focus();
   };
 
-  const handleSelect = (messageId: number): void => {
+  const handleSelect = (messageId: string): void => {
     // Keep the panel open: the pointer is still on it and another entry is one
     // click away.
     cancelClose();

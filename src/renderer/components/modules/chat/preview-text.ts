@@ -154,3 +154,15 @@ function flatten(
   const plain = toPlainText(content).replace(/\s+/g, " ").trim();
   return resolveMention ? replaceMentions(plain, resolveMention) : plain;
 }
+
+/**
+ * Collapse every whitespace run (newlines included) to one space and trim the
+ * ends — the shape a one-line summary needs (the "my messages" list renders one
+ * line per entry, so the raw multi-line text is never shown).
+ *
+ * Shared by the root chat and the agent session so both lists describe a message
+ * the same way.
+ */
+export function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}

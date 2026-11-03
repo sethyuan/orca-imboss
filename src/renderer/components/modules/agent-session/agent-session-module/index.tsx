@@ -18,15 +18,35 @@ import {
   useState,
 } from "react";
 import { cls } from "reactutils";
-import { appStore, sessionKey, useApp } from "../../../../app-store";
+import { appStore, IS_MAC, sessionKey, useApp } from "../../../../app-store";
 import { ModuleView } from "../../../app-shell";
 import { EmployeeAvatar } from "../../../employee-avatar";
 import { HaltButton } from "../../../halt-button";
 import { IconButton } from "../../../icon-button";
-import { IconChevronDown, IconChevronUp, IconHalt } from "../../../icons";
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconHalt,
+  IconSearch,
+} from "../../../icons";
 import { Markdown } from "../../../markdown";
 import { useMentionResolver } from "../../../markdown/use-mention";
 import { Tooltip } from "../../../tooltip";
+import {
+  MY_JUMP_TOP_GAP,
+  MyMessageJump,
+  type MyMessageEntry,
+} from "../../chat/my-message-jump";
+import { collapseWhitespace } from "../../chat/preview-text";
+import { ThreadFindBar } from "../../chat/thread-find";
+import {
+  SEARCHABLE_SELECTOR,
+  useThreadFind,
+} from "../../chat/thread-find/use-thread-find";
+import {
+  prefersReducedMotion,
+  scrollThreadToRow,
+} from "../../chat/thread-scroll";
 import "../../chat/thread.css";
 import {
   isMediaOnlyAttachments,
@@ -49,6 +69,26 @@ export interface AgentSessionModuleProps {
   employeeId: number;
   chatId: number;
 }
+
+/**
+ * Content containers the find engine searches, on top of the shared chat list
+ * (`SEARCHABLE_SELECTOR`): what the boss typed into the composer and the
+ * reasoning text of a thinking block are plain text, not Markdown. Assistant
+ * text and a compaction summary already render as `.imb-markdown`, so they are
+ * covered by the shared list. Tool names / arguments / details stay out on
+ * purpose: they are call chrome, not conversation.
+ */
+const SESSION_SEARCHABLE_SELECTOR = [
+  SEARCHABLE_SELECTOR,
+  ".imb-session-user-text",
+  ".imb-session-thinking-body",
+].join(", ");
+
+/**
+ * Row selector of this view: every rendered entry carries `data-message-id`
+ * (the same row contract the chat threads use), there is no `.imb-msg` here.
+ */
+const SESSION_ROW_SELECTOR = "[data-message-id]";
 
 /** One reconstructed block of the currently streaming assistant message. */
 interface LiveBlock {
@@ -913,6 +953,208 @@ export function AgentSessionModule({
     return entries[0]?.kind === "wake" ? wakes - 1 : wakes;
   }, [entries]);
 
+  // --- My messages + in-thread find ------------------------------------------
+  /**
+   * The boss's own prompts, one line each (`MyMessageJump`'s list). Only
+   * prompts that carry text are listed: an attachment-only send has no words to
+   * show, exactly like the root chat's list (which skips text-less messages).
+   */
+  const myEntries = useMemo<MyMessageEntry[]>(() => {
+    const list: MyMessageEntry[] = [];
+    for (const entry of entries) {
+      if (entry.kind !== "user") continue;
+      const text = collapseWhitespace(entry.text);
+      if (text.length > 0) list.push({ id: entry.id, text });
+    }
+    return list;
+  }, [entries]);
+
+  /** The row of one entry, addressed by its `data-message-id` (see the row
+   *  contract: every rendered entry's root element carries it). */
+  const findEntryRow = useCallback((id: string): HTMLElement | null => {
+    const thread = threadRef.current;
+    if (thread === null) return null;
+    for (const row of thread.querySelectorAll<HTMLElement>(
+      SESSION_ROW_SELECTOR,
+    )) {
+      if (row.dataset.messageId === id) return row;
+    }
+    return null;
+  }, []);
+
+  /**
+   * Jump to one of the boss's prompts (a pick in the `MyMessageJump` panel).
+   * Same landing as every other jump in this view: the row goes to the landing
+   * line, flashes once, and the view stops following the live tail so streamed
+   * content cannot yank it back.
+   */
+  const jumpToEntry = useCallback(
+    (id: string): void => {
+      const thread = threadRef.current;
+      const row = findEntryRow(id);
+      if (thread === null || row === null) return;
+      scrollThreadToRow(thread, row, {
+        topGap: MY_JUMP_TOP_GAP,
+        beforeScroll: (target) => {
+          pinnedRef.current = false;
+          sessionScrollStore.set(sessionKeyStr, {
+            scrollTop: target,
+            pinned: false,
+          });
+        },
+        flash: row,
+      });
+    },
+    [findEntryRow, sessionKeyStr],
+  );
+
+  /**
+   * The panel's 「Go to bottom」: back to the newest content and resume following
+   * it. The same end state as sending a message: `pinned` is set *before*
+   * scrolling, so the follow effect keeps the view on the tail.
+   */
+  const jumpToLatest = useCallback((): void => {
+    const el = threadRef.current;
+    if (el === null) return;
+    pinnedRef.current = true;
+    sessionScrollStore.set(sessionKeyStr, {
+      scrollTop: Math.max(0, el.scrollHeight - el.clientHeight),
+      pinned: true,
+    });
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+    });
+  }, [sessionKeyStr]);
+
+  /**
+   * The boss's own choice of which thinking blocks are open (`undefined` = the
+   * default: a persisted block starts folded, a streaming one is open until it
+   * ends). Rewritten wholesale when a find session ends — see `handleFindClose`.
+   */
+  const [thinkingOpen, setThinkingOpen] = useState<Record<string, boolean>>({});
+  const toggleThinking = useCallback((key: string, next: boolean): void => {
+    setThinkingOpen((prev) =>
+      (prev[key] ?? false) === next ? prev : { ...prev, [key]: next },
+    );
+  }, []);
+
+  /**
+   * A find-bar jump: leave the bottom (the view is no longer following the live
+   * tail) and record the landing position, so switching away and back keeps the
+   * place the boss was reading.
+   */
+  const handleFindJump = useCallback(
+    (target: number): void => {
+      pinnedRef.current = false;
+      sessionScrollStore.set(sessionKeyStr, {
+        scrollTop: target,
+        pinned: false,
+      });
+    },
+    [sessionKeyStr],
+  );
+
+  /**
+   * The bar closed: exactly the block the cursor was on (the one that was
+   * highlighted) stays expanded, everything else folds — including blocks this
+   * find session had only forced open, blocks an earlier jump of the same
+   * session left behind, and blocks the boss had expanded by hand before
+   * searching (the boss's rule: "除当前那一块，其它思考都折叠").
+   *
+   * With no match at all ("No matches", or the query was cleared) there is
+   * nothing highlighted, so every block folds.
+   *
+   * A streaming block is unaffected: its own default (`!done`, i.e. open) is
+   * what keeps it open, not this map.
+   */
+  const handleFindClose = useCallback(
+    (lastActiveRow: HTMLElement | null): void => {
+      const id = lastActiveRow?.dataset.messageId;
+      const keep =
+        id !== undefined &&
+        lastActiveRow?.classList.contains("imb-session-thinking") === true
+          ? id
+          : null;
+      setThinkingOpen((prev) => {
+        const keys = Object.keys(prev);
+        if (keep === null) return keys.length === 0 ? prev : {};
+        return keys.length === 1 && prev[keep] === true
+          ? prev
+          : { [keep]: true };
+      });
+    },
+    [],
+  );
+
+  /**
+   * Find in this session (⌘F). The engine searches the *rendered* thread, so it
+   * can only see thinking whose body is mounted — and a folded block renders no
+   * body at all. While the bar is open, every thinking block whose text contains
+   * the scanned query is therefore forced open (see `forcedThinking`), which is
+   * what makes folded reasoning searchable at all; `handleFindClose` then decides
+   * what is left expanded.
+   *
+   * `chatId` is the reset key: switching sessions remounts this view anyway
+   * (`App.tsx` keys it by session), so this only guards a same-chat remount.
+   */
+  const threadFind = useThreadFind({
+    chatId,
+    // Only a change signal (and the long-conversation measure): a reload of the
+    // projection re-scans, so a message that has just been persisted is
+    // immediately searchable. The live tail is searchable through the DOM.
+    messages: entries,
+    threadRef,
+    searchableSelector: SESSION_SEARCHABLE_SELECTOR,
+    rowSelector: SESSION_ROW_SELECTOR,
+    onBeforeJump: handleFindJump,
+    onClose: handleFindClose,
+  });
+
+  const findQuery = threadFind.scannedQuery.toLowerCase();
+
+  /**
+   * Thinking blocks that must be mounted for the current query to be findable.
+   * Derived from the *scanned* query (the same value the engine searches), so the
+   * mounted content and the match list can never disagree.
+   *
+   * `liveBlocks` is read from this render's snapshot while `version` is the
+   * dependency: every live mutation bumps it, and re-reading the blocks on each
+   * streamed token would buy nothing.
+   */
+  const forcedThinking = useMemo(() => {
+    const forced = new Set<string>();
+    if (findQuery.length === 0) return forced;
+    for (const entry of entries) {
+      if (
+        entry.kind === "thinking" &&
+        entry.text.toLowerCase().includes(findQuery)
+      ) {
+        forced.add(entry.id);
+      }
+    }
+    for (const block of liveBlocks) {
+      if (
+        block.kind === "thinking" &&
+        block.text.toLowerCase().includes(findQuery)
+      ) {
+        forced.add(block.key);
+      }
+    }
+    return forced;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see the doc above.
+  }, [entries, findQuery, version]);
+
+  /**
+   * Whether one thinking block renders expanded: a forced (find) block wins,
+   * then the boss's own choice, then the streaming default.
+   */
+  const isThinkingOpen = useCallback(
+    (key: string, fallback: boolean): boolean =>
+      forcedThinking.has(key) || (thinkingOpen[key] ?? fallback),
+    [forcedThinking, thinkingOpen],
+  );
+
   const content = (
     <>
       <div className="imb-chat-header">
@@ -958,24 +1200,61 @@ export function AgentSessionModule({
             </button>
           </Tooltip>
         </div>
-        {/* Interrupts the current turn of *this* session only (queued work is
-            kept, the session stays alive). One click, no confirmation: stopping a
-            single turn is cheap and simply talking again resumes the work.
-            Disabled while the session is idle — `interruptTurn` is a no-op then,
-            and a greyed chip states that honestly.
+        {/* Header trailing actions: the boss's messages, find, and interrupt.
+            One `margin-left: auto` on the group keeps all three pinned right
+            (two auto margins would split the free space and float the group's
+            first control towards the middle). Same order and styling as the
+            chat views: the panel entry sits immediately left of find. */}
+        <div className="imb-session-header-actions">
+          {/* Interrupts the current turn of *this* session only (queued work is
+            kept, the session stays alive). One click, no confirmation: stopping
+            a single turn is cheap and simply talking again resumes the work.
+            Disabled while the session is idle — `interruptTurn` is a no-op
+            then, and a greyed chip states that honestly.
 
             Deliberately independent from the composer's send/interject button:
             steer keeps the running turn, interrupt throws it away, so the
             destructive action must not share the highest-traffic control. */}
-        <HaltButton
-          className="imb-session-interrupt"
-          label={interruptLabel}
-          confirm={false}
-          disabled={!streaming}
-          onInterrupt={() => imb.agentSession.interruptTurn(employeeId, chatId)}
-        >
-          <IconHalt />
-        </HaltButton>
+          <HaltButton
+            className="imb-session-interrupt"
+            label={interruptLabel}
+            confirm={false}
+            disabled={!streaming}
+            onInterrupt={() =>
+              imb.agentSession.interruptTurn(employeeId, chatId)
+            }
+          >
+            <IconHalt />
+          </HaltButton>
+          <MyMessageJump
+            threadRef={threadRef}
+            entries={myEntries}
+            onSelect={jumpToEntry}
+            onLatest={jumpToLatest}
+          />
+          {/* Find entry: the same action as ⌘F (open + focus, or re-select the
+              term when the bar is already up). `aria-pressed` states whether
+              the bar is open; it never toggles it closed — that would make the
+              button behave differently from the shortcut. */}
+          <Tooltip
+            placement="bottom"
+            content={`${t("Find in chat")} · ${IS_MAC ? "⌘F" : "Ctrl+F"}`}
+          >
+            <IconButton
+              className="imb-chat-find"
+              label={t("Find in chat")}
+              aria-pressed={threadFind.open}
+              // The bubble above is the hint; an empty `title` suppresses the
+              // native (duplicate) one the component would otherwise add.
+              title=""
+              boxSize={28}
+              size={16}
+              onClick={threadFind.openFind}
+            >
+              <IconSearch />
+            </IconButton>
+          </Tooltip>
+        </div>
       </div>
       {/* The thread and the floating jump control share a positioned wrapper so
           the control can sit above the composer without a fixed offset. */}
@@ -986,6 +1265,9 @@ export function AgentSessionModule({
             dividerCount > 0 && "imb-has-jumps",
           )}
           ref={threadRef}
+          // Focus target after the find bar closes (nothing to restore when the
+          // composer was not the trigger).
+          tabIndex={-1}
           onScroll={handleScroll}
         >
           {!loading &&
@@ -1005,6 +1287,8 @@ export function AgentSessionModule({
                   resolveMention={resolveMention}
                   employeeId={employeeId}
                   chatId={chatId}
+                  isThinkingOpen={isThinkingOpen}
+                  onToggleThinking={toggleThinking}
                 />
               ))}
               {liveBlocks.map((block) => (
@@ -1012,6 +1296,8 @@ export function AgentSessionModule({
                   key={block.key}
                   block={block}
                   resolveMention={resolveMention}
+                  isThinkingOpen={isThinkingOpen}
+                  onToggleThinking={toggleThinking}
                 />
               ))}
             </>
@@ -1026,6 +1312,7 @@ export function AgentSessionModule({
             />
           ))}
         </div>
+        {threadFind.open && <ThreadFindBar find={threadFind} />}
         {dividerCount > 0 && (
           <SessionJumpButtons availability={jump} onJump={jumpTo} />
         )}
@@ -1060,6 +1347,8 @@ function SessionEntry({
   resolveMention,
   employeeId,
   chatId,
+  isThinkingOpen,
+  onToggleThinking,
 }: {
   entry: AgentSessionViewEntry;
   /** True for the first rendered entry (some markers are skipped there). */
@@ -1068,6 +1357,10 @@ function SessionEntry({
   /** Session identity, for the user row's attachment reveal IPC. */
   employeeId: number;
   chatId: number;
+  /** Whether a thinking block renders expanded (forced by find, then the
+   *  boss's own choice, then the streaming default). */
+  isThinkingOpen: (key: string, fallback: boolean) => boolean;
+  onToggleThinking: (key: string, next: boolean) => void;
 }): React.JSX.Element | null {
   switch (entry.kind) {
     case "wake":
@@ -1079,17 +1372,28 @@ function SessionEntry({
       );
     case "text":
       return (
-        <div className="imb-session-text">
+        <div className="imb-session-text" data-message-id={entry.id}>
           <Markdown content={entry.text} resolveMention={resolveMention} />
         </div>
       );
     case "thinking":
-      return <ThinkingBlock text={entry.text} streaming={false} />;
+      return (
+        <ThinkingBlock
+          messageId={entry.id}
+          text={entry.text}
+          streaming={false}
+          open={isThinkingOpen(entry.id, false)}
+          onToggle={() =>
+            onToggleThinking(entry.id, !isThinkingOpen(entry.id, false))
+          }
+        />
+      );
     case "interrupted":
       return <InterruptedDivider />;
     case "tool":
       return (
         <ToolBlock
+          messageId={entry.id}
           name={entry.name}
           status={entry.status}
           summary={entry.argsSummary}
@@ -1099,6 +1403,7 @@ function SessionEntry({
     case "compaction":
       return (
         <CompactionBlock
+          messageId={entry.id}
           summary={entry.summary}
           resolveMention={resolveMention}
         />
@@ -1164,6 +1469,7 @@ function SessionUserRow({
   return (
     <div
       className={cls("imb-session-user", mediaOnly && "imb-session-user-media")}
+      data-message-id={entry.id}
     >
       {attachments.length > 0 && (
         <SessionAttachments
@@ -1387,9 +1693,13 @@ function SessionJumpButtons({
 function LiveBlockView({
   block,
   resolveMention,
+  isThinkingOpen,
+  onToggleThinking,
 }: {
   block: LiveBlock;
   resolveMention: (id: number) => string | null;
+  isThinkingOpen: (key: string, fallback: boolean) => boolean;
+  onToggleThinking: (key: string, next: boolean) => void;
 }): React.JSX.Element {
   switch (block.kind) {
     case "text":
@@ -1399,7 +1709,21 @@ function LiveBlockView({
         </div>
       );
     case "thinking":
-      return <ThinkingBlock text={block.text} streaming={!block.done} />;
+      return (
+        <ThinkingBlock
+          text={block.text}
+          streaming={!block.done}
+          // A live block stays open while it streams and folds once it ends,
+          // unless the boss (or a find jump) opened it by hand.
+          open={isThinkingOpen(block.key, block.done !== true)}
+          onToggle={() =>
+            onToggleThinking(
+              block.key,
+              !isThinkingOpen(block.key, block.done !== true),
+            )
+          }
+        />
+      );
     case "tool":
       return (
         <ToolBlock
@@ -1413,27 +1737,39 @@ function LiveBlockView({
 }
 
 /**
- * Collapsible assistant reasoning. Auto-expands while streaming and folds once
- * the thinking block ends; a completed block starts folded and toggles on click.
+ * Collapsible assistant reasoning. Expanded/collapsed state lives in the module
+ * (`thinkingOpen`), not here, because two things outside this component decide
+ * it: the streaming lifecycle (open while streaming, folded once it ends — the
+ * caller passes that as `open`) and find, which must be able to open a block
+ * whose text a query matches (the body is not even mounted while folded, so
+ * folded reasoning would otherwise be unsearchable).
+ *
+ * `messageId` is the find/jump row contract (`data-message-id`): it addresses
+ * this block for the landing flash and for my-messages jumps.
  */
 function ThinkingBlock({
+  messageId,
   text,
   streaming,
+  open,
+  onToggle,
 }: {
+  /** Entry id (persisted blocks only; a live block has none). */
+  messageId?: string;
   text: string;
   streaming: boolean;
+  open: boolean;
+  onToggle: () => void;
 }): React.JSX.Element {
-  const [open, setOpen] = useState(streaming);
-  useEffect(() => {
-    setOpen(streaming);
-  }, [streaming]);
-
   return (
-    <div className={cls("imb-session-thinking", open && "imb-is-open")}>
+    <div
+      className={cls("imb-session-thinking", open && "imb-is-open")}
+      data-message-id={messageId}
+    >
       <button
         type="button"
         className="imb-session-thinking-head"
-        onClick={() => setOpen((value) => !value)}
+        onClick={onToggle}
         aria-expanded={open}
       >
         <IconChevronDown className="imb-icon imb-sm" />
@@ -1446,11 +1782,14 @@ function ThinkingBlock({
 
 /** A tool call: name, a compact argument summary, and expandable args detail. */
 function ToolBlock({
+  messageId,
   name,
   status,
   summary,
   detail,
 }: {
+  /** Entry id, for the row contract (`data-message-id`). */
+  messageId?: string;
   name: string;
   status: "running" | "ok" | "error";
   summary?: string;
@@ -1484,6 +1823,7 @@ function ToolBlock({
         expandable && "imb-is-expandable",
         open && "imb-is-open",
       )}
+      data-message-id={messageId}
     >
       {expandable ? (
         <button
@@ -1506,14 +1846,17 @@ function ToolBlock({
 
 /** A compaction marker with its summary. */
 function CompactionBlock({
+  messageId,
   summary,
   resolveMention,
 }: {
+  /** Entry id, for the row contract (`data-message-id`). */
+  messageId?: string;
   summary: string;
   resolveMention: (id: number) => string | null;
 }): React.JSX.Element {
   return (
-    <div className="imb-session-compaction">
+    <div className="imb-session-compaction" data-message-id={messageId}>
       <div className="imb-session-compaction-head">{t("Compacted")}</div>
       <div className="imb-session-compaction-body">
         <Markdown content={summary} resolveMention={resolveMention} />
