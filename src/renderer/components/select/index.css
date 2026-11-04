@@ -140,7 +140,7 @@
    select panel's padding is 4px, so the recipe's negative margins are re-tuned
    to keep the row flush with the panel edges. */
 .imb-select-panel .imb-ms-search {
-  margin: -4px -4px 4px;
+  margin: 0 0 4px;
 }
 
 /* A custom `renderOption` row fills the option (the row is `space-between`) and

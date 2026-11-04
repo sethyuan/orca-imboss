@@ -109,8 +109,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
-  margin: -6px -6px 4px;
+  padding: 6px var(--imb-space-3);
+  margin: 0 0 4px;
   background: var(--imb-surface);
   border-bottom: 1px solid var(--imb-border);
   color: var(--imb-muted);
@@ -167,7 +167,7 @@
 /* "Clear all" control, a sibling of the trigger so it never toggles the panel.
    The higher-specificity padding rule keeps the chips clear of it in every
    variant (the module-level trigger overrides have lower specificity). */
-.imb-ms.imb-ms-has-clear > .imb-ms-trigger {
+.imb-ms.imb-ms-has-clear>.imb-ms-trigger {
   padding-right: 28px;
 }
 
