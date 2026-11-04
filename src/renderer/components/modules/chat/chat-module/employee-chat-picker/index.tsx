@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { appStore, useApp } from "../../../../../app-store";
 import { EmployeeAvatar } from "../../../../employee-avatar";
 import { Select, type SelectOption } from "../../../../select";
-import { Tooltip } from "../../../../tooltip";
 import "./index.css";
 
 /**
@@ -85,43 +84,35 @@ export function EmployeeChatPicker(): React.JSX.Element {
 
   return (
     <>
-      {/* The tooltip is the only place the action (or the reason it is
-          unavailable) is written down: the trigger itself is just a caret. It
-          wraps the trigger instead of sitting on the button, because a disabled
-          button dispatches no mouse events — the wrapper still does. */}
-      <Tooltip content={reason} placement="right">
-        <span className="imb-employee-picker-trigger">
-          <Select
-            // Never a value: picking is an action, not a selection (see above).
-            value=""
-            options={options}
-            onChange={(value) => void start(value)}
-            // `label` is the icon-only trigger's whole accessible name.
-            label={reason}
-            disabled={loading || empty || busy}
-            variant="icon"
-            searchable
-            searchPlaceholder={t("Search employees")}
-            emptyMessage={
-              empty ? t("No employees to chat with") : t("No employees found")
-            }
-            // Avatar + name + role need more room than this trigger has.
-            panelMinWidth={260}
-            renderOption={(option) => (
-              // The option value is the employee id (see `options` above).
-              <span className="imb-employee-picker-option">
-                <EmployeeAvatar employeeId={Number(option.value)} size={20} />
-                <span className="imb-employee-picker-name">{option.label}</span>
-                {option.note !== undefined && (
-                  <span className="imb-employee-picker-role">
-                    {option.note}
-                  </span>
-                )}
-              </span>
-            )}
-          />
-        </span>
-      </Tooltip>
+      <span className="imb-employee-picker-trigger">
+        <Select
+          // Never a value: picking is an action, not a selection (see above).
+          value=""
+          options={options}
+          onChange={(value) => void start(value)}
+          // `label` is the icon-only trigger's whole accessible name.
+          label={reason}
+          disabled={loading || empty || busy}
+          variant="icon"
+          searchable
+          searchPlaceholder={t("Search employees")}
+          emptyMessage={
+            empty ? t("No employees to chat with") : t("No employees found")
+          }
+          // Avatar + name + role need more room than this trigger has.
+          panelMinWidth={260}
+          renderOption={(option) => (
+            // The option value is the employee id (see `options` above).
+            <span className="imb-employee-picker-option">
+              <EmployeeAvatar employeeId={Number(option.value)} size={20} />
+              <span className="imb-employee-picker-name">{option.label}</span>
+              {option.note !== undefined && (
+                <span className="imb-employee-picker-role">{option.note}</span>
+              )}
+            </span>
+          )}
+        />
+      </span>
       {error !== null && (
         // A failure must be visible, not only announced: it takes its own line
         // under the footer row (the trigger has no room for text).
