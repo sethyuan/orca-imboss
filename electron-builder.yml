@@ -41,7 +41,10 @@ mac:
     releaseType: release
     channel: latest-${arch}
 dmg:
-  artifactName: orca-imboss-${version}.${ext}
+  # `-${arch}` keeps the arm64 and x64 disk images apart: a user-specified
+  # artifactName is always expanded with the arch, so both builds would otherwise
+  # produce the same `orca-imboss-<version>.dmg` and clobber each other.
+  artifactName: orca-imboss-${version}-${arch}.${ext}
 linux:
   icon: resources/icon.png
   target:

@@ -16,10 +16,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - macos-latest
-          - ubuntu-latest
-          - windows-latest
+        # `builderArgs` pins the architecture explicitly: if a runner label ever
+        # starts pointing at the other architecture, the build fails instead of
+        # silently shipping mis-architected artifacts (which would also clobber
+        # same-named assets of the other architecture).
+        # `macos-latest` is macOS 26 arm64; `macos-26-intel` is the standard
+        # GitHub-hosted macOS 26 x64 (Intel) runner.
+        include:
+          - os: macos-latest
+            builderArgs: --mac --arm64
+          - os: macos-26-intel
+            builderArgs: --mac --x64
+          - os: ubuntu-latest
+            builderArgs: ""
+          - os: windows-latest
+            builderArgs: ""
     env:
       NODE_OPTIONS: "--max-old-space-size=4096"
     steps:
@@ -46,7 +57,7 @@ jobs:
           APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
-        run: pnpm run build && npx electron-builder --publish always
+        run: pnpm run build && npx electron-builder --publish always ${{ matrix.builderArgs }}
 
       # The remote backend zip is platform-independent (pure Node bundle, no
       # node_modules inside — better-sqlite3 is installed at deploy time), so a
