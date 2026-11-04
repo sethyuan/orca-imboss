@@ -25,6 +25,13 @@ export function registerChatHandlers(bind: Binder): void {
 
   bind("chats:summaries", () => dbChats.listChatSummaries());
 
+  // Task groups spawned by one conversation: the composer's `#` reference
+  // candidates. Explicitly not part of `chats:summaries` (root-only) so the
+  // Chat module's list can never pick a group up.
+  bind("chats:taskGroups", (_ctx, parentChatId: unknown) =>
+    dbChats.listTaskGroupsOf(assertInteger(parentChatId, "chat id")),
+  );
+
   // Pin/unpin one conversation (sorts above the rest of the list).
   bind("chats:setPinned", (_ctx, id: unknown, pinned: unknown) => {
     const safeId = assertInteger(id, "chat id");

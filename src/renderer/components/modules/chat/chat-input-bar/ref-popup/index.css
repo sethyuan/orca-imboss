@@ -1,4 +1,8 @@
-.imb-mention-popup {
+/*
+ * Composer reference popup (`@` employees / `#` task groups): a floating
+ * candidate list above the textarea, anchored to the composer's top-left.
+ */
+.imb-ref-popup {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 12px;
@@ -14,7 +18,7 @@
   animation: imb-fade-in var(--imb-motion-fast) var(--imb-ease-standard);
 }
 
-.imb-mention-item {
+.imb-ref-item {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -28,24 +32,24 @@
   user-select: none;
 }
 
-.imb-mention-item:hover,
-.imb-mention-item.imb-is-selected {
+.imb-ref-item:hover,
+.imb-ref-item.imb-is-selected {
   background: var(--imb-border-soft);
 }
 
-.imb-mention-avatar {
+.imb-ref-avatar {
   flex-shrink: 0;
   display: inline-flex;
 }
 
-.imb-mention-info {
+.imb-ref-info {
   display: flex;
   flex-direction: column;
   min-width: 0;
   flex: 1;
 }
 
-.imb-mention-name {
+.imb-ref-name {
   font-size: var(--imb-text-sm);
   font-weight: 500;
   color: var(--imb-fg);
@@ -54,7 +58,7 @@
   white-space: nowrap;
 }
 
-.imb-mention-role {
+.imb-ref-detail {
   font-size: var(--imb-text-xs);
   color: var(--imb-muted);
   overflow: hidden;
@@ -62,7 +66,7 @@
   white-space: nowrap;
 }
 
-.imb-mention-empty {
+.imb-ref-empty {
   padding: var(--imb-space-3);
   text-align: center;
   font-size: var(--imb-text-xs);

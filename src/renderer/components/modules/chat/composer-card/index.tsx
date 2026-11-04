@@ -122,18 +122,18 @@ export interface ComposerCardProps {
   attachMenuMinWidth?: number;
   /** Offer the "Conversation" reference row + its picker (default true). */
   attachConversations?: boolean;
-  /** Overlay drawn above the textarea (chat: the `@`-mention popup). */
+  /** Overlay drawn above the textarea (chat: the `@`/`#` reference popup). */
   overlay?: ReactNode;
   /** Extra class on the outer wrapper (context-specific spacing). */
   className?: string;
   /**
    * Called for every keydown **before** the built-in Enter-to-send handling;
-   * `true` means the caller consumed the key (e.g. `@`-mention navigation).
+   * `true` means the caller consumed the key (e.g. reference-popup navigation).
    */
   onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => boolean;
-  /** Called after the draft text was written (chat: `@` trigger detection). */
+  /** Called after the draft text was written (chat: `@` / `#` trigger detection). */
   onTextChanged?: (value: string, caret: number) => void;
-  /** Called when the caret moved (chat: re-check the `@` trigger). */
+  /** Called when the caret moved (chat: re-check the `@` / `#` trigger). */
   onCaretMove?: () => void;
 }
 
@@ -154,7 +154,7 @@ export interface ComposerCardProps {
  * - the send itself (chat: `chat:send` writes a message; session:
  *   `agentSession:send` only injects into that employee's Pi session);
  * - chat-only extras: the common-project rows (`attachMenuExtra`, whose pick
- *   also writes tags into the conversation), the `@`-mention popup
+ *   also writes tags into the conversation), the `@`-mention / `#`-task-group popup
  *   (`overlay` + `onKeyDown` + `onTextChanged`) and the one-shot "a new chat
  *   was created" reset.
  *

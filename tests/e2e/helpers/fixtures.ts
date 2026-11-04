@@ -18,6 +18,15 @@ import type { Page } from "@playwright/test";
 export const ASSISTANT_ID = 0;
 
 /**
+ * Placeholder of the **chat** composer (a root conversation): it advertises the
+ * two reference triggers. Direct chats and the agent-session composer keep the
+ * plain "What are your instructions?" / "Message ${name} directly" copy, since
+ * neither offers `@` or `#`.
+ */
+export const CHAT_COMPOSER_PLACEHOLDER =
+  "Type @ to mention an employee, # to reference a task chat";
+
+/**
  * The parts of the preload bridge these fixtures use. Kept local and minimal on
  * purpose: the real contract lives in `src/preload/index.ts`, and a test that
  * needs a new channel should add it here (which is also a reminder to check the

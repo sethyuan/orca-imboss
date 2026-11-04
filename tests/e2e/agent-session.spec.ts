@@ -3,6 +3,7 @@ import { launchApp, type LaunchedApp } from "./helpers/app";
 import {
   appendMessage,
   ASSISTANT_ID,
+  CHAT_COMPOSER_PLACEHOLDER,
   createChat,
   createEmployee,
   detailPane,
@@ -133,9 +134,7 @@ test("the chat composer still offers attachments and the common projects", async
     .first()
     .click();
   const pane = detailPane(window);
-  await expect(
-    pane.getByPlaceholder("What are your instructions?"),
-  ).toBeVisible();
+  await expect(pane.getByPlaceholder(CHAT_COMPOSER_PLACEHOLDER)).toBeVisible();
 
   // Attach + remove still work on the chat side (the card was extracted).
   const send = pane.getByRole("button", { name: "Send" });

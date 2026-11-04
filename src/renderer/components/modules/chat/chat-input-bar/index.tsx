@@ -1,5 +1,10 @@
 import { t } from "@shared/l10n";
-import type { CommonProject, MessageAttachment } from "@shared/types";
+import { wrapRefName } from "@shared/ref-names";
+import type {
+  ChatSummary,
+  CommonProject,
+  MessageAttachment,
+} from "@shared/types";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { appStore, useAppSync } from "../../../../app-store";
 import {
@@ -13,7 +18,24 @@ import {
   type ComposerDraftBinding,
   type ComposerHandle,
 } from "../composer-card";
-import { MentionPopup } from "./mention-popup";
+import { displayTitle } from "../relative-time";
+import { RefPopup, type RefCandidate, type RefTrigger } from "./ref-popup";
+
+/**
+ * The reference triggers, in match order. Both are only recognised at the start
+ * of the line or after whitespace (see `TRIGGER_PATTERNS`), so a `@` inside an
+ * email address or a `#` inside a tag never opens a popup.
+ */
+const REF_TRIGGERS: readonly RefTrigger[] = ["@", "#"];
+
+/**
+ * `<trigger>query-to-the-caret`, anchored at the caret. The query class excludes
+ * whitespace and the trigger itself, so the whole reference stays one token.
+ */
+const TRIGGER_PATTERNS: Record<RefTrigger, RegExp> = {
+  "@": /(?:^|\s)@([^\s@]*)$/,
+  "#": /(?:^|\s)#([^\s#]*)$/,
+};
 
 /**
  * One-shot "reset this composer" request, minted by the chat module right after
@@ -48,11 +70,12 @@ export interface ChatInputBarProps {
   onComposerResetApplied?: (seq: number) => void;
   onSend: (text: string, attachments: MessageAttachment[]) => void;
   /**
-   * Whether the `@`-mention popup is offered (default `true`).
+   * Whether the reference popups are offered (default `true`): `@` for an
+   * employee and `#` for a task group this conversation created.
    *
-   * An employee direct chat targets exactly one employee, so mentioning a third
-   * one would do nothing; that composer turns the popup off and an `@` stays
-   * plain text.
+   * An employee direct chat targets exactly one employee and spawns no task
+   * groups of its own, so both references would be meaningless there; that
+   * composer turns the popups off and `@` / `#` stay plain text.
    */
   mentions?: boolean;
   /**
@@ -68,8 +91,8 @@ export interface ChatInputBarProps {
  * needs.
  *
  * Chat-only here, in one place:
- * - the `@`-mention popup and its key/caret handling (a session send has no
- *   mention semantics);
+ * - the `@`-mention / `#`-task-group reference popup and its key/caret handling
+ *   (a session send has no mention semantics);
  * - the common-project rows in the attach menu — they attach a folder **and**
  *   write the project's tags into the conversation (`chats:addTags`), which is
  *   a chat side effect; the agent-session composer passes no
@@ -99,24 +122,86 @@ export function ChatInputBar({
   const [projectsMenuOpen, setProjectsMenuOpen] = useState(false);
   const [projects, setProjects] = useState<CommonProject[]>([]);
 
-  // Mention state
-  const [mentionOpen, setMentionOpen] = useState(false);
-  const [mentionQuery, setMentionQuery] = useState("");
-  const [mentionIndex, setMentionIndex] = useState(0);
-  const [mentionCaret, setMentionCaret] = useState({ start: 0, end: 0 });
+  // Reference popups: one state says which trigger is live, so `@` and `#`
+  // can never both be open (a single overlay slot, and `ArrowDown` must move
+  // exactly one list).
+  const [refTrigger, setRefTrigger] = useState<RefTrigger | null>(null);
+  const [refQuery, setRefQuery] = useState("");
+  const [refIndex, setRefIndex] = useState(0);
+  // Caret span of the typed trigger token (from the `@`/`#` up to the caret),
+  // replaced as a whole when a candidate is picked.
+  const [refCaret, setRefCaret] = useState({ start: 0, end: 0 });
 
   const allEmployees = snap.data.employees.items;
-  const filteredEmployees = useMemo(() => {
-    if (!mentionOpen) return [];
-    const q = mentionQuery.toLowerCase().trim();
-    if (!q) return allEmployees;
-    return allEmployees.filter(
-      (e) =>
-        e.name.toLowerCase().includes(q) ||
-        e.role.toLowerCase().includes(q) ||
-        String(e.id).includes(q),
-    );
-  }, [mentionOpen, mentionQuery, allEmployees]);
+
+  // Task groups of this conversation: loaded when the `#` popup opens (so a
+  // group created since the last look is pickable without remounting the
+  // composer, exactly like the common-project rows).
+  const [taskChats, setTaskChats] = useState<ChatSummary[]>([]);
+  const [taskChatsLoading, setTaskChatsLoading] = useState(false);
+  useEffect(() => {
+    if (!mentions || refTrigger !== "#") return;
+    let alive = true;
+    setTaskChatsLoading(true);
+    void imb.chats
+      .taskGroups(chatId)
+      .then((list) => {
+        if (!alive) return;
+        setTaskChats(list);
+        setTaskChatsLoading(false);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        // Defensive: a failed read leaves an empty list (the boss can still
+        // type the reference by hand), and is reported rather than swallowed.
+        console.error(
+          "[chat-input-bar] task groups",
+          err instanceof Error ? err.message : err,
+        );
+        setTaskChats([]);
+        setTaskChatsLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [mentions, refTrigger, chatId]);
+
+  const candidates = useMemo<RefCandidate[]>(() => {
+    if (refTrigger === null) return [];
+    const q = refQuery.toLowerCase().trim();
+    if (refTrigger === "@") {
+      return allEmployees
+        .filter(
+          (e) =>
+            q.length === 0 ||
+            e.name.toLowerCase().includes(q) ||
+            e.role.toLowerCase().includes(q) ||
+            String(e.id).includes(q),
+        )
+        .map((e) => ({
+          kind: "employee" as const,
+          id: e.id,
+          name: e.name,
+          role: e.role,
+        }));
+    }
+    // `#`: the task groups this conversation spawned, most recently active
+    // first (main sorts them). The current chat can never be one of them —
+    // main filters by `from_chat_id` — but the id check keeps a stale list from
+    // offering the composer its own conversation.
+    return taskChats
+      .filter((chat) => chat.id !== chatId && chat.fromChatId !== null)
+      .filter((chat) => q.length === 0 || chat.title.toLowerCase().includes(q))
+      .map((chat) => ({
+        kind: "taskChat" as const,
+        id: chat.id,
+        title: chat.title,
+        participants: chat.participants,
+        // Non-null for every task group; the fallback only keeps the avatar
+        // rendering sane if that ever changes.
+        fromChatId: chat.fromChatId ?? chatId,
+      }));
+  }, [refTrigger, refQuery, allEmployees, taskChats, chatId]);
   // A brand-new chat resets the composer's transient UI and lands the caret in
   // the input. Only an explicit request does this: a plain `chatId` change (a
   // chat switch) must never reset anything, because the draft — text *and*
@@ -226,81 +311,96 @@ export function ChatInputBar({
   };
 
   /**
-   * Mention keys are handled before the card's Enter-to-send. `true` means the
-   * key was consumed by the popup.
+   * Reference keys are handled before the card's Enter-to-send. `true` means
+   * the key was consumed by the popup.
+   *
+   * An open popup with no candidates consumes nothing but `Escape`: `Enter`
+   * must still send and every character must still be typed, so an empty list
+   * can never swallow the boss's input.
    */
   const onKeyDown = (
     event: React.KeyboardEvent<HTMLTextAreaElement>,
   ): boolean => {
-    if (!mentionOpen || filteredEmployees.length === 0) return false;
+    if (refTrigger === null) return false;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setRefTrigger(null);
+      return true;
+    }
+    if (candidates.length === 0) return false;
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setMentionIndex((i) => (i + 1) % filteredEmployees.length);
+      setRefIndex((i) => (i + 1) % candidates.length);
       return true;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      setMentionIndex(
-        (i) => (i - 1 + filteredEmployees.length) % filteredEmployees.length,
-      );
+      setRefIndex((i) => (i - 1 + candidates.length) % candidates.length);
       return true;
     }
     if (event.key === "Enter" || event.key === "Tab") {
       event.preventDefault();
-      const chosen = filteredEmployees[mentionIndex] ?? filteredEmployees[0];
-      if (chosen) insertMention(chosen);
-      return true;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      setMentionOpen(false);
+      const chosen = candidates[refIndex] ?? candidates[0];
+      if (chosen) insertRef(chosen);
       return true;
     }
     return false;
   };
 
-  const checkMentionTrigger = (val: string, cursor: number): void => {
+  /**
+   * Open / close the reference popup for the token the caret sits in. `@` is
+   * tried before `#`; only one of them can match a given caret position because
+   * the trigger characters differ.
+   */
+  const checkRefTrigger = (val: string, cursor: number): void => {
     if (!mentions) return;
     const before = val.slice(0, cursor);
-    const match = /(?:^|\s)@([^\s@]*)$/.exec(before);
-    if (match) {
-      const query = match[1];
-      const atStart = match.index + (match[0].startsWith("@") ? 0 : 1);
-      setMentionQuery(query);
-      setMentionCaret({ start: atStart, end: cursor });
-      setMentionOpen(true);
-      setMentionIndex(0);
-    } else {
-      setMentionOpen(false);
+    for (const trigger of REF_TRIGGERS) {
+      const match = TRIGGER_PATTERNS[trigger].exec(before);
+      if (!match) continue;
+      // `match[0]` also contains the leading whitespace (or nothing at line
+      // start); the token starts at the trigger character itself.
+      const atStart =
+        (match.index ?? 0) + (match[0].startsWith(trigger) ? 0 : 1);
+      setRefTrigger(trigger);
+      setRefQuery(match[1]);
+      setRefCaret({ start: atStart, end: cursor });
+      setRefIndex(0);
+      return;
     }
+    setRefTrigger(null);
   };
 
   const onCaretMove = (): void => {
     if (!mentions) return;
     const textarea = cardRef.current?.textarea() ?? null;
     if (textarea) {
-      checkMentionTrigger(textarea.value, textarea.selectionStart ?? 0);
+      checkRefTrigger(textarea.value, textarea.selectionStart ?? 0);
     }
   };
 
-  const insertMention = (employee: {
-    id: number;
-    name?: string;
-    role?: string;
-  }): void => {
+  /**
+   * Replace the typed trigger token with the candidate's reference.
+   *
+   * The message gets the **name alone**, wrapped in backticks: `` `名字` ``
+   * (`shared/ref-names.ts`). The trigger character is not written — it only
+   * opened the popup — and the backticks are what keep a name with spaces one
+   * token (`@John Doe` could not be told apart from `@John` plus prose). A
+   * trailing space is added so typing continues outside the reference, unless
+   * the text already continues with whitespace there.
+   */
+  const insertRef = (candidate: RefCandidate): void => {
     const card = cardRef.current;
     // The textarea is uncontrolled: the DOM owns the live value, so rebuild the
     // text from it rather than from the (possibly one frame stale) snapshot.
     const prevText = card?.textarea()?.value ?? text;
-    const mentionTag = `@${employee.name || employee.role || employee.id} `;
-    const nextText =
-      prevText.slice(0, mentionCaret.start) +
-      mentionTag +
-      prevText.slice(mentionCaret.end);
-    const newCursor = mentionCaret.start + mentionTag.length;
+    const rest = prevText.slice(refCaret.end);
+    const tag = refTagName(candidate) + (/^\s/.test(rest) ? "" : " ");
+    const nextText = prevText.slice(0, refCaret.start) + tag + rest;
+    const newCursor = refCaret.start + tag.length;
     // Writing through the card updates both the DOM value and the draft.
     card?.setText(nextText, newCursor);
-    setMentionOpen(false);
+    setRefTrigger(null);
   };
 
   const binding: ComposerDraftBinding = {
@@ -346,7 +446,13 @@ export function ChatInputBar({
     <ComposerCard
       ref={cardRef}
       binding={binding}
-      placeholder={t("What are your instructions?")}
+      // The reference hints only where both are actually offered: an employee
+      // direct chat keeps the plain prompt (it has no `@` / `#`).
+      placeholder={
+        mentions
+          ? t("Type @ to mention an employee, # to reference a task chat")
+          : t("What are your instructions?")
+      }
       actionLabel={t("Send")}
       disabled={disabled}
       resetKey={chatId}
@@ -355,18 +461,32 @@ export function ChatInputBar({
       attachMenuOpenChange={setProjectsMenuOpen}
       overlay={
         mentions ? (
-          <MentionPopup
-            open={mentionOpen}
-            employees={filteredEmployees}
-            selectedIndex={mentionIndex}
-            onSelect={insertMention}
-            onHoverIndex={setMentionIndex}
+          <RefPopup
+            trigger={refTrigger}
+            candidates={candidates}
+            selectedIndex={refIndex}
+            onSelect={insertRef}
+            onHoverIndex={setRefIndex}
+            loading={refTrigger === "#" && taskChatsLoading}
           />
         ) : null
       }
       onKeyDown={onKeyDown}
-      onTextChanged={(value, caret) => checkMentionTrigger(value, caret)}
+      onTextChanged={(value, caret) => checkRefTrigger(value, caret)}
       onCaretMove={onCaretMove}
     />
   );
+}
+
+/**
+ * The text a candidate contributes to the message: its name as an inline code
+ * span, `` `名字` `` (see `shared/ref-names.ts` for the normalization rules and
+ * why the trigger character is not part of it).
+ */
+function refTagName(candidate: RefCandidate): string {
+  const raw =
+    candidate.kind === "employee"
+      ? candidate.name || candidate.role || String(candidate.id)
+      : displayTitle(candidate.title);
+  return wrapRefName(raw, candidate.id);
 }

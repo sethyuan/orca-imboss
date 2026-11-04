@@ -1,7 +1,7 @@
 /*
  * Interactive anchored popup (Halt confirmation). Surface + border + shadow in
  * the same visual language as the app's other popups (`.imb-ctx-menu`,
- * `.imb-mention-popup`), with the tooltip's fixed + flipped placement.
+ * `.imb-ref-popup`), with the tooltip's fixed + flipped placement.
  */
 .imb-popover {
   position: fixed;

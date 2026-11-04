@@ -45,6 +45,8 @@ import {
   splitAttachmentPrompt,
 } from "../../src/main/attachment-prompt";
 import { initDatabase } from "../../src/main/db";
+import { normalizeRefName, wrapRefName } from "../../src/shared/ref-names";
+import { createChat, listTaskGroupsOf } from "../../src/main/db/chats";
 import { appendMessage } from "../../src/main/db/messages";
 import { sweepTransferTempRoot } from "../../src/main/file-browser";
 import { registerRemoteHandlers } from "../../src/main/ipc";
@@ -117,8 +119,18 @@ async function main(): Promise<void> {
     // per-turn "the boss typed this" hint must compose and split byte-exactly,
     // or the session view would either lose the boss's words or show the hint.
     runBossDirectHintChecks();
+    // The composer's reference encoding (what a picked `@`/`#` candidate writes
+    // into the message). Pure and shared, so it is asserted here instead of
+    // through the UI.
+    runRefNameChecks();
 
     await seed(handlers);
+
+    // `#`-reference candidates (`chats:taskGroups`). A task group can only be
+    // created by an agent, so the E2E suite cannot put the composer in the state
+    // that lists them; the rule is asserted here against the real query, and the
+    // channel is then added to the transport comparison below.
+    runTaskGroupChecks();
 
     const server = await startRpcServer({
       config: { listen: "127.0.0.1:0", token: TOKEN, dataRoot, tls: null },
@@ -211,6 +223,96 @@ function runBossDirectHintChecks(): void {
     "splitting attachments then the hint yields the typed text",
     splitBossDirectHint(attachmentSplit.text).text === typed,
   );
+}
+
+/**
+ * The text form a reference takes inside a message (`` `名字` ``), which the
+ * composer writes and nothing else parses.
+ *
+ * The properties that matter: a name with spaces stays ONE inline-code token,
+ * whitespace/newlines collapse, an embedded backtick cannot close the span early,
+ * and an empty name never inserts an empty pair of backticks.
+ */
+function runRefNameChecks(): void {
+  check(
+    "a plain name becomes one inline code span",
+    wrapRefName("Ada", 0) === "`Ada`",
+    wrapRefName("Ada", 0),
+  );
+  check(
+    "a name with spaces keeps its spaces inside the span",
+    wrapRefName("John  Doe", 0) === "`John Doe`",
+    wrapRefName("John  Doe", 0),
+  );
+  check(
+    "a name with a newline collapses to one space",
+    wrapRefName("John\nDoe", 0) === "`John Doe`",
+    wrapRefName("John\nDoe", 0),
+  );
+  check(
+    "surrounding whitespace is trimmed before wrapping",
+    wrapRefName("  Ada  ", 0) === "`Ada`",
+    wrapRefName("  Ada  ", 0),
+  );
+  check(
+    "an embedded backtick cannot close the span early",
+    wrapRefName("a`b", 0) === "`a'b`",
+    wrapRefName("a`b", 0),
+  );
+  check(
+    "an empty name falls back to the id instead of empty backticks",
+    wrapRefName("   ", 42) === "`42`",
+    wrapRefName("   ", 42),
+  );
+  check(
+    "normalizeRefName exposes the same text without the backticks",
+    normalizeRefName(" Ada ", 7) === "Ada" && normalizeRefName("", 7) === "7",
+  );
+}
+
+/**
+ * Task-group candidates for the composer's `#` trigger: a conversation offers
+ * only the groups **it** spawned, most recently active first — never another
+ * conversation's groups, and never itself.
+ */
+function runTaskGroupChecks(): void {
+  const root = createChat("Harness refs", [0]);
+  const other = createChat("Harness other refs", [0]);
+  const older = createChat("Harness group one", [0], { fromChatId: root.id });
+  const newer = createChat("Harness group two", [0], { fromChatId: root.id });
+  const foreign = createChat("Harness foreign group", [0], {
+    fromChatId: other.id,
+  });
+  appendMessage(older.id, null, "older group activity");
+  appendMessage(newer.id, null, "newer group activity");
+
+  const groups = listTaskGroupsOf(root.id);
+  const ids = groups.map((group) => group.id);
+  check(
+    "only the groups this conversation spawned are candidates",
+    ids.length === 2 && ids.includes(newer.id) && ids.includes(older.id),
+    ids.join(","),
+  );
+  check(
+    "the much most recently active group comes first",
+    ids[0] === newer.id,
+    ids.join(","),
+  );
+  check(
+    "another conversation's group is never offered",
+    !ids.includes(foreign.id),
+  );
+  check(
+    "a group's parent lists no group of its own",
+    listTaskGroupsOf(other.id).length === 1,
+  );
+  check(
+    "an unknown parent chat yields no candidates",
+    listTaskGroupsOf(99999).length === 0,
+  );
+
+  // The same read over the real transport, with a non-empty payload.
+  READ_CASES.push({ channel: "chats:taskGroups", args: [root.id] });
 }
 
 function readSuite(): "all" | "handlers" | "events" | "transfer" {

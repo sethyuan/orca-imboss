@@ -124,6 +124,41 @@ export function listChatSummaries(): ChatSummary[] {
 }
 
 /**
+ * Cap for the composer's `#` reference candidates. A conversation cannot
+ * plausibly have spawned more than a handful of task groups, and the popup is a
+ * picker, not a list view.
+ */
+export const MAX_TASK_GROUP_CANDIDATES = 200;
+
+/**
+ * Task groups **spawned by one conversation** (`from_chat_id = parentChatId`),
+ * most recently active first. Backs the composer's `#` reference popup, which
+ * offers only the groups the boss is currently working in (a group of another
+ * conversation would be noise, and the boss can still attach any root
+ * conversation through the attach menu's "Conversation" row).
+ *
+ * `listChatSummaries` / `listChatSummariesPage` are deliberately root-only (the
+ * Chat module's list), so they cannot be reused here: this is the one query
+ * that reads groups by their spawning chat.
+ */
+export function listTaskGroupsOf(parentChatId: number): ChatSummary[] {
+  if (!Number.isSafeInteger(parentChatId) || parentChatId <= 0) return [];
+  const rows = getDB()
+    .prepare(
+      `${CHAT_SUMMARY_SELECT}
+       WHERE c.from_chat_id = ?
+       ORDER BY c.last_message_at DESC, c.id DESC
+       LIMIT ?`,
+    )
+    .all(
+      ...PREVIEW_SKIP_KINDS,
+      parentChatId,
+      MAX_TASK_GROUP_CANDIDATES,
+    ) as ChatSummaryRow[];
+  return toChatSummaries(rows);
+}
+
+/**
  * Single chat summary (any chat — root or group). The caller decides whether
  * to ignore non-root chats; used by the renderer's live per-chat refresh.
  */

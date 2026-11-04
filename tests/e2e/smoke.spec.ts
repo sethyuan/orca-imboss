@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, type LaunchedApp } from "./helpers/app";
-import { listRows } from "./helpers/fixtures";
+import { CHAT_COMPOSER_PLACEHOLDER, listRows } from "./helpers/fixtures";
 
 /**
  * The floor of the suite: the built app starts, shows the shell, and can create
@@ -53,7 +53,7 @@ test("creates a conversation that survives a reload", async () => {
   await expect(listRows(window)).toHaveCount(1);
   // The new chat is selected, so its thread and composer are on screen.
   await expect(
-    window.getByPlaceholder("What are your instructions?"),
+    window.getByPlaceholder(CHAT_COMPOSER_PLACEHOLDER),
   ).toBeVisible();
 
   // Reload: an empty list here would mean the chat only ever lived in memory.

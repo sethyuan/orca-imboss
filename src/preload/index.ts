@@ -347,6 +347,15 @@ const api = {
     list: () => ipcRenderer.invoke("chats:list") as Promise<Chat[]>,
     summaries: () =>
       ipcRenderer.invoke("chats:summaries") as Promise<ChatSummary[]>,
+    /**
+     * Task groups spawned by one conversation, most recently active first: the
+     * chat composer's `#` reference candidates. (`summaries` is root-only, so a
+     * task group is only reachable through this channel or by id.)
+     */
+    taskGroups: (parentChatId: number) =>
+      ipcRenderer.invoke("chats:taskGroups", parentChatId) as Promise<
+        ChatSummary[]
+      >,
     /** Pin or unpin one conversation (sorts above the rest). */
     setPinned: (id: number, pinned: boolean) =>
       ipcRenderer.invoke("chats:setPinned", id, pinned) as Promise<Chat | null>,
