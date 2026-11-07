@@ -12,3 +12,4 @@ dist-remote
 test-results
 playwright-report
 tsconfig.e2e.tsbuildinfo
+docs/
