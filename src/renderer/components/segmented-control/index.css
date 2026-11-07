@@ -29,10 +29,10 @@
 
 .imb-segmented-btn {
   position: relative;
-  z-index: 1; /* above the thumb */
+  /* above the thumb */
+  z-index: 1;
   flex: 1 1 0;
   min-width: 0;
-  height: var(--imb-control-h);
   padding: 0 var(--imb-space-2);
   font: inherit;
   font-size: var(--imb-fs-ui);
