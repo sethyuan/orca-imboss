@@ -30,6 +30,26 @@
   color: var(--imb-fg);
 }
 
+/*
+ * Second line of a stat tile: "$X reported · $Y estimated" under the total cost.
+ * Rendered only when the provider reported part of the amount, so an
+ * all-estimated bucket looks exactly like it did before.
+ */
+.imb-spend-stat-hint {
+  font-family: var(--imb-font-mono);
+  font-size: var(--imb-text-xs);
+  color: var(--imb-muted);
+  /* Two lines still fit a 140px tile at the narrowest column width. */
+  line-height: 1.35;
+}
+
+/* Superscript `*` on a model row whose cost the provider reported. */
+.imb-spend-reported-mark {
+  margin-left: 2px;
+  color: var(--imb-muted);
+  cursor: help;
+}
+
 .imb-spend-section {
   margin-bottom: var(--imb-space-6);
 }

@@ -100,7 +100,16 @@ export function SpendDetail({
           </section>
         )}
         <section className="imb-spend-section">
-          <h3>{t("By model")}</h3>
+          <h3>
+            {t("By model")}
+            {view.byModel.some(
+              (model) => (model.totals.costFromProvider ?? 0) > 0,
+            ) && (
+              <span className="imb-spend-section-note">
+                {t("* reported by the provider")}
+              </span>
+            )}
+          </h3>
           {view.byModel.length === 0 ? (
             <p className="imb-module-note">{t("No spend recorded yet")}</p>
           ) : (
@@ -131,6 +140,14 @@ export function SpendDetail({
                   </span>
                   <span className="imb-spend-num">
                     {formatCost(model.totals.cost)}
+                    {(model.totals.costFromProvider ?? 0) > 0 && (
+                      <span
+                        className="imb-spend-reported-mark"
+                        title={t("The provider reported this cost")}
+                      >
+                        *
+                      </span>
+                    )}
                   </span>
                 </div>
               ))}
@@ -299,7 +316,12 @@ function jumpToChat(chatId: number): void {
 
 /** Token/cost tiles for one resolved view. */
 function StatsGrid({ view }: { view: SpendView }): React.JSX.Element {
-  const tiles: Array<{ label: string; value: string }> = [
+  const tiles: Array<{
+    label: string;
+    value: string;
+    /** Small line under the value; omitted when there is nothing extra to say. */
+    hint?: string;
+  }> = [
     { label: t("Tokens"), value: formatTokens(view.totals.totalTokens) },
     { label: t("Cache read"), value: formatTokens(view.totals.cacheRead) },
     { label: t("Input tokens"), value: formatTokens(view.totals.input) },
@@ -308,6 +330,20 @@ function StatsGrid({ view }: { view: SpendView }): React.JSX.Element {
     { label: t("Cost"), value: formatCost(view.totals.cost) },
     { label: t("Calls"), value: formatTokens(view.totals.calls) },
   ];
+  // Split the cost tile into reported/estimated only when the provider reported
+  // something: an all-estimated bucket (old sessions, every non-OpenRouter
+  // provider) then renders exactly as it did before this existed. `?? 0` keeps a
+  // report from an older backend (which has no such field) rendering as before.
+  const reported = view.totals.costFromProvider ?? 0;
+  if (reported > 0) {
+    tiles[tiles.length - 2].hint = t(
+      "${reported} reported · ${estimated} estimated",
+      {
+        reported: formatCost(reported),
+        estimated: formatCost(Math.max(0, view.totals.cost - reported)),
+      },
+    );
+  }
   if (view.chats !== null) {
     tiles.push({ label: t("Chats"), value: formatTokens(view.chats) });
   }
@@ -317,6 +353,9 @@ function StatsGrid({ view }: { view: SpendView }): React.JSX.Element {
         <div className="imb-spend-stat" key={tile.label}>
           <span className="imb-spend-stat-label">{tile.label}</span>
           <span className="imb-spend-stat-value">{tile.value}</span>
+          {tile.hint !== undefined && (
+            <span className="imb-spend-stat-hint">{tile.hint}</span>
+          )}
         </div>
       ))}
     </div>

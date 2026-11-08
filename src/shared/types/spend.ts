@@ -21,7 +21,16 @@ export interface SpendTotals {
   cacheRead: number;
   cacheWrite: number;
   totalTokens: number;
+  /** Total cost in USD, provider-reported and catalog-estimated parts together. */
   cost: number;
+  /**
+   * The part of `cost` the provider reported as actually billed (Pi's
+   * `Usage.cost.totalFromProvider`, today only OpenRouter). Never larger than
+   * `cost`; `cost - costFromProvider` is the part estimated from the model
+   * catalog. Session records written before Pi 1.5.0 carry no such flag and
+   * count entirely as estimated, so a report over old history has `0` here.
+   */
+  costFromProvider: number;
   /** Number of provider calls folded into these counters. */
   calls: number;
 }

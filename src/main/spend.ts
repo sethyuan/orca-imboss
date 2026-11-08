@@ -45,6 +45,12 @@ interface SpendRecord {
   cacheWrite: number;
   totalTokens: number;
   cost: number;
+  /**
+   * The part of `cost` the provider reported as billed (Pi's
+   * `Usage.cost.totalFromProvider`); records without that flag — including every
+   * session written before Pi 1.5.0 — contribute nothing here.
+   */
+  costFromProvider: number;
 }
 
 /** Token + cost payload read off a `Usage` object. */
@@ -323,6 +329,7 @@ function addTotals(target: SpendTotals, source: SpendTotals): void {
   target.cacheWrite += source.cacheWrite;
   target.totalTokens += source.totalTokens;
   target.cost += source.cost;
+  target.costFromProvider += source.costFromProvider;
   target.calls += source.calls;
 }
 
@@ -457,6 +464,7 @@ function emptyTotals(): SpendTotals {
     cacheWrite: 0,
     totalTokens: 0,
     cost: 0,
+    costFromProvider: 0,
     calls: 0,
   };
 }
@@ -468,6 +476,7 @@ function addCounters(totals: SpendTotals, counters: SpendCounters): void {
   totals.cacheWrite += counters.cacheWrite;
   totals.totalTokens += counters.totalTokens;
   totals.cost += counters.cost;
+  totals.costFromProvider += counters.costFromProvider;
   totals.calls += 1;
 }
 
@@ -571,6 +580,7 @@ function readCounters(value: unknown): SpendCounters | null {
   // Providers report `totalTokens`; fall back to the parts when absent.
   const totalTokens = count(usage.totalTokens);
   const cost = readCost(usage.cost);
+  const costFromProvider = readReportedCost(usage.cost, cost);
   if (input + output + cacheRead + cacheWrite + totalTokens + cost === 0) {
     return null;
   }
@@ -582,12 +592,30 @@ function readCounters(value: unknown): SpendCounters | null {
     totalTokens:
       totalTokens > 0 ? totalTokens : input + output + cacheRead + cacheWrite,
     cost,
+    costFromProvider,
   };
 }
 
 function readCost(value: unknown): number {
   if (value === null || typeof value !== "object") return 0;
   return count((value as Record<string, unknown>).total);
+}
+
+/**
+ * The provider-reported part of one record's cost.
+ *
+ * Pi 1.5.0 added `Usage.cost.totalFromProvider`: `true` when the provider
+ * returned the amount it actually billed (OpenRouter, including BYOK), `false`
+ * when Pi computed it from the catalog entry. Older records carry no such flag
+ * at all — they are catalog estimates by definition, so anything but an
+ * explicit `true` counts as estimated and contributes nothing here. The result
+ * is clamped to the record's own cost so a malformed transcript can never make
+ * the reported part exceed the total.
+ */
+function readReportedCost(value: unknown, cost: number): number {
+  if (value === null || typeof value !== "object") return 0;
+  if ((value as Record<string, unknown>).totalFromProvider !== true) return 0;
+  return cost > 0 ? cost : 0;
 }
 
 function count(value: unknown): number {
