@@ -45,7 +45,7 @@
     "qq-official-bot": "1.3.0",
     "qrcode": "1.5.4",
     "typebox": "^1.3.21",
-    "undici": "8.10.2",
+    "undici": "8.12.3",
     "wechat-ilink-client": "0.1.0"
   },
   "devDependencies": {
