@@ -34,7 +34,7 @@
     "dist:linux": "pnpm run build && electron-builder --linux"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^1.4.0",
+    "@earendil-works/pi-coding-agent": "1.5.0",
     "@grpc/grpc-js": "^1.14.6",
     "better-sqlite3": "^13.0.3",
     "croner": "^10.0.1",
