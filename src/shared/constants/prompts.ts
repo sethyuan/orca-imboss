@@ -212,13 +212,18 @@ export const BASE_TOOL_SNIPPETS: Record<string, string> = {
  * Tool/OS-agnostic Guidelines bullets shared by every platform (rendered with a
  * `- ` prefix). Kept separate so the POSIX and Windows lists can differ only in
  * their leading shell/path bullets while this tail stays byte-identical.
+ *
+ * The `edit` bullets track the SDK's own `editToolSystemPromptContribution`
+ * (Pi 1.5.0: "Batch changes to one file in a single call", and one bullet on
+ * how `edits[].oldText` has to match) instead of growing app-specific rules:
+ * the SDK rewrote that guidance in 1.5.0 after the old wording made models emit
+ * many tiny overlapping calls, and duplicate wording here would only drift.
+ * The other bullets are app-owned (`PI_*` variables, brevity, paths).
  */
 const COMMON_TOOLS_GUIDELINES: readonly string[] = [
   "You can inspect PI_* environment variables for current model and session details.",
-  "Use edit for precise changes (edits[].oldText must match exactly)",
-  "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
-  "Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
-  "Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
+  "Use edit for targeted changes. Batch changes to one file in a single call.",
+  "Each edits[].oldText must exactly and uniquely match the original file. Keep matches short and non-overlapping; merge nearby changes without including large unchanged regions.",
   "Use write only for new files or complete rewrites.",
   "Be concise in your responses",
   "Show file paths clearly when working with files",
