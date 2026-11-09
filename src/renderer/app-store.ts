@@ -1370,6 +1370,23 @@ export const appStore = proxy({
   },
 });
 
+/**
+ * Message kinds that must never ring the notification beep, wherever they land
+ * in a root chat. Everything else in a root, unmuted, non-silent chat beeps.
+ *
+ * - `progress` — cards post in bursts (one per step update) and the thread
+ *   folds a run of them into one card the boss pages through;
+ * - `chat` — the link card `imb_create_chat` drops into the spawning chat when
+ *   a task group is created. Creating the group is the boss's own request and
+ *   the card only adds a Nav entry; the run it starts reports back through
+ *   `report`/`alert`, which does ring.
+ *
+ * Both still bump the unread badge (that happens in main, see
+ * `db/messages.ts`), so this is a beep-only policy and the single place it is
+ * decided.
+ */
+const SILENT_KINDS: ReadonlySet<string> = new Set(["progress", "chat"]);
+
 /** One-time app-state bootstrap (theme/locale subscriptions + persisted prefs). */
 let initialized = false;
 export async function initAppStore(): Promise<void> {
@@ -1428,16 +1445,15 @@ export async function initAppStore(): Promise<void> {
       // chats and silent acks stay quiet). Throttled inside
       // playNotificationSound().
       //
-      // Progress cards are the exception: they post in bursts (one card per step
-      // update) and the thread folds a run of them into one card the boss pages
-      // through, so they keep bumping the unread badge (done in main) but never
+      // `SILENT_KINDS` (progress cards, chat link cards — see above) are the
+      // exceptions: they keep bumping the unread badge (done in main) but never
       // ring.
       if (
         root &&
         senderEmployeeId !== null &&
         !silent &&
         !muted &&
-        kind !== "progress"
+        !SILENT_KINDS.has(kind ?? "")
       ) {
         playNotificationSound();
       }

@@ -190,7 +190,8 @@ export interface MessageChangedPayload {
   senderEmployeeId: number | null;
   /**
    * Kind of the message. Optional so a payload written before it was added
-   * still type-checks; `progress` is the one the beep rule treats specially.
+   * still type-checks; the beep rule treats two kinds specially (`progress`
+   * and `chat` never ring — see `SILENT_KINDS` in `renderer/app-store.ts`).
    */
   kind?: MessageKind;
   /** App-generated (no beep, no unread bump — unread is main-side anyway). */
