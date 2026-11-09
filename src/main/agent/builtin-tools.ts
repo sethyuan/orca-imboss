@@ -453,12 +453,71 @@ function assertActiveEmployee(employeeId: number): void {
 }
 
 /**
- * Display name for orchestration messages: `#ID name`, or `#ID` for an
- * unnamed employee. Matches the employee list/detail `#ID` convention.
+ * One field of a roster entry, safe to sit on a single line.
+ *
+ * A name or role is free text the boss edits (≤200 chars each) and may carry
+ * newlines or long whitespace runs; a join notice is a one-line list, so every
+ * whitespace run collapses to a single space. Unlike `alertOneLine` this keeps
+ * the whole value (a roster entry is not a banner) and strips no leading
+ * character — `#<id>` must survive intact.
  */
-function employeeDisplayName(employeeId: number): string {
-  const name = getEmployee(employeeId)?.name.trim() ?? "";
-  return name.length > 0 ? `#${employeeId} ${name}` : `#${employeeId}`;
+function rosterField(value: string | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * One participant of an orchestration message: `#ID name (role)`.
+ *
+ * Matches the employee list/detail `#ID` convention and degrades instead of
+ * throwing, because a chat's `participants` is not FK-enforced (`migrations.ts`)
+ * and an employee row may be gone:
+ * - name + role → `#ID name (role)`, the parens localized;
+ * - name only → `#ID name` (nothing to translate);
+ * - role only → `#ID (role)`, still says what that participant does;
+ * - neither, or no employee row → `#ID`.
+ */
+function employeeRosterEntry(employeeId: number): string {
+  const employee = getEmployee(employeeId);
+  const name = rosterField(employee?.name);
+  const role = rosterField(employee?.role);
+  const id = String(employeeId);
+  if (name.length > 0) {
+    return role.length > 0
+      ? t("#${id} ${name} (${role})", { id, name, role })
+      : `#${employeeId} ${name}`;
+  }
+  return role.length > 0
+    ? t("#${id} (${role})", { id, role })
+    : `#${employeeId}`;
+}
+
+/**
+ * Character budget for one rendered roster. `participants` carries no schema
+ * cap and employee names/roles are 200 chars each, so an absurd roster could
+ * otherwise approach the 100k `content` limit; a notice longer than this is
+ * cut and closed with "…and N more" rather than growing without bound.
+ */
+const ROSTER_MAX_CHARS = 4_000;
+
+/** Render `employeeIds` as one comma-separated roster line (see `employeeRosterEntry`). */
+function employeeRoster(employeeIds: number[]): string {
+  const parts: string[] = [];
+  let used = 0;
+  let shown = 0;
+  for (const employeeId of employeeIds) {
+    const entry = employeeRosterEntry(employeeId);
+    // Always keep at least one entry: an over-long first name must not make the
+    // notice claim a roster it never printed.
+    if (parts.length > 0 && used + entry.length + 2 > ROSTER_MAX_CHARS) break;
+    parts.push(entry);
+    used += entry.length + 2;
+    shown += 1;
+  }
+  const rest = employeeIds.length - shown;
+  if (rest > 0) {
+    parts.push(t("…and ${count} more", { count: String(rest) }));
+  }
+  return parts.join(", ");
 }
 
 /**
@@ -604,6 +663,7 @@ function createChatTool(
       "Create a new chat with the given title and employee participants, initializing one persistent agent session per employee participant " +
       "(the assistant orchestrates from its own root-chat session and gets no session here). " +
       "The assistant always joins, and the chat that spawned this one is linked as `from_chat_id`. " +
+      "A join notice listing every participant with their role is posted into the new chat. " +
       "Participants are NOT notified or started automatically — assign their work afterwards with `imb_send_message`, " +
       "passing their ids in `notify` to wake them.",
     promptSnippet: "new team chat",
@@ -649,6 +709,24 @@ function createChatTool(
 
       // Best-effort: materialize session files; never roll back committed DB.
       await materializeSessions(sessionRecords);
+
+      // Join notice into the new chat itself. A participant has no other way to
+      // learn who it is working with: `imb_read_chat` returns messages only, and
+      // a session's identity block carries just the chat id (`fromChatId` at
+      // most), so the roster has to be a message. `chat.participants` is already
+      // deduped and assistant-first (`dbChats.createChat`). No `notify` on
+      // purpose: creating a chat must NOT start any participant's agent. They
+      // are woken only when an assignment reaches them through
+      // `imb_send_message` with a `notify` list.
+      await performSendMessage(env, {
+        senderEmployeeId: ASSISTANT_ID,
+        chatId: chat.id,
+        kind: "text",
+        content: t("Chat created with participants: ${participants}", {
+          participants: employeeRoster(chat.participants),
+        }),
+        skipSenderCheck: true,
+      });
 
       // Link the new chat back to its spawning chat with a `chat`-kind card.
       // No `notify` on purpose: creating a chat must NOT start any participant's
@@ -1287,7 +1365,8 @@ function addParticipantTool(env: AgentEnvironment): AnyPiTool {
     description:
       "Add participants to an existing chat and initialize one persistent agent " +
       "session per new participant. A join notice is posted into " +
-      "the chat. New participants are NOT notified or started automatically — " +
+      "the chat, naming each new participant with their role. New participants are " +
+      "NOT notified or started automatically — " +
       "assign their work afterwards with `imb_send_message`, passing their ids in " +
       "`notify` to wake them.",
     promptSnippet: "add members to a chat",
@@ -1336,17 +1415,19 @@ function addParticipantTool(env: AgentEnvironment): AnyPiTool {
       // Best-effort: materialize session files; never roll back committed DB.
       await materializeSessions(sessionRecords);
 
-      // Join notice with the new members' `#ID name` display names. No `notify`
-      // on purpose: adding members must NOT start any participant's agent. They
-      // are woken only when an assignment reaches them through
-      // `imb_send_message` with a `notify` list.
-      const names = add.map(employeeDisplayName);
+      // Join notice with the new members' `#ID name (role)` roster entries — the
+      // roster is how the other participants learn who just joined and what they
+      // do (the added employee reads the whole history from cursor 0 anyway).
+      // Only the members added by THIS call are listed. No `notify` on purpose:
+      // adding members must NOT start any participant's agent. They are woken
+      // only when an assignment reaches them through `imb_send_message` with a
+      // `notify` list.
       await performSendMessage(env, {
         senderEmployeeId: ASSISTANT_ID,
         chatId: updated.id,
         kind: "text",
-        content: t("New participant(s) joined: ${names}", {
-          names: names.join(", "),
+        content: t("New participant(s) joined: ${participants}", {
+          participants: employeeRoster(add),
         }),
         skipSenderCheck: true,
       });

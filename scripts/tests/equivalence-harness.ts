@@ -54,6 +54,9 @@ import {
   splitAttachmentPrompt,
 } from "../../src/main/attachment-prompt";
 import { initDatabase } from "../../src/main/db";
+import { createTeamToolDefinitions } from "../../src/main/agent/builtin-tools";
+import { readSessionActivity } from "../../src/main/agent/session-queue";
+import { createEmployee } from "../../src/main/db/employees";
 import { normalizeRefName, wrapRefName } from "../../src/shared/ref-names";
 import { createChat, listTaskGroupsOf } from "../../src/main/db/chats";
 import { appendMessage, listMessages } from "../../src/main/db/messages";
@@ -158,6 +161,11 @@ async function main(): Promise<void> {
     // that lists them; the rule is asserted here against the real query, and the
     // channel is then added to the transport comparison below.
     runTaskGroupChecks();
+
+    // The two join notices (`imb_create_chat` / `imb_add_participant`): a task
+    // group is only ever created by an agent, so these writes are unreachable
+    // from the E2E suite and are asserted here against the real tools.
+    await runJoinNoticeChecks();
 
     const server = await startRpcServer({
       config: { listen: "127.0.0.1:0", token: TOKEN, dataRoot, tls: null },
@@ -601,6 +609,219 @@ function runTaskGroupChecks(): void {
 
   // The same read over the real transport, with a non-empty payload.
   READ_CASES.push({ channel: "chats:taskGroups", args: [root.id] });
+}
+
+/**
+ * Join notices: who joined a task group chat, with what role.
+ *
+ * A task group can only be created by an agent, so no E2E case can reach these
+ * writes; they are asserted here against the **real** tool definitions and the
+ * app's own DB/locale (the harness data root is a temp dir; `initLocale()`
+ * resolves to `en`, so the expectations are the English dictionary keys).
+ * `AgentEnvironment` is only `{ rootDir }`, and neither tool passes a `notify`
+ * list, so nothing is woken: the notices are pure message writes.
+ *
+ * The four roster degradations are covered with real employees: name+role, name
+ * only, role only, and neither. The "neither" case is also the code path of a
+ * participant whose employee row is gone (a chat's `participants` is not
+ * FK-enforced), which no tool can be made to produce.
+ */
+async function runJoinNoticeChecks(): Promise<void> {
+  const bossChat = createChat("Harness join root", [0]);
+  const architect = createEmployee({
+    name: "Roster Architect",
+    role: "Architect",
+  }).id;
+  // Whitespace-only name, empty role, and both blank: the degradation ladder.
+  const nameless = createEmployee({ name: "   ", role: "Reviewer" }).id;
+  const roleless = createEmployee({ name: "Roster Helper", role: "" }).id;
+  const blank = createEmployee({ name: "", role: "  " }).id;
+  // A role spanning two lines must still produce a single-line notice.
+  const late = createEmployee({ name: "Roster Late", role: "QA\nEngineer" }).id;
+
+  const tools = createTeamToolDefinitions({
+    env: { rootDir: tmpdir() },
+    employeeId: 0,
+    chatId: bossChat.id,
+  });
+  const pick = (name: string) => {
+    const found = tools.find((candidate) => candidate.name === name);
+    if (!found) throw new Error(`the assistant tool set is missing ${name}`);
+    return found;
+  };
+  const createChatTool = pick("imb_create_chat");
+  const addParticipantTool = pick("imb_add_participant");
+
+  const created = await callTeamTool(createChatTool, "harness-create-chat", {
+    title: "Harness join group",
+    participants: [architect, nameless, roleless, blank],
+  });
+  const chatId = (toolResultJson(created) as { chatId?: number }).chatId;
+  check(
+    "imb_create_chat still reports the new chat id",
+    typeof chatId === "number",
+    String(chatId),
+  );
+  const createdChat = requireChatId(chatId);
+
+  // The notice must be the chat's **first** message: every participant's first
+  // `imb_read_chat` starts at cursor 0, so that is what makes the roster visible
+  // to them at all.
+  const groupMessages = listMessages(createdChat);
+  check(
+    "the new chat starts with exactly one join notice",
+    groupMessages.length === 1,
+    `${groupMessages.length} messages`,
+  );
+  const notice = groupMessages[0];
+  check(
+    "the join notice is a text message from the assistant",
+    notice?.kind === "text" && notice?.senderEmployeeId === 0,
+    `${notice?.kind} / sender ${notice?.senderEmployeeId}`,
+  );
+  const roster = [
+    "#0 Assistant (Assistant)",
+    `#${architect} Roster Architect (Architect)`,
+    `#${nameless} (Reviewer)`,
+    `#${roleless} Roster Helper`,
+    `#${blank}`,
+  ].join(", ");
+  check(
+    "it lists every participant with its role, the assistant first",
+    notice?.content === `Chat created with participants: ${roster}`,
+    notice?.content ?? "",
+  );
+  check(
+    "creating the chat writes the notice without waking the participant",
+    (() => {
+      const activity = readSessionActivity(architect, createdChat);
+      return !activity.streaming && activity.queued === 0;
+    })(),
+    JSON.stringify(readSessionActivity(architect, createdChat).queued),
+  );
+
+  const bossMessages = listMessages(bossChat.id);
+  check(
+    "the spawning chat still gets its chat link card, and only that",
+    bossMessages.length === 1 &&
+      bossMessages[0]?.kind === "chat" &&
+      bossMessages[0]?.content === String(chatId),
+    `${bossMessages.length} messages`,
+  );
+
+  const beforeAdd = listMessages(createdChat).length;
+  await callTeamTool(addParticipantTool, "harness-add-participant", {
+    chatId: createdChat,
+    participants: [{ employeeID: late }, { employeeID: architect }],
+  });
+  const afterAdd = listMessages(createdChat);
+  check(
+    "imb_add_participant posts exactly one join notice",
+    afterAdd.length === beforeAdd + 1,
+    `${afterAdd.length - beforeAdd} new messages`,
+  );
+  const addNotice = afterAdd[afterAdd.length - 1];
+  check(
+    "it names only the genuinely-new member, with their role on one line",
+    addNotice?.content ===
+      `New participant(s) joined: #${late} Roster Late (QA Engineer)`,
+    addNotice?.content ?? "",
+  );
+  check(
+    "a member already in the chat is not re-announced",
+    !(addNotice?.content ?? "").includes(`#${architect}`),
+  );
+
+  const beforeNoop = listMessages(createdChat).length;
+  const noop = await callTeamTool(addParticipantTool, "harness-add-none", {
+    chatId: createdChat,
+    participants: [{ employeeID: architect }],
+  });
+  check(
+    "adding nobody new writes no notice",
+    listMessages(createdChat).length === beforeNoop,
+  );
+  check(
+    "…and still reports an empty `added` list",
+    JSON.stringify((toolResultJson(noop) as { added?: number[] }).added) ===
+      "[]",
+    JSON.stringify(toolResultJson(noop)),
+  );
+
+  // Absurd rosters are cut at a character budget instead of growing without
+  // bound: `participants` has no schema cap and a name/role is 200 chars each,
+  // so 12 bulky employees already blow the budget.
+  const bulky: number[] = [];
+  for (let index = 0; index < 12; index += 1) {
+    bulky.push(
+      createEmployee({
+        name: `Bulky Name ${index} ${"n".repeat(180)}`,
+        role: `Role ${index} ${"r".repeat(180)}`,
+      }).id,
+    );
+  }
+  const bulkyCreated = await callTeamTool(
+    createChatTool,
+    "harness-bulky-chat",
+    {
+      title: "Harness bulky group",
+      participants: bulky,
+    },
+  );
+  const bulkyNotice =
+    listMessages(
+      requireChatId(
+        (toolResultJson(bulkyCreated) as { chatId?: number }).chatId,
+      ),
+    )[0]?.content ?? "";
+  const dropped = /…and (\d+) more$/.exec(bulkyNotice);
+  const printed = bulkyNotice.split(", ").length - 1;
+  check(
+    "an oversized roster is cut and its marker counts who was dropped",
+    dropped !== null &&
+      printed + Number(dropped[1]) === bulky.length + 1 &&
+      bulkyNotice.length < 6_000,
+    `${printed} printed, ${dropped?.[1] ?? "no marker"} dropped, ${bulkyNotice.length} chars`,
+  );
+}
+
+/** The `chatId` returned by `imb_create_chat`, narrowed to a chat id. */
+function requireChatId(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`imb_create_chat returned no usable chat id: ${value}`);
+  }
+  return value;
+}
+
+/** What a team tool's `execute` returns: one JSON text part (see `toolResult`). */
+type ToolResult = { content: Array<{ type: string; text?: string }> };
+
+/**
+ * Run one built-in team tool the way a session does.
+ *
+ * `signal`/`onUpdate`/`ctx` are part of the SDK's signature but the team tools
+ * never touch them, so they are passed as `undefined` — the harness drives the
+ * tool body (DB writes included) without a Pi session.
+ */
+async function callTeamTool(
+  tool: ReturnType<typeof createTeamToolDefinitions>[number],
+  toolCallId: string,
+  params: unknown,
+): Promise<ToolResult> {
+  const execute = tool.execute as unknown as (
+    toolCallId: string,
+    params: unknown,
+    signal: undefined,
+    onUpdate: undefined,
+    ctx: undefined,
+  ) => Promise<ToolResult>;
+  return await execute(toolCallId, params, undefined, undefined, undefined);
+}
+
+/** The JSON payload of a tool result (see `toolResult` in `builtin-tools`). */
+function toolResultJson(result: ToolResult): unknown {
+  const text = result.content.find((part) => part.type === "text")?.text;
+  return JSON.parse(text ?? "{}") as unknown;
 }
 
 function readSuite(): "all" | "handlers" | "events" | "transfer" {
