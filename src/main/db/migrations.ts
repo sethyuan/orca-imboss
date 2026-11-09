@@ -212,6 +212,17 @@ const MIGRATIONS: Array<(db: Database) => void> = [
       ALTER TABLE chats ADD COLUMN direct_employee_id INTEGER;
     `);
   },
+  // 8 — comments on earlier messages: a comment annotates a passage of an
+  // existing message and rides along with the message that carries it (the
+  // `[Comments]` block of its agent prompt). The column holds the whole
+  // `{ comments: [...] }` payload — anchor + note per entry — exactly like
+  // `attachments`/`steps` hold theirs, because a comment is only ever read
+  // together with the message it was sent with.
+  (db) => {
+    db.exec(`
+      ALTER TABLE messages ADD COLUMN comments TEXT;
+    `);
+  },
 ];
 
 export function migrate(db: Database): void {

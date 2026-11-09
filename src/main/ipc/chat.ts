@@ -17,6 +17,7 @@ import {
   userMessageContent,
   validateAttachmentsPayload,
 } from "../attachment-prompt";
+import { validateCommentsPayload, withComments } from "../comment-prompt";
 import { assertInteger, assertString, parsePageQuery } from "./helpers";
 import type { Binder } from "../rpc/types";
 
@@ -231,13 +232,28 @@ export function registerChatHandlers(bind: Binder): void {
    * The answering session is the conversation's own: the assistant for a normal
    * chat, the conversation's employee for an employee direct chat
    * (`chats.direct_employee_id`). Everything else about the send is shared.
+   *
+   * `comments` are the boss's annotations of earlier messages. They are part of
+   * **this** message: stored on its row (`messages.comments`, which is what the
+   * thread renders) and written into the same prompt as a `[Comments]` block, so
+   * the agent sees them in the turn they were sent in. A comment-only send (no
+   * text, no files) is legitimate.
    */
   bind(
     "chat:send",
-    async (_ctx, chatId: unknown, content: unknown, attachments: unknown) => {
+    async (
+      _ctx,
+      chatId: unknown,
+      content: unknown,
+      attachments: unknown,
+      comments: unknown,
+    ) => {
       const safeChatId = assertInteger(chatId, "chat id");
       const safeContent = assertString(content, "content");
       const safeAttachments = validateAttachmentsPayload(attachments);
+      // Shape-only validation; `appendMessage` re-checks with the target-is-in-
+      // this-chat rule (the only place that knows the chat to check against).
+      const safeComments = validateCommentsPayload(comments);
 
       const chat = dbChats.getChat(safeChatId);
       if (chat === null) throw new Error("Conversation not found.");
@@ -257,8 +273,15 @@ export function registerChatHandlers(bind: Binder): void {
       const userMessage = dbMessages.appendMessage(
         safeChatId,
         null,
-        userMessageContent(safeContent, safeAttachments),
-        !!safeAttachments?.length ? { attachments: safeAttachments } : {},
+        userMessageContent(
+          safeContent,
+          safeAttachments,
+          (safeComments?.length ?? 0) > 0,
+        ),
+        {
+          ...(safeAttachments?.length ? { attachments: safeAttachments } : {}),
+          ...(safeComments?.length ? { comments: safeComments } : {}),
+        },
       );
 
       if (directEmployeeId === null) {
@@ -293,7 +316,9 @@ export function registerChatHandlers(bind: Binder): void {
       void deliver(
         directEmployeeId ?? ASSISTANT_ID,
         safeChatId,
-        agentPrompt(safeContent, safeAttachments),
+        // The comment block goes before the attachment block: `[Attachments]`
+        // must stay the prompt's trailing suffix (see `comment-prompt.ts`).
+        agentPrompt(withComments(safeContent, safeComments), safeAttachments),
         { mode: "steer" },
       );
 

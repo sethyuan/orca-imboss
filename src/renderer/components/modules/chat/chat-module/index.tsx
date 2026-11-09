@@ -7,6 +7,7 @@ import type {
   ChatSummary,
   Message,
   MessageAttachment,
+  MessageComment,
   PageQuery,
   PageResult,
 } from "@shared/types";
@@ -21,6 +22,8 @@ import {
 } from "react";
 import { cls } from "reactutils";
 import { appStore, IS_MAC, useApp } from "../../../../app-store";
+import { EMPTY_COMMENTS, nextCommentId } from "../../../../comment-draft";
+import type { CommentSurface } from "../../../../comment-draft";
 import { useDebouncedValue } from "../../../../hooks/use-debounced-value";
 import { useInfiniteList } from "../../../../hooks/use-infinite-list";
 import { useModuleFilter } from "../../../../hooks/use-module-filter";
@@ -57,6 +60,7 @@ import { pairAskAnswers } from "../ask-answer";
 import { ChatInputBar, type ComposerResetRequest } from "../chat-input-bar";
 import { CHAT_MUTE_ENABLED, chatMuteMenuItem, MuteGlyph } from "../chat-mute";
 import { MessageItem } from "../message-item";
+import { CommentLayer } from "../comment-layer";
 import {
   MY_JUMP_TOP_GAP,
   MyMessageJump,
@@ -169,6 +173,14 @@ function patchChatScroll(chatId: number, patch: Partial<ChatScroll>): void {
 }
 
 /**
+ * Content roots a comment may be anchored in, inside one chat row: the rendered
+ * Markdown of a prose message and the plain-text bubble body. Structured cards
+ * (`ask`, `progress`, `image`, …) and the bubble's chrome are deliberately
+ * absent — see `comment-layer`. Their rows carry no `data-commentable` either.
+ */
+const CHAT_COMMENT_CONTENT_SELECTOR = ".imb-markdown, .imb-bubble-text";
+
+/**
  * Is the window actually on screen? A hidden / minimized / occluded window means
  * "the boss is not looking": messages that arrive then must not count as read,
  * and the view must not creep forward behind her back.
@@ -178,7 +190,7 @@ function isDocumentVisible(): boolean {
 }
 
 export function ChatModule(): React.JSX.Element {
-  const { data, focusChatId, resyncEpoch } = useApp();
+  const { data, focusChatId, resyncEpoch, chatComments } = useApp();
   const [selectedId, setSelectedId] = useState<number | null>(
     // Restore the chat selected before this module was unmounted.
     () => appStore.activeRootChatId,
@@ -233,6 +245,33 @@ export function ChatModule(): React.JSX.Element {
   // unmounts) cannot persist a second time.
   const titleDoneRef = useRef(false);
   const threadRef = useRef<HTMLDivElement>(null);
+
+  // --- Comments of the open conversation -------------------------------------
+  // Two halves: the drafts waiting in the composer (per chat, on the store, so
+  // they survive a module switch) and the ones the loaded messages already
+  // carry (what the inline tints are drawn from). `CommentLayer` takes both. The
+  // sent ones point at `messages` rows — the same anchors a draft made here
+  // uses (`CommentSurface.kind === "chat"`).
+  const sentComments = useMemo(
+    () => messages.flatMap((message) => message.comments ?? []),
+    [messages],
+  );
+  const pendingComments =
+    selectedId === null
+      ? EMPTY_COMMENTS
+      : (chatComments[selectedId] ?? EMPTY_COMMENTS);
+  const commentSurface = useMemo<CommentSurface | null>(() => {
+    if (selectedId === null) return null;
+    const chatId = selectedId;
+    return {
+      kind: "chat",
+      pending: pendingComments,
+      sent: sentComments,
+      add: (anchor, note) =>
+        appStore.addChatComment(chatId, { id: nextCommentId(), anchor, note }),
+      remove: (id) => appStore.removeChatComment(chatId, id),
+    };
+  }, [selectedId, pendingComments, sentComments]);
   const selectedIdRef = useRef<number | null>(null);
   selectedIdRef.current = selectedId;
   // Whether the thread is scrolled to (near) the bottom. Auto-scroll only
@@ -1439,7 +1478,11 @@ export function ChatModule(): React.JSX.Element {
   );
 
   const handleSend = useCallback(
-    async (text: string, attachments: MessageAttachment[]): Promise<void> => {
+    async (
+      text: string,
+      attachments: MessageAttachment[],
+      comments: MessageComment[] | undefined,
+    ): Promise<void> => {
       if (selectedId === null) return;
       const chatId = selectedId;
       // Sending always jumps to the bottom, even if the user had scrolled up.
@@ -1449,7 +1492,9 @@ export function ChatModule(): React.JSX.Element {
       // about; the follow effect will show the tail (and its replies).
       dropUnseen();
       try {
-        await imb.chat.send(chatId, text, attachments);
+        // `comments` are the annotations of earlier messages: stored on this
+        // message (`messages.comments`) and delivered in the same prompt.
+        await imb.chat.send(chatId, text, attachments, comments);
         void loadMessages(chatId);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -1976,6 +2021,18 @@ export function ChatModule(): React.JSX.Element {
             )}
           </div>
           {threadFind.open && <ThreadFindBar find={threadFind} />}
+          {commentSurface !== null && (
+            // Commenting on a passage of any prose row (the agent's or the
+            // boss's own): the layer reads the selection inside a
+            // `[data-commentable]` row and keeps the pending comment on the store
+            // until the next send freezes it onto the message.
+            <CommentLayer
+              threadRef={threadRef}
+              comments={commentSurface}
+              contentSelector={CHAT_COMMENT_CONTENT_SELECTOR}
+              revision={messages}
+            />
+          )}
           {/* Messages that arrived while the boss was reading history: floating
             pill over the bottom-right corner of the transcript, above the
             composer. Centering the start of the batch keeps a slice of the
@@ -2067,13 +2124,44 @@ function DirectChatDetail({
   /** Failure of this conversation's own send (nothing typed is lost). */
   const [sendError, setSendError] = useState<string | null>(null);
 
+  // --- Comments --------------------------------------------------------------
+  // This detail renders the **session** transcript but sends through
+  // `chat:send`, so a comment here anchors a session entry (the row the boss
+  // selected) and is still stored on the sent message. Its prompt's
+  // `[Comments]` block is what the transcript reads back to draw the cards and
+  // the tints, so both surfaces agree without duplicating state.
+  const { chatComments } = useApp();
+  const sentComments = useMemo(
+    () =>
+      view.entries.flatMap((entry) =>
+        entry.kind === "user" ? (entry.comments ?? []) : [],
+      ),
+    [view.entries],
+  );
+  const pendingComments = chatComments[chat.id] ?? EMPTY_COMMENTS;
+  const commentSurface = useMemo<CommentSurface>(
+    () => ({
+      kind: "session",
+      pending: pendingComments,
+      sent: sentComments,
+      add: (anchor, note) =>
+        appStore.addChatComment(chat.id, { id: nextCommentId(), anchor, note }),
+      remove: (id) => appStore.removeChatComment(chat.id, id),
+    }),
+    [chat.id, pendingComments, sentComments],
+  );
+
   const send = useCallback(
-    async (text: string, attachments: MessageAttachment[]): Promise<void> => {
+    async (
+      text: string,
+      attachments: MessageAttachment[],
+      comments?: MessageComment[],
+    ): Promise<void> => {
       setSendError(null);
       try {
         // Main routes it to the conversation's employee (see `chat:send`) and
         // stores the message, so the list preview/unread/search keep working.
-        await imb.chat.send(chat.id, text, attachments);
+        await imb.chat.send(chat.id, text, attachments, comments);
         // The transcript only carries the message once the employee's turn
         // starts, which can be minutes away while it is busy: the placeholder
         // row is the boss's feedback until then.
@@ -2093,7 +2181,7 @@ function DirectChatDetail({
   return (
     <>
       {renderHeader(view, employeeId)}
-      <SessionThread view={view} />
+      <SessionThread view={view} comments={commentSurface} />
       {error !== null ? (
         // In flow, above the composer: the shared `.imb-chat-error` is a fixed
         // toast that would land on top of the composer here.
@@ -2105,7 +2193,9 @@ function DirectChatDetail({
         chatId={chat.id}
         composerReset={composerReset}
         onComposerResetApplied={onComposerResetApplied}
-        onSend={(text, attachments) => void send(text, attachments)}
+        onSend={(text, attachments, comments) =>
+          void send(text, attachments, comments)
+        }
         onTagsApplied={onTagsApplied}
         // Only this one employee is reachable in a direct chat.
         mentions={false}

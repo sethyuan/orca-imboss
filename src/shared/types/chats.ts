@@ -83,6 +83,7 @@ export interface ChatSummaryRow extends ChatRow {
   last_content: string | null;
   last_steps: string | null;
   last_attachments: string | null;
+  last_comments: string | null;
   last_image_status: string | null;
   last_at: number | null;
   last_message_at: number;

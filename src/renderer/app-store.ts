@@ -29,6 +29,7 @@ import {
   type ChatDraft,
   type PendingAttachment,
 } from "./chat-draft";
+import { type PendingComment } from "./comment-draft";
 import { updateLocale } from "./locale";
 import { playNotificationSound } from "./sound";
 import { updateThemeState } from "./theme";
@@ -262,6 +263,14 @@ export const appStore = proxy({
   // composer renders the same card, so a draft carries text *and* pending
   // attachments. Session-only, like `chatDrafts`.
   sessionDrafts: {} as Record<string, ChatDraft>,
+
+  // Comments waiting to be sent with the next message, per conversation (the
+  // chat module's composers, including an employee direct chat) and per session
+  // key (the agent-session view). A comment annotates a passage of an earlier
+  // message and is frozen into the sent message + its agent prompt, so it is a
+  // draft until then: session-only, like `chatDrafts`/`sessionDrafts`.
+  chatComments: {} as Record<number, PendingComment[]>,
+  sessionComments: {} as Record<string, PendingComment[]>,
 
   // Root chat currently selected in the chat module. Distinct from
   // `activeChatId` (an opened *group* chat). Written by `ChatModule` so the
@@ -749,12 +758,19 @@ export const appStore = proxy({
   },
   removeChat(id: number): void {
     appStore.clearChatDraft(id);
+    // Pending comments name messages of this chat: nothing can show them again.
+    appStore.clearChatComments(id);
     // Agent-session drafts are keyed by `<employee>/<chat>`; a deleted chat's
     // drafts can never be shown again, and their chips own on-disk pasted files
     // (revoked by `clearSessionDraft`).
     for (const key of Object.keys(appStore.sessionDrafts)) {
       if (parseSessionKey(key)?.chatId === id) {
         appStore.clearSessionDraft(key);
+      }
+    }
+    for (const key of Object.keys(appStore.sessionComments)) {
+      if (parseSessionKey(key)?.chatId === id) {
+        appStore.clearSessionComments(key);
       }
     }
     // The conversation's ask messages are cascade-deleted with it, so their
@@ -911,6 +927,80 @@ export const appStore = proxy({
     revokeDraftUrls(appStore.sessionDrafts[key]);
     delete appStore.sessionDrafts[key];
   },
+
+  // --- Pending comments (session-only, per conversation / per session) -------
+  /**
+   * Add one pending comment to a conversation's composer. Same allocation rule
+   * as the drafts: write through the store so valtio notifies subscribers.
+   */
+  addChatComment(chatId: number, comment: PendingComment): void {
+    const existing = appStore.chatComments[chatId];
+    if (existing) {
+      existing.push(comment);
+      return;
+    }
+    appStore.chatComments[chatId] = [comment];
+  },
+  /**
+   * Replace one pending comment's note, in place.
+   *
+   * Only the note changes: the id, the ordinal and — crucially — the anchor stay
+   * as recorded, so the inline highlight and the message it points at are
+   * untouched. An empty/blank note is refused (a comment with nothing in it is
+   * not a comment); the store keeps the previous text.
+   */
+  updateChatComment(chatId: number, id: number, note: string): void {
+    const item = appStore.chatComments[chatId]?.find(
+      (comment) => comment.id === id,
+    );
+    if (item === undefined) return;
+    const value = note.trim();
+    if (value.length === 0) return;
+    item.note = value;
+  },
+  removeChatComment(chatId: number, id: number): void {
+    const list = appStore.chatComments[chatId];
+    if (!list) return;
+    const index = list.findIndex((item) => item.id === id);
+    if (index < 0) return;
+    list.splice(index, 1);
+    // Drop the entry once empty, so the map holds only real drafts.
+    if (list.length === 0) delete appStore.chatComments[chatId];
+  },
+  clearChatComments(chatId: number): void {
+    delete appStore.chatComments[chatId];
+  },
+  /** Add one pending comment to an agent session composer (`sessionKey`). */
+  addSessionComment(key: string, comment: PendingComment): void {
+    const existing = appStore.sessionComments[key];
+    if (existing) {
+      existing.push(comment);
+      return;
+    }
+    appStore.sessionComments[key] = [comment];
+  },
+  /** Session-composer counterpart of `updateChatComment` (same rules). */
+  updateSessionComment(key: string, id: number, note: string): void {
+    const item = appStore.sessionComments[key]?.find(
+      (comment) => comment.id === id,
+    );
+    if (item === undefined) return;
+    const value = note.trim();
+    if (value.length === 0) return;
+    item.note = value;
+  },
+  removeSessionComment(key: string, id: number): void {
+    const list = appStore.sessionComments[key];
+    if (!list) return;
+    const index = list.findIndex((item) => item.id === id);
+    if (index < 0) return;
+    list.splice(index, 1);
+    if (list.length === 0) delete appStore.sessionComments[key];
+  },
+  clearSessionComments(key: string): void {
+    delete appStore.sessionComments[key];
+  },
+
   setActiveRootChat(chatId: number | null): void {
     appStore.activeRootChatId = chatId;
   },

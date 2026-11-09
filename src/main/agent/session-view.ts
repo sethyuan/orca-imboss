@@ -6,6 +6,10 @@ import type {
 } from "@shared/types";
 import { resolve } from "path";
 import { splitAttachmentPrompt } from "../attachment-prompt";
+import {
+  promptCommentToMessageComment,
+  splitCommentPrompt,
+} from "../comment-prompt";
 import { splitBossDirectHint } from "./boss-direct-prompt";
 import { getAgentSessionsDir } from "../data-dir";
 import { getSession } from "../db/sessions";
@@ -136,15 +140,28 @@ function projectEntries(entries: SessionEntry[]): AgentSessionViewEntry[] {
         // per-turn "answer me directly" hint (see `boss-direct-prompt.ts`). It
         // is chrome added before the attachment block, so it is peeled off
         // after it — and only when it rebuilds the text byte for byte.
-        const { text } = splitBossDirectHint(withoutAttachments);
+        const { text: withoutHint } = splitBossDirectHint(withoutAttachments);
+        // Comments the prompt carried sit right before that hint, so they come
+        // off last (`splitCommentPrompt` is the byte-exact inverse of
+        // `withComments`). This is the **only** way a session prompt's comments
+        // survive: the prompt text itself is their storage.
+        const { text, comments } = splitCommentPrompt(withoutHint);
         // A file-only send has no words at all: it is still a turn, and dropping
         // it here would make the boss's message disappear from the view.
-        if (text.length === 0 && attachments.length === 0) break;
+        if (
+          text.length === 0 &&
+          attachments.length === 0 &&
+          comments.length === 0
+        )
+          break;
         out.push({
           kind: "user",
           id: entry.id,
           text,
           ...(attachments.length > 0 ? { attachments } : {}),
+          ...(comments.length > 0
+            ? { comments: comments.map(promptCommentToMessageComment) }
+            : {}),
         });
         break;
       }

@@ -16,6 +16,7 @@ import { parseNumberArray, stringifyArray } from "./json";
 import {
   parseAttachmentTotal,
   parseAttachments,
+  parseComments,
   parseImageStatus,
   parseSteps,
 } from "./message-payload";
@@ -90,7 +91,7 @@ export function getRootChatId(chatId: number): number {
 const CHAT_SUMMARY_SELECT = `SELECT c.id, c.title, c.participants, c.unread, c.created_at, c.from_chat_id,
         c.direct_employee_id, c.pinned, c.muted, c.source, c.last_message_at,
         m.kind AS last_kind, m.content AS last_content, m.steps AS last_steps,
-        m.attachments AS last_attachments,
+        m.attachments AS last_attachments, m.comments AS last_comments,
         m.image_status AS last_image_status, m.created_at AS last_at
  FROM chats c
  LEFT JOIN messages m ON m.id = (
@@ -532,6 +533,7 @@ function describeLastMessage(
     steps: parseSteps(row.last_steps),
     attachments: parseAttachments(row.last_attachments),
     attachmentsTotal: parseAttachmentTotal(row.last_attachments),
+    comments: parseComments(row.last_comments),
     imageStatus: parseImageStatus(row.last_image_status),
     resolveChatTitle,
   });

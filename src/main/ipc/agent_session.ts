@@ -19,6 +19,7 @@ import { getChat, getRootChatId } from "../db/chats";
 import { getEmployee } from "../db/employees";
 import { validateMessageAttachments } from "../db/messages";
 import { agentPrompt, validateAttachmentsPayload } from "../attachment-prompt";
+import { validateCommentsPayload, withComments } from "../comment-prompt";
 import { withBossDirectHint } from "../agent/boss-direct-prompt";
 import { assertInteger, assertString } from "./helpers";
 
@@ -122,6 +123,12 @@ export function registerAgentSessionHandlers(rpc: Binder): void {
    * invalid. The interjection records what the boss typed as its display copy
    * (`displayText`) while Pi's queue and every withdrawal / interrupt path keep
    * the composed prompt.
+   *
+   * `comments` are annotations of **earlier entries of this same session** (see
+   * `comment-prompt.ts`). Nothing is written to `messages` here, so the prompt's
+   * `[Comments]` block is their only storage: the projection reads it back
+   * (`splitCommentPrompt`) to render the quoted cards and the highlights. A
+   * comment-only send (no text, no files) is legitimate.
    */
   rpc(
     "agentSession:send",
@@ -131,6 +138,7 @@ export function registerAgentSessionHandlers(rpc: Binder): void {
       chatId: unknown,
       text: unknown,
       attachments: unknown,
+      comments: unknown,
     ): Promise<AgentSessionSendResult> => {
       const safeEmployee = assertInteger(employeeId, "employee id");
       const safeChat = assertInteger(chatId, "chat id");
@@ -142,9 +150,14 @@ export function registerAgentSessionHandlers(rpc: Binder): void {
         validateMessageAttachments(validateAttachmentsPayload(attachments));
       const hasAttachments =
         safeAttachments !== undefined && safeAttachments.length > 0;
-      // A file-only send is legitimate (chat's composer allows it too); only an
-      // entirely empty request is rejected.
-      if (safeText.trim().length === 0 && !hasAttachments) {
+      // Session-entry anchors name transcript entries, which live in the Pi
+      // session file — there is nothing to check them against here, so only the
+      // shared shape rules apply.
+      const safeComments = validateCommentsPayload(comments);
+      const hasComments = safeComments !== undefined && safeComments.length > 0;
+      // A file-only (or comment-only) send is legitimate (chat's composer allows
+      // it too); only an entirely empty request is rejected.
+      if (safeText.trim().length === 0 && !hasAttachments && !hasComments) {
         throw new Error("Message must not be empty.");
       }
       if (safeText.length > MAX_MESSAGE_LENGTH) {
@@ -155,10 +168,15 @@ export function registerAgentSessionHandlers(rpc: Binder): void {
       // posted chat message (see `boss-direct-prompt.ts` for why this is a
       // per-turn suffix and for every ingress that deliberately does not get it).
       // The assistant keeps its own contract ("post into the boss's chat").
+      //
+      // Composition order is fixed: text → `[Comments]` → boss hint →
+      // `[Attachments]`. The attachment block must stay the trailing suffix the
+      // session projection splits off first (see `comment-prompt.ts`).
+      const textWithComments = withComments(safeText, safeComments);
       const prompt =
         safeEmployee === ASSISTANT_ID
-          ? agentPrompt(safeText, safeAttachments)
-          : agentPrompt(withBossDirectHint(safeText), safeAttachments);
+          ? agentPrompt(textWithComments, safeAttachments)
+          : agentPrompt(withBossDirectHint(textWithComments), safeAttachments);
       if (prompt.length > MAX_PROMPT_LENGTH) {
         throw new Error("Message is too long.");
       }

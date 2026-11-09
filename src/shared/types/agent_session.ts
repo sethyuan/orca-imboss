@@ -1,3 +1,5 @@
+import type { MessageComment } from "./messages";
+
 /**
  * Renderer-facing projection of a persisted `(employee, chat)` agent session.
  *
@@ -49,6 +51,17 @@ export type AgentSessionViewEntry =
        * byte-for-byte (a historical / hand-edited prompt keeps its raw text).
        */
       attachments?: AgentSessionAttachment[];
+      /**
+       * Comments the prompt carried, recovered from its `[Comments]` block
+       * (`splitCommentPrompt`). Absent when it had none, or when the block could
+       * not be rebuilt byte-for-byte.
+       *
+       * This block is the **only** storage of a comment written in this view: a
+       * session prompt is never written to `messages`, so — unlike a chat send —
+       * there is no row to hold it. Their anchors point at earlier entries of
+       * this same transcript (`CommentTarget.kind === "entry"`).
+       */
+      comments?: MessageComment[];
     }
   | {
       /**

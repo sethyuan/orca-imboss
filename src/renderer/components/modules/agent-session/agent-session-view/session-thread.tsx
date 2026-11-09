@@ -3,9 +3,12 @@ import type { AgentSessionViewEntry } from "@shared/types";
 import { useCallback, useEffect, useState } from "react";
 import { cls } from "reactutils";
 import { appStore } from "../../../../app-store";
+import type { CommentSurface } from "../../../../comment-draft";
 import { IconButton } from "../../../icon-button";
 import { IconChevronDown, IconChevronUp } from "../../../icons";
 import { Markdown } from "../../../markdown";
+import { CommentCards } from "../../chat/comment-card";
+import { CommentLayer } from "../../chat/comment-layer";
 import { ThreadFindBar } from "../../chat/thread-find";
 import {
   isMediaOnlyAttachments,
@@ -48,6 +51,16 @@ function pendingFeedbackLabel(feedback: PendingFeedback): string {
 const FEEDBACK_MS = 4000;
 
 /**
+ * Content roots a comment may be anchored in, inside one session row.
+ *
+ * An assistant `text` entry (`.imb-session-text`) and the boss's own prompt
+ * (`.imb-session-user-text`). Thinking blocks, tool arguments and compaction
+ * summaries are deliberately absent: they are transcript chrome, and an
+ * annotation of a folded thinking block could not be read back after a reload.
+ */
+const COMMENT_CONTENT_SELECTOR = ".imb-session-text, .imb-session-user-text";
+
+/**
  * The session transcript: history entries, the live tail, the sent-but-not-yet
  * visible rows, the in-thread find bar and the divider jump buttons.
  *
@@ -57,8 +70,15 @@ const FEEDBACK_MS = 4000;
  */
 export function SessionThread({
   view,
+  comments,
 }: {
   view: SessionView;
+  /**
+   * Comments of this transcript (pending drafts plus the sent ones) and the
+   * mutations the comment layer needs. `undefined` disables commenting, which is
+   * how a host without a composer for this session states that.
+   */
+  comments?: CommentSurface;
 }): React.JSX.Element {
   const {
     employeeId,
@@ -140,6 +160,20 @@ export function SessionThread({
           ))}
         </div>
         {threadFind.open && <ThreadFindBar find={threadFind} />}
+        {comments !== undefined && (
+          // Mounted inside the positioned wrapper (not the scrolling thread) so
+          // the portaled toolbar survives scrolling. Commenting only applies to
+          // **settled** rows: a live streaming block carries no
+          // `data-commentable`, because its text is still growing and its id is
+          // replaced by the persisted entry id when the run ends — an anchor
+          // written there could never be resolved again.
+          <CommentLayer
+            threadRef={threadRef}
+            comments={comments}
+            contentSelector={COMMENT_CONTENT_SELECTOR}
+            revision={entries}
+          />
+        )}
         {dividerCount > 0 && (
           <SessionJumpButtons availability={jump} onJump={jumpTo} />
         )}
@@ -180,7 +214,11 @@ function SessionEntry({
       );
     case "text":
       return (
-        <div className="imb-session-text" data-message-id={entry.id}>
+        <div
+          className="imb-session-text"
+          data-message-id={entry.id}
+          data-commentable="1"
+        >
           <Markdown content={entry.text} resolveMention={resolveMention} />
         </div>
       );
@@ -278,6 +316,7 @@ function SessionUserRow({
     <div
       className={cls("imb-session-user", mediaOnly && "imb-session-user-media")}
       data-message-id={entry.id}
+      data-commentable="1"
     >
       {attachments.length > 0 && (
         <SessionAttachments
@@ -286,6 +325,7 @@ function SessionUserRow({
           onOpenConversation={openConversation}
         />
       )}
+      <CommentCards comments={entry.comments ?? []} surface="session" />
       {entry.text.length > 0 && (
         <div className="imb-session-user-text">{entry.text}</div>
       )}

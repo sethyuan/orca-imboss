@@ -5,6 +5,7 @@ import { isAbsolute } from "path";
 import { wakeAgent } from "../agent/session-queue";
 import * as dbMessages from "../db/messages";
 import { agentPrompt, validateAttachmentsPayload } from "../attachment-prompt";
+import { validateCommentsPayload } from "../comment-prompt";
 import { getRevealer } from "../platform";
 import { assertInteger, assertObject, assertString } from "./helpers";
 import type { Binder } from "../rpc/types";
@@ -18,18 +19,32 @@ export function registerMessageHandlers(bind: Binder): void {
     dbMessages.searchMessages(assertString(query, "query")),
   );
 
+  /**
+   * Append a stored message. `comments` is optional (and is what the E2E
+   * fixtures use to seed an already-sent annotation); it goes through the same
+   * validation `chat:send` applies, including "the target message must belong to
+   * this chat".
+   */
   bind(
     "messages:append",
-    (_ctx, chatId: unknown, senderEmployeeId: unknown, content: unknown) => {
+    (
+      _ctx,
+      chatId: unknown,
+      senderEmployeeId: unknown,
+      content: unknown,
+      comments: unknown,
+    ) => {
       const safeChatId = assertInteger(chatId, "chat id");
       const safeSender =
         senderEmployeeId === null
           ? null
           : assertInteger(senderEmployeeId, "sender id");
+      const safeComments = validateCommentsPayload(comments);
       return dbMessages.appendMessage(
         safeChatId,
         safeSender,
         assertString(content, "content"),
+        safeComments === undefined ? {} : { comments: safeComments },
       );
     },
   );

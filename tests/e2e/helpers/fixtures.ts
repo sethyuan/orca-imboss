@@ -24,7 +24,7 @@ export const ASSISTANT_ID = 0;
  * neither offers `@` or `#`.
  */
 export const CHAT_COMPOSER_PLACEHOLDER =
-  "Type @ to mention an employee, # to reference a task chat";
+  "Shift+Enter for new line. Type @ to mention an employee, # to reference a task chat";
 
 /**
  * The parts of the preload bridge these fixtures use. Kept local and minimal on
@@ -57,7 +57,9 @@ interface TestBridge {
       chatId: number,
       senderEmployeeId: number | null,
       content: string,
+      comments?: unknown[],
     ): Promise<unknown>;
+    list(chatId: number): Promise<Array<{ id: number; content: string }>>;
   };
   theme: {
     get(): Promise<{ mode: string; color: string }>;
@@ -117,22 +119,36 @@ export async function appendMessage(
   chatId: number,
   senderEmployeeId: number | null,
   content: string,
+  comments?: unknown[],
 ): Promise<void> {
   await window.evaluate(
     async (input: {
       chatId: number;
       senderEmployeeId: number | null;
       content: string;
+      comments?: unknown[];
     }) => {
       const imb = (window as unknown as PageWindow).imb;
       await imb.messages.append(
         input.chatId,
         input.senderEmployeeId,
         input.content,
+        input.comments,
       );
     },
-    { chatId, senderEmployeeId, content },
+    { chatId, senderEmployeeId, content, comments },
   );
+}
+
+/** The stored messages of a chat, in conversation order (id + content). */
+export async function readMessages(
+  window: Page,
+  chatId: number,
+): Promise<Array<{ id: number; content: string }>> {
+  return await window.evaluate(async (id: number) => {
+    const imb = (window as unknown as PageWindow).imb;
+    return await imb.messages.list(id);
+  }, chatId);
 }
 
 /** The current (persisted) theme state as the main process reports it. */

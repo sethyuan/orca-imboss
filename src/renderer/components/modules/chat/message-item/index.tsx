@@ -169,6 +169,7 @@ export const MessageItem = memo(function MessageItem({
           messageId={message.id}
           content={message.content}
           attachments={message.attachments}
+          comments={message.comments}
           attachmentsTotal={message.attachmentsTotal}
           markdown={message.kind === "text" || message.kind === "report"}
           resolveMention={mentions.resolveMention}

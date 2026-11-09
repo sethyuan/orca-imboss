@@ -97,6 +97,13 @@ export function formatChatPreview(
       break;
   }
 
+  // A send that carried only comments has no body at all: the count is its
+  // description. Localized here (never stored), like every other label.
+  const comments = preview.commentCount ?? 0;
+  if (body.length === 0 && comments > 0) {
+    parts.push(countLabel("Comment", comments));
+  }
+
   const attachments = preview.attachmentCount ?? 0;
   // An image message's attachments *are* the picture, so counting them here
   // would only add noise to "Generating image: …".
@@ -123,22 +130,32 @@ function fallback(text: string): string {
 }
 
 /**
- * `"Question (3 questions)"` / `"Answer (1 answer)"`.
+ * `"Question (3 questions)"` / `"Answer (1 answer)"` / `"Comment (2 comments)"`.
  *
  * The dictionary has no plural engine (`t()` only interpolates), so the
  * singular is a key of its own instead of an `s` sexed onto the count in code —
  * every language then spells its own singular/plural, and Chinese (which has
  * neither) simply translates both keys the same way.
  */
-function countLabel(noun: "Question" | "Answer", count: number): string {
-  if (noun === "Question") {
-    return count === 1
-      ? t("Question (1 question)")
-      : t("Question (${count} questions)", { count: String(count) });
+function countLabel(
+  noun: "Question" | "Answer" | "Comment",
+  count: number,
+): string {
+  const one = count === 1;
+  switch (noun) {
+    case "Question":
+      return one
+        ? t("Question (1 question)")
+        : t("Question (${count} questions)", { count: String(count) });
+    case "Answer":
+      return one
+        ? t("Answer (1 answer)")
+        : t("Answer (${count} answers)", { count: String(count) });
+    case "Comment":
+      return one
+        ? t("Comment (1 comment)")
+        : t("Comment (${count} comments)", { count: String(count) });
   }
-  return count === 1
-    ? t("Answer (1 answer)")
-    : t("Answer (${count} answers)", { count: String(count) });
 }
 
 /**

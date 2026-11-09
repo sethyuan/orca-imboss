@@ -1,6 +1,8 @@
 import { t } from "@shared/l10n";
-import { useCallback, useRef, useState } from "react";
-import { appStore, IS_MAC, useApp } from "../../../../app-store";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { appStore, IS_MAC, sessionKey, useApp } from "../../../../app-store";
+import { EMPTY_COMMENTS, nextCommentId } from "../../../../comment-draft";
+import type { CommentSurface } from "../../../../comment-draft";
 import { ModuleView } from "../../../app-shell";
 import { EmployeeAvatar } from "../../../employee-avatar";
 import { HaltButton } from "../../../halt-button";
@@ -32,7 +34,7 @@ export function AgentSessionModule({
   employeeId,
   chatId,
 }: AgentSessionModuleProps): React.JSX.Element {
-  const { data, openedItems } = useApp();
+  const { data, openedItems, sessionComments } = useApp();
   /**
    * Failure of the header's "open this session's conversation" link. Kept apart
    * from the session's own `error`/`runError` because it says nothing about the
@@ -53,6 +55,36 @@ export function AgentSessionModule({
     jumpToLatest,
     threadFind,
   } = view;
+
+  // --- Comments --------------------------------------------------------------
+  // A session prompt is never written to `messages`, so the `[Comments]` block of
+  // the prompt **is** the storage of a comment written here: the projection reads
+  // it back (`entry.comments`) and the layer draws both the cards and the tints
+  // from it. Drafts live on the store per session key, like this composer's text.
+  const draftKey = sessionKey(employeeId, chatId);
+  const pendingComments = sessionComments[draftKey] ?? EMPTY_COMMENTS;
+  const sentComments = useMemo(
+    () =>
+      view.entries.flatMap((entry) =>
+        entry.kind === "user" ? (entry.comments ?? []) : [],
+      ),
+    [view.entries],
+  );
+  const commentSurface = useMemo<CommentSurface>(
+    () => ({
+      kind: "session",
+      pending: pendingComments,
+      sent: sentComments,
+      add: (anchor, note) =>
+        appStore.addSessionComment(draftKey, {
+          id: nextCommentId(),
+          anchor,
+          note,
+        }),
+      remove: (id) => appStore.removeSessionComment(draftKey, id),
+    }),
+    [draftKey, pendingComments, sentComments],
+  );
 
   const sessionItem = openedItems.find(
     (item) =>
@@ -195,7 +227,7 @@ export function AgentSessionModule({
           </Tooltip>
         </div>
       </div>
-      <SessionThread view={view} />
+      <SessionThread view={view} comments={commentSurface} />
       {view.error !== null || view.runError !== null || linkError !== null ? (
         // In flow, above the composer: the shared `.imb-chat-error` is a fixed
         // toast that would land on top of the composer here.

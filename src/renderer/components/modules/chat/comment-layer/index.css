@@ -1,0 +1,155 @@
+/*
+ * Comment layer: the selection toolbar, the compose panel and the two inline
+ * highlight registries.
+ *
+ * Layering follows the app's ladder (`chat/thread.css`): the toolbar and the
+ * panel are portaled to `document.body` and use the popover slot (60), above
+ * menus (50) and far above the transcript. The panel itself is the standard
+ * opaque popover surface (`.imb-menu-surface` in `base.css`) — **no** glass and
+ * no `backdrop-filter`: an overlay on top of scrolling text is exactly what the
+ * design system forbids.
+ */
+
+/* --- Inline highlights -------------------------------------------------------
+   Applied through the CSS Custom Highlight API from `index.tsx`, so no DOM node
+   is inserted into the React-managed Markdown tree. Only a small property set is
+   honoured by `::highlight`.
+
+   Sent comments and pending ones use the same accent at different intensities:
+   a pending one is still the boss's draft (it must read as "not sent yet"), and
+   it draws over a sent one (priority in `index.tsx`). */
+::highlight(imb-comment) {
+  background-color: color-mix(in oklab, var(--imb-accent) 20%, transparent);
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(
+    in oklab,
+    var(--imb-accent) 55%,
+    transparent
+  );
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+::highlight(imb-comment-pending) {
+  background-color: color-mix(in oklab, var(--imb-accent) 32%, transparent);
+  color: inherit;
+  text-decoration: underline dashed;
+  text-decoration-color: var(--imb-accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+/* --- Selection toolbar ------------------------------------------------------ */
+.imb-comment-toolbar {
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  pointer-events: auto;
+  /* The toolbar must never take the selection with it: the press is prevented in
+     JS, and the box itself is not focusable. */
+  user-select: none;
+}
+
+.imb-comment-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--imb-space-1);
+  width: 100%;
+  height: var(--imb-control-h);
+  padding: 0 var(--imb-space-3);
+  border: 1px solid var(--imb-sep-strong);
+  border-radius: var(--imb-radius-control);
+  background: var(--imb-material-popover);
+  box-shadow: var(--imb-highlight-top), var(--imb-shadow-2);
+  color: var(--imb-fg);
+  font: inherit;
+  font-size: var(--imb-fs-ui);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--imb-dur-1) var(--imb-ease-standard);
+}
+
+/* Hover must stay **opaque**: the toolbar sits on top of scrolling text, so a
+   translucent row-hover tint (the list-row recipe) would let the transcript show
+   through and make the label hard to read. The popover material stays; only the
+   accent and the outline change, exactly like the app's other floating controls
+   (design system: overlays are opaque, `--imb-row-hover` is for rows). */
+.imb-comment-toolbar-btn:hover {
+  background-color: var(--imb-bg-sunken);
+  box-shadow: var(--imb-highlight-top), var(--imb-shadow-3);
+}
+
+.imb-comment-toolbar-btn:active {
+  transform: scale(var(--imb-press-scale));
+}
+
+/* --- Compose panel ---------------------------------------------------------- */
+.imb-comment-panel {
+  /* Popover band of the app's ladder (`chat/thread.css`): header 5 < modal 40 <
+     menu 50 < tooltip/popover/notice **60** < image lightbox 300. It is portaled
+     to `document.body`, so it covers the thread, the header and any menu. */
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-2);
+  padding: var(--imb-space-3);
+  /* `.imb-menu-surface` supplies material, hairline, radius and shadow.
+     Never taller than the viewport: the placement pins it inside the window and
+     this keeps the content scrollable when it cannot fit (a very long note). */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.imb-comment-panel-quote {
+  margin: 0;
+  padding-left: var(--imb-space-2);
+  border-left: 2px solid var(--imb-accent-soft);
+  font-size: var(--imb-fs-caption);
+  line-height: var(--imb-leading-ui);
+  color: var(--imb-muted);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  user-select: none;
+}
+
+.imb-comment-panel-input {
+  min-height: 72px;
+  padding: var(--imb-space-2);
+  border: 1px solid var(--imb-control-border);
+  border-radius: var(--imb-radius-control);
+  background: var(--imb-bg-content);
+  color: var(--imb-fg);
+  font: inherit;
+  font-size: var(--imb-fs-ui);
+  line-height: var(--imb-leading-text);
+  resize: vertical;
+}
+
+.imb-comment-panel-input:focus-visible {
+  outline: none;
+  border-color: var(--imb-accent);
+  box-shadow: var(--imb-focus-ring);
+}
+
+.imb-comment-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-2);
+}
+
+.imb-comment-panel-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--imb-fs-caption);
+  color: var(--imb-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+}

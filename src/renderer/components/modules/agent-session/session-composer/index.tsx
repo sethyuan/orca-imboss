@@ -7,6 +7,8 @@ import type {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { appStore, sessionKey, useAppSync } from "../../../../app-store";
 import { EMPTY_DRAFT, toPlainAttachment } from "../../../../chat-draft";
+import { EMPTY_COMMENTS, toPlainComments } from "../../../../comment-draft";
+import { PendingComments } from "../../chat/pending-comments";
 import {
   ComposerCard,
   type ComposerDraftBinding,
@@ -74,6 +76,10 @@ export function SessionComposer({
   const draftKey = sessionKey(employeeId, chatId);
   const draft = snap.sessionDrafts[draftKey] ?? EMPTY_DRAFT;
   const attachments = draft.attachments;
+  // Comments queued for the next turn: their `[Comments]` block is the only
+  // storage a session prompt has (nothing is written to `messages`), so they
+  // must travel with this exact send.
+  const pendingComments = snap.sessionComments[draftKey] ?? EMPTY_COMMENTS;
   const cardRef = useRef<ComposerHandle>(null);
   /** Guards a double submit before the first render lands (`sending` is async). */
   const sendingRef = useRef(false);
@@ -86,7 +92,13 @@ export function SessionComposer({
       // `live` is what the card read from the DOM (uncontrolled textarea): the
       // store may be one input event behind on the very first paste.
       const value = live;
-      if (value.trim().length === 0 && attachments.length === 0) return;
+      if (
+        value.trim().length === 0 &&
+        attachments.length === 0 &&
+        pendingComments.length === 0
+      ) {
+        return;
+      }
 
       sendingRef.current = true;
       setSending(true);
@@ -99,10 +111,12 @@ export function SessionComposer({
           attachments.length > 0
             ? attachments.map((item) => toPlainAttachment(item.attachment))
             : undefined,
+          toPlainComments(pendingComments),
         );
         // Accepted: clear the DOM and the draft together, otherwise a remount
         // would resurrect text that is already on its way to the agent.
         cardRef.current?.clear();
+        appStore.clearSessionComments(draftKey);
         // The placeholder row shows the same chips the transcript will, so a
         // file-only send is not an empty bubble (and the row still matches its
         // projection, which strips the prompt's attachment block to `""`).
@@ -121,7 +135,7 @@ export function SessionComposer({
         setSending(false);
       }
     },
-    [attachments, chatId, employeeId, onSent],
+    [attachments, chatId, draftKey, employeeId, onSent, pendingComments],
   );
 
   const actionLabel = streaming ? t("Interject") : t("Send");
@@ -167,6 +181,18 @@ export function SessionComposer({
       error={error}
       resetKey={draftKey}
       onSend={(live) => void send(live)}
+      pendingComments={{
+        count: pendingComments.length,
+        node: (
+          <PendingComments
+            comments={pendingComments}
+            onEdit={(id, note) =>
+              appStore.updateSessionComment(draftKey, id, note)
+            }
+            onRemove={(id) => appStore.removeSessionComment(draftKey, id)}
+          />
+        ),
+      }}
     />
   );
 }

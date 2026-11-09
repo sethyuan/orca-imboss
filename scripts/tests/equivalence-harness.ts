@@ -40,6 +40,15 @@ import {
   withBossDirectHint,
 } from "../../src/main/agent/boss-direct-prompt";
 import { materializeBuiltinSkills } from "../../src/main/agent/builtin-skills";
+import { buildEmployeeSystemPrompt } from "../../src/main/agent/employee-prompt";
+import {
+  composeCommentBlock,
+  promptCommentToMessageComment,
+  splitCommentPrompt,
+  validateCommentsPayload,
+  withComments,
+} from "../../src/main/comment-prompt";
+import { ASSISTANT_COMMENT_RESPONSE_PROMPT } from "../../src/shared/constants/prompts";
 import {
   agentPrompt,
   splitAttachmentPrompt,
@@ -47,7 +56,7 @@ import {
 import { initDatabase } from "../../src/main/db";
 import { normalizeRefName, wrapRefName } from "../../src/shared/ref-names";
 import { createChat, listTaskGroupsOf } from "../../src/main/db/chats";
-import { appendMessage } from "../../src/main/db/messages";
+import { appendMessage, listMessages } from "../../src/main/db/messages";
 import { sweepTransferTempRoot } from "../../src/main/file-browser";
 import { registerRemoteHandlers } from "../../src/main/ipc";
 import { initLocale } from "../../src/main/locale";
@@ -79,6 +88,16 @@ function check(label: string, ok: boolean, detail?: string): void {
   console.log(
     `${ok ? "PASS" : "FAIL"}  ${label}${detail !== undefined ? ` — ${detail}` : ""}`,
   );
+}
+
+/** True when `fn` throws — asserts a rejection at a trust boundary. */
+function throws(fn: () => unknown): boolean {
+  try {
+    fn();
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 /** A subscriber that records nothing (the reference path never pushes). */
@@ -123,6 +142,14 @@ async function main(): Promise<void> {
     // into the message). Pure and shared, so it is asserted here instead of
     // through the UI.
     runRefNameChecks();
+    // Comments: the `[Comments]` block must compose/split byte-exactly (the
+    // session view relies on the split to show the cards again) and keep its
+    // place **before** the `[Attachments]` block.
+    runCommentChecks();
+    // The generated system prompt must not carry anything volatile (Pi records a
+    // new `preamble` revision — the whole system prompt — on every change), and
+    // the two role variants must stay distinct.
+    runSystemPromptDeterminismChecks();
 
     await seed(handlers);
 
@@ -267,6 +294,267 @@ function runRefNameChecks(): void {
   check(
     "normalizeRefName exposes the same text without the backticks",
     normalizeRefName(" Ada ", 7) === "Ada" && normalizeRefName("", 7) === "7",
+  );
+}
+
+/**
+ * Comments ↔ prompt plumbing (`comment-prompt.ts`) and their storage round-trip.
+ *
+ * The session projection trusts `splitCommentPrompt()` to hand back exactly what
+ * was sent, so these are the properties that must hold: a byte-exact round trip, a
+ * payload-only block, a block that stays ahead of `[Attachments]`, a hand-edited
+ * look-alike left alone, and the shape rules the IPC boundary enforces.
+ */
+function runCommentChecks(): void {
+  const chat = createChat("Harness comments", [0]);
+  const target = appendMessage(chat.id, 0, "the answer the boss annotated");
+  const comment = {
+    anchor: {
+      target: { kind: "message" as const, messageId: target.id },
+      quote: "the answer",
+      start: 4,
+      end: 14,
+      occurrence: 0,
+      textLength: 29,
+    },
+    note: "narrow this down",
+  };
+  const block = composeCommentBlock([comment]);
+  check(
+    "the block is payload only: a header and then one record per comment",
+    block.split("\n").length === 4 &&
+      block.split("\n")[1].startsWith("#1 on message #"),
+    block.replace(/\n/g, "⏎").slice(0, 60),
+  );
+  check(
+    "a comment block names the ordinal and the annotated message",
+    block.includes("#1 on message #" + target.id) &&
+      block.includes("quote: the answer") &&
+      block.includes("note: narrow this down"),
+    block.split("\n")[0],
+  );
+  const typed = "please tighten it";
+  const composed = withComments(typed, [comment]);
+  check(
+    "the block is appended after the boss's own text",
+    composed.startsWith(`${typed}\n\n[Comments]\n`),
+    composed.slice(0, 24),
+  );
+  check(
+    "a comment-only prompt is the block alone",
+    withComments("", [comment]) === block,
+  );
+  const split = splitCommentPrompt(composed);
+  check(
+    "the block splits back to exactly what was typed",
+    split.text === typed && split.comments.length === 1,
+    split.text,
+  );
+  check(
+    "the recovered comment keeps its quote, note and target",
+    split.comments[0]?.quote === "the answer" &&
+      split.comments[0]?.note === "narrow this down" &&
+      split.comments[0]?.messageId === target.id,
+  );
+  const recovered = promptCommentToMessageComment(split.comments[0]!);
+  check(
+    "a recovered comment is a quote-only anchor (offsets unknown, both -1)",
+    recovered.anchor.start === -1 &&
+      recovered.anchor.end === -1 &&
+      recovered.anchor.textLength === -1 &&
+      recovered.anchor.occurrence === 0,
+  );
+  const entryComment = {
+    anchor: {
+      target: { kind: "entry" as const, entryId: "abc123" },
+      quote: "streamed text",
+      start: 0,
+      end: 13,
+      occurrence: 0,
+      textLength: 13,
+    },
+    note: "and here?",
+  };
+  const entrySplit = splitCommentPrompt(withComments("", [entryComment]));
+  check(
+    "a session-entry comment round-trips through its own header shape",
+    entrySplit.comments.length === 1 &&
+      entrySplit.comments[0]?.entryId === "abc123" &&
+      composeCommentBlock([
+        promptCommentToMessageComment(entrySplit.comments[0]!),
+      ]) === withComments("", [entryComment]),
+  );
+  check(
+    "a note is collapsed to one line, so it cannot forge a second comment",
+    splitCommentPrompt(
+      withComments("", [{ ...comment, note: "line one\nline two" }]),
+    ).comments.length === 1,
+  );
+  // The `[Attachments]` block must stay the trailing suffix the session
+  // projection splits off first, so the comment block has to come before it.
+  const withFiles = agentPrompt(withComments("see below", [comment]), [
+    {
+      name: "notes.md",
+      size: 12,
+      type: "text/markdown",
+      path: "/tmp/notes.md",
+    },
+  ]);
+  check(
+    "the comment block stays ahead of the attachment block",
+    withFiles.indexOf("[Comments]") < withFiles.indexOf("[Attachments]"),
+    withFiles.replace(/\n/g, "⏎").slice(-40),
+  );
+  check(
+    "a hand-edited look-alike is left untouched",
+    splitCommentPrompt(
+      "[Comments]\nDo what I mean.\n#1 on message #1\nquote: x\nnote: y",
+    ).comments.length === 0,
+  );
+  check(
+    "a line count that is not 1 + 3n is not recognized",
+    splitCommentPrompt("[Comments]\n#1 on message #1\nquote: x").comments
+      .length === 0,
+  );
+  check(
+    "an empty list produces no block at all",
+    withComments("hi", []) === "hi" && withComments("hi", undefined) === "hi",
+  );
+  // Shape rules at the IPC boundary.
+  check(
+    "a quote-only anchor is accepted",
+    validateCommentsPayload([recovered])?.length === 1,
+  );
+  check(
+    "an empty note is rejected",
+    throws(() => validateCommentsPayload([{ ...comment, note: "   " }])),
+  );
+  check(
+    "an inverted span is rejected",
+    throws(() =>
+      validateCommentsPayload([
+        { ...comment, anchor: { ...comment.anchor, start: 10, end: 4 } },
+      ]),
+    ),
+  );
+  check(
+    "an unknown target kind is rejected",
+    throws(() =>
+      validateCommentsPayload([
+        {
+          ...comment,
+          anchor: { ...comment.anchor, target: { kind: "row", id: 1 } },
+        },
+      ]),
+    ),
+  );
+  // Storage: the column keeps the anchors (the session view only ever gets the
+  // quote back, so the thread's own highlights depend on this).
+  const carrier = appendMessage(chat.id, null, "tighten it", {
+    comments: [comment],
+  });
+  const stored = listMessages(chat.id).find((m) => m.id === carrier.id);
+  check(
+    "comments are stored on the message and read back intact",
+    stored?.comments?.length === 1 &&
+      stored.comments[0]?.anchor.start === 4 &&
+      stored.comments[0]?.note === "narrow this down",
+  );
+  const foreign = createChat("Harness comments foreign", [0]);
+  check(
+    "a comment pointing at another conversation's message is rejected",
+    throws(() =>
+      appendMessage(foreign.id, null, "nope", { comments: [comment] }),
+    ),
+  );
+  check(
+    "a message without comments stores none",
+    appendMessage(chat.id, null, "plain").comments === null,
+  );
+}
+
+/**
+ * The generated system prompt must be a **pure function of the session's
+ * configuration**, and the two role variants must stay distinct.
+ *
+ * Pi persists the prompt as structured *sections* and appends a `system` message
+ * whenever a section's text differs from the one the transcript already carries
+ * (`diffSystemPromptSections`). A volatile part — a date, a timestamp, a turn
+ * counter — would therefore make **every turn** write a whole new `preamble`
+ * (the entire system prompt) into the boss's session file, and would break the
+ * provider's prompt cache (see `.pi/facts/comments-feature.md`).
+ *
+ * The role checks assert **intent**, not wording: the assistant's comment rule is
+ * meant to stay a one-paragraph coordination rule, so pinning its exact phrases
+ * would make every simplification look like a regression.
+ */
+function runSystemPromptDeterminismChecks(): void {
+  const base = {
+    personaParts: ["## Persona\n\nBe brief."],
+    name: "Ada",
+    role: "Researcher",
+    employeeId: 7,
+    chatId: 42,
+    fromChatId: null,
+    directChat: false,
+    toolEntries: [{ name: "read", snippet: "Read file contents" }],
+    toolsGuidelines: ["Use bash for file operations"],
+  };
+  const employeeFirst = buildEmployeeSystemPrompt({
+    ...base,
+    isAssistant: false,
+  });
+  const employeeSecond = buildEmployeeSystemPrompt({
+    ...base,
+    isAssistant: false,
+  });
+  check(
+    "the employee system prompt is identical across builds (no volatile content)",
+    employeeFirst === employeeSecond,
+    `${employeeFirst.length} chars`,
+  );
+  const assistantFirst = buildEmployeeSystemPrompt({
+    ...base,
+    isAssistant: true,
+  });
+  const assistantSecond = buildEmployeeSystemPrompt({
+    ...base,
+    isAssistant: true,
+  });
+  check(
+    "the assistant system prompt is identical across builds",
+    assistantFirst === assistantSecond,
+    `${assistantFirst.length} chars`,
+  );
+  // Both roles get a comment rule; the two variants differ in what they ask for.
+  check(
+    "an employee is told to answer the comments itself",
+    employeeFirst.includes("## Answering Comments") &&
+      employeeFirst.includes("Answer **every** comment") &&
+      !employeeFirst.includes("decide which employees"),
+  );
+  check(
+    "the assistant hands comments to employees instead of answering them",
+    assistantFirst.includes("## Answering Comments") &&
+      assistantFirst.includes("decide which employees") &&
+      !assistantFirst.includes("Answer **every** comment"),
+  );
+  check(
+    "the assistant replies to all comments at once, after the answers arrive",
+    assistantFirst.includes("Once their answers are in") &&
+      assistantFirst.includes("**all** the comments in one message"),
+  );
+  check(
+    "the assistant never answers on an employee's behalf or drops a comment",
+    assistantFirst.includes("never answer for an employee") &&
+      assistantFirst.includes("Never drop a comment"),
+  );
+  // The boss asked for this rule to stay simple: a rule list that grows back into
+  // a decision tree is a regression, so its length is capped.
+  check(
+    "the assistant's comment rule stays short",
+    ASSISTANT_COMMENT_RESPONSE_PROMPT.length < 1_500,
+    `${ASSISTANT_COMMENT_RESPONSE_PROMPT.length} chars`,
   );
 }
 

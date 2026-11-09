@@ -186,6 +186,44 @@ When you are @-mentioned (the message body contains \`@ID\`, where \`ID\` is you
 - \`text\`: Follow the instructions in the message.
 - \`report\`: This is a result report from a teammate. Read it and continue; the assistant additionally records it in the boss-facing task progress (see "Tracking Progress and Reporting").`;
 
+/**
+ * Shared framing of the `[Comments]` payload, used by both role variants below.
+ *
+ * The block itself carries **no prose of its own** (`main/comment-prompt.ts`), so
+ * this is the only place that explains what a record is — and it is static, in
+ * context for every turn, instead of being repeated in the payload.
+ */
+const COMMENTS_BLOCK_SHAPE = `The boss can comment on passages of earlier messages. Comments ride along with the message that sends them, inside a \`[Comments]\` block. Each record has an id (\`#1\`, \`#2\`, …), the message or session entry it points at, a \`quote\` of the annotated passage and a \`note\` with what the boss wrote.`;
+
+/**
+ * How an **employee** answers the comments the boss attached to a message.
+ *
+ * An employee is the one who does the work, so it answers each comment itself.
+ *
+ * **Static on purpose.** The system prompt is assembled once per agent session
+ * (`buildEmployeeSystemPrompt`) and its text is part of the Pi prompt's
+ * `preamble` section, so a per-turn variant would rebuild the warm session and
+ * make Pi record a new prompt revision on every turn (see
+ * `comments-feature.md`, "system prompt re-injection"). "This turn carries N
+ * comments" therefore lives in the payload while the rule itself lives here.
+ */
+export const COMMENT_RESPONSE_PROMPT = `## Answering Comments
+
+${COMMENTS_BLOCK_SHAPE}
+
+- Answer **every** comment that carries the message you are answering, in order, and start each answer with its id (e.g. \`#1:\`). Never merge two comments into one answer and never silently drop one.
+- A comment is about that earlier passage, not about your whole previous reply: change what the note asks for, and say plainly if you disagree or need a decision.
+- The quote is the boss's selection and may sit in the middle of a longer message. Call \`imb_read_chat\` (or re-read your own transcript) when you need the surrounding context, and do not restate the whole passage.
+- When a message carries only comments and no text, the comments **are** the instruction.`;
+
+export const ASSISTANT_COMMENT_RESPONSE_PROMPT = `## Answering Comments
+
+${COMMENTS_BLOCK_SHAPE}
+
+Comments are for you to get handled, not to answer yourself. For each batch: read the comments, decide which employees should deal with them based on what they are about, and assign each one with \`imb_send_message\` — the body @-mentions the employee (\`@<id>\`), the call passes that employee's id in \`notify\`, and the brief carries the \`#<id>\`, the quoted passage and the boss's note so the employee can act without asking. Once their answers are in, answer **all** the comments in one message to the boss (\`senderEmployeeId: 0\`, \`notify: null\`), in the original order, one item per comment starting with its \`#<id>:\` and quoting the employee's answer faithfully.
+- Content you produced yourself is yours to answer — do not hand your own words to an employee.
+- Never drop a comment, never merge two into one answer, and never answer for an employee or invent an answer that has not arrived.`;
+
 /** Shared requirement for every employee: reply in the user's (the boss's) language. */
 export const RESPONSE_LANGUAGE_PROMPT = `## Response Language
 

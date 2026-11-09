@@ -1,9 +1,17 @@
 import type {
+  CommentAnchor,
+  CommentTarget,
   ImageGenStatus,
   MessageAttachment,
+  MessageComment,
   MessageStep,
   StepStatus,
 } from "@shared/types";
+import {
+  MAX_COMMENT_NOTE_LENGTH,
+  MAX_COMMENT_QUOTE_LENGTH,
+  MAX_COMMENTS_PER_MESSAGE,
+} from "@shared/constants/comments";
 import { parseJsonObject } from "./json";
 
 /**
@@ -146,4 +154,109 @@ export function parseImageStatus(raw: string | null): ImageGenStatus | null {
   return IMAGE_STATUSES.includes(raw as ImageGenStatus)
     ? (raw as ImageGenStatus)
     : null;
+}
+
+/** Longest session entry id a stored anchor may name (mirrors the write side). */
+const MAX_COMMENT_ENTRY_ID_LENGTH = 64;
+
+/**
+ * Parse a stored comments JSON (`{"comments":[…]}`). Stored values are never
+ * trusted: every field is validated and anything invalid drops **the whole
+ * list** — a comment whose anchor cannot be rebuilt would otherwise render a
+ * quote pointing at the wrong place, which is worse than showing nothing.
+ *
+ * Returns `null` when the column is empty or holds no usable list.
+ */
+export function parseComments(raw: string | null): MessageComment[] | null {
+  if (!raw) return null;
+  const parsed = parseJsonObject(raw);
+  const list = parsed["comments"];
+  if (!Array.isArray(list) || list.length === 0) return null;
+  if (list.length > MAX_COMMENTS_PER_MESSAGE) return null;
+  const result: MessageComment[] = [];
+  for (const item of list) {
+    const comment = parseOneComment(item);
+    if (comment === null) return null;
+    result.push(comment);
+  }
+  return result;
+}
+
+/** Parse one stored comment, or `null` when any field is unusable. */
+function parseOneComment(value: unknown): MessageComment | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const note = record["note"];
+  if (
+    typeof note !== "string" ||
+    note.trim().length === 0 ||
+    note.length > MAX_COMMENT_NOTE_LENGTH
+  ) {
+    return null;
+  }
+  const anchorRecord = record["anchor"];
+  if (typeof anchorRecord !== "object" || anchorRecord === null) return null;
+  const raw = anchorRecord as Record<string, unknown>;
+  const quote = raw["quote"];
+  if (
+    typeof quote !== "string" ||
+    quote.trim().length === 0 ||
+    quote.length > MAX_COMMENT_QUOTE_LENGTH
+  ) {
+    return null;
+  }
+  const target = parseCommentTarget(raw["target"]);
+  if (target === null) return null;
+  const start = raw["start"];
+  const end = raw["end"];
+  const occurrence = raw["occurrence"];
+  const textLength = raw["textLength"];
+  // A quote-only anchor (`-1`/`-1`/`0`/`-1`) is the shape recovered from a
+  // prompt block: no offsets, resolved by searching the quote.
+  const quoteOnly =
+    start === -1 && end === -1 && occurrence === 0 && textLength === -1;
+  if (!quoteOnly) {
+    if (!isSafeInt(start) || start < 0) return null;
+    if (!isSafeInt(end) || end <= start) return null;
+    if (!isSafeInt(textLength) || textLength < end) return null;
+    if (!isSafeInt(occurrence) || occurrence < 0) return null;
+  }
+  const anchor: CommentAnchor = {
+    target,
+    quote,
+    start: start as number,
+    end: end as number,
+    occurrence: occurrence as number,
+    textLength: textLength as number,
+  };
+  return { anchor, note };
+}
+
+/** Parse one anchor target (exactly one of the two shapes). */
+function parseCommentTarget(value: unknown): CommentTarget | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (record["kind"] === "message") {
+    const messageId = record["messageId"];
+    if (!isSafeInt(messageId) || messageId <= 0) return null;
+    return { kind: "message", messageId };
+  }
+  if (record["kind"] === "entry") {
+    const entryId = record["entryId"];
+    if (
+      typeof entryId !== "string" ||
+      entryId.length === 0 ||
+      entryId.length > MAX_COMMENT_ENTRY_ID_LENGTH ||
+      /\s/.test(entryId)
+    ) {
+      return null;
+    }
+    return { kind: "entry", entryId };
+  }
+  return null;
+}
+
+/** `true` for a non-negative safe integer. */
+function isSafeInt(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
 }

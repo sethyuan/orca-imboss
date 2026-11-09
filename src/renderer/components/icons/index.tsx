@@ -382,3 +382,17 @@ export function IconPlay(props: IconProps): React.JSX.Element {
     </svg>
   );
 }
+
+/**
+ * Comment on a passage: a speech bubble with two text lines. Deliberately not
+ * `IconChat` (an empty round bubble) so "comment on what I selected" never reads
+ * as "open a conversation".
+ */
+export function IconComment(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M20 15.5a2.5 2.5 0 0 1-2.5 2.5H8l-4 3v-3.5H6a2.5 2.5 0 0 1-2-2.5V6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5Z" />
+      <path d="M8 9h8M8 13h5" />
+    </svg>
+  );
+}

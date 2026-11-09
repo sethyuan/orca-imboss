@@ -1,6 +1,8 @@
 import {
+  ASSISTANT_COMMENT_RESPONSE_PROMPT,
   ASSISTANT_REPORT_PROMPT,
   buildEmployeeRolePrompt,
+  COMMENT_RESPONSE_PROMPT,
   EMPLOYEE_DIRECT_CHAT_PROMPT,
   EMPLOYEE_REPORT_PROMPT,
   MENTION_HANDLING_PROMPT,
@@ -11,12 +13,10 @@ import { BuildEmployeeSystemPromptArgs } from "@shared/types";
 
 /**
  * Assemble an employee-session's system prompt under the app's own
- * `systemPromptOverride` (the Pi SDK customPrompt branch). Because the SDK
- * appends `<project_context>`, `[skills]` and a trailing
- * `Current working directory` line after the override, this function emits
- * the leading identity block, the role, persona, `[builtinSkills]`,
- * response-language rule, the `[tools]` block and the `Today` line (in that
- * order). The exact template shape:
+ * `systemPromptOverride` (the Pi SDK customPrompt branch). The SDK renders this
+ * override as the **`preamble` section** of the prompt and appends its own
+ * sections after it (`<project_context>`, `[skills]`, `Current working
+ * directory`). The exact template shape:
  *
  * ```
  * This is your working session as employee {ID}[( {name}) — assistant only] in chat {chatId}[, the boss's chat][, your direct conversation with the boss — direct chat only].
@@ -26,14 +26,22 @@ import { BuildEmployeeSystemPromptArgs } from "@shared/types";
  * [report skill: assistant aggregation/progress/summary OR employee result report
  *  OR — in an employee direct chat — the "your final text is the reply" rule]
  * [@-mention handling]
+ * [comments handling: employee answers them OR the assistant routes + relays]
  * [never block waiting]
- * [builtinSkills]
  * [response language]
  * [tools]
- * Today is {yyyy-MM-dd}
  * ```
+ *
+ * **Nothing volatile may go in here.** Pi persists the prompt as *sections* and
+ * appends a `system` message whenever a section's text differs from the one the
+ * transcript already carries — so a date, a timestamp, a turn counter or any
+ * other per-run value would make every turn write a full new `preamble` (the
+ * whole system prompt) into the session file, and would break provider prompt
+ * caching. Per-turn information belongs in the prompt **payload** the turn
+ * carries (the boss's text, `[Comments]`, `[Attachments]`, the boss-direct hint),
+ * never in this function's output. `scripts/tests/equivalence-harness.ts`
+ * asserts the determinism.
  */
-
 export function buildEmployeeSystemPrompt({
   personaParts,
   isAssistant,
@@ -104,6 +112,13 @@ export function buildEmployeeSystemPrompt({
     : directChat
       ? EMPLOYEE_DIRECT_CHAT_PROMPT
       : EMPLOYEE_REPORT_PROMPT;
+  // Comments: an employee answers them (it does the work); the assistant routes
+  // each comment to whoever produced the annotated passage and relays the
+  // answers, answering only the ones about its own output. Chosen by role, which
+  // is fixed per session — never per turn (see `prompts.ts`).
+  const commentBlock = isAssistant
+    ? ASSISTANT_COMMENT_RESPONSE_PROMPT
+    : COMMENT_RESPONSE_PROMPT;
 
   const sections = [
     identityBlock,
@@ -111,6 +126,7 @@ export function buildEmployeeSystemPrompt({
     persona,
     reportBlock,
     MENTION_HANDLING_PROMPT,
+    commentBlock,
     NEVER_BLOCK_WAITING_PROMPT,
     RESPONSE_LANGUAGE_PROMPT,
     toolsBlock,

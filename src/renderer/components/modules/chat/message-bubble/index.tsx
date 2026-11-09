@@ -1,6 +1,7 @@
-import type { MessageAttachment } from "@shared/types";
+import type { MessageAttachment, MessageComment } from "@shared/types";
 import { cls } from "reactutils";
 import { Markdown } from "../../../markdown";
+import { CommentCards } from "../comment-card";
 import {
   isMediaOnly,
   MessageAttachments,
@@ -16,6 +17,11 @@ export interface MessageBubbleProps {
   messageId: number;
   content: string;
   attachments: MessageAttachment[] | null;
+  /**
+   * Comments this message was sent with (annotations of earlier messages).
+   * Rendered above the message's own words — see `../comment-card`.
+   */
+  comments?: MessageComment[] | null;
   /**
    * True attachment count. May exceed `attachments.length` when an agent only
    * forwarded the first few; drives the `+N` overflow chip.
@@ -57,6 +63,7 @@ export function MessageBubble({
   messageId,
   content,
   attachments,
+  comments = null,
   attachmentsTotal,
   avatar,
   markdown = false,
@@ -79,10 +86,15 @@ export function MessageBubble({
       // bubbles are the only kind the boss writes, so tagging this row covers
       // every jump target without touching the other message kinds.
       data-message-id={messageId}
+      // Boxing a comment on this row: the bubble's prose (`..imb-markdown` /
+      // `.imb-bubble-text`) is what `comment-layer` lets the boss select, and the
+      // id it records comes from this attribute.
+      data-commentable="1"
     >
       {avatar}
       <div className={cls("imb-bubble", mediaOnly && "imb-bubble-media")}>
         <MessageAttachments view={attachmentView} self={self} />
+        <CommentCards comments={comments ?? []} />
         {content.length > 0 &&
           (markdown ? (
             <Markdown

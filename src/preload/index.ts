@@ -31,6 +31,7 @@ import type {
   Message,
   MessageAttachment,
   MessageChangedPayload,
+  MessageComment,
   MessageSearchResult,
   MiniApp,
   ModelOption,
@@ -448,16 +449,23 @@ const api = {
       ipcRenderer.invoke("messages:search", query) as Promise<
         MessageSearchResult[]
       >,
+    /**
+     * Append a stored message. `comments` is for fixtures and for an
+     * already-sent annotation; the main process validates it exactly like
+     * `chat:send` does (including "the target must belong to this chat").
+     */
     append: (
       chatId: number,
       senderEmployeeId: number | null,
       content: string,
+      comments?: MessageComment[],
     ) =>
       ipcRenderer.invoke(
         "messages:append",
         chatId,
         senderEmployeeId,
         content,
+        comments,
       ) as Promise<Message>,
     /**
      * Answer an ask card. `attachments` are files the boss attaches to this
@@ -490,16 +498,24 @@ const api = {
   },
 
   chat: {
+    /**
+     * Send a message into a conversation: stored as a user message and answered
+     * by the conversation's own agent. `comments` annotate earlier messages and
+     * travel inside the same prompt (`[Comments]` block); a comment-only send
+     * (no text, no files) is legitimate.
+     */
     send: (
       chatId: number,
       content: string,
       attachments?: MessageAttachment[],
+      comments?: MessageComment[],
     ) =>
       ipcRenderer.invoke(
         "chat:send",
         chatId,
         content,
         attachments,
+        comments,
       ) as Promise<Message>,
   },
 
@@ -542,7 +558,8 @@ const api = {
      * Send a message into exactly one `(employee, chat)` agent session (the
      * session view's composer), optionally with attachments — the same
      * `MessageAttachment[]` the chat composer sends, described to the model as
-     * absolute paths. The main process decides between steering the live run
+     * absolute paths — and optionally with `comments` annotating earlier entries
+     * of that session. The main process decides between steering the live run
      * and queueing; nothing is written to the conversation. A steered text also
      * comes back with a `steerId`, which is what `revokeSteer` addresses.
      */
@@ -551,6 +568,7 @@ const api = {
       chatId: number,
       text: string,
       attachments?: MessageAttachment[],
+      comments?: MessageComment[],
     ) =>
       ipcRenderer.invoke(
         "agentSession:send",
@@ -558,6 +576,7 @@ const api = {
         chatId,
         text,
         attachments,
+        comments,
       ) as Promise<AgentSessionSendResult>,
     /**
      * Withdraw one interjection of one session (its text never reaches the

@@ -1,0 +1,147 @@
+/*
+ * Pending comments bar, rendered inside the composer card above the textarea —
+ * the same slot the attachment chips use, because it is the same kind of thing:
+ * part of the draft that has not been sent yet.
+ *
+ * Structure is deliberately flat: `ul.imb-comment-pending > li.imb-comment-pending-row`
+ * with the ordinal, the quoted passage and the note (a button, or the editor plus
+ * its key hint while editing) and the remove button as direct children of the row.
+ * No header line, no intermediate wrapper, and no Save/Cancel buttons: the
+ * ordinals carry the "this is a batch" meaning (and the list role + `aria-label`
+ * carry it for assistive tech), and `Enter`/`Esc` carry the editing contract.
+ */
+
+.imb-comment-pending {
+  list-style: none;
+  margin: 0;
+  padding: var(--imb-space-2) var(--imb-space-3);
+  border-bottom: 1px solid var(--imb-sep);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* A long batch must not push the textarea off screen. */
+  max-height: 132px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Resting row: one line — ordinal | quote | note | remove. */
+.imb-comment-pending-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 45%) minmax(0, 1fr) auto;
+  grid-template-areas: "ordinal quote note remove";
+  align-items: center;
+  gap: var(--imb-space-2);
+  min-height: var(--imb-control-h-mini);
+  padding: 2px var(--imb-space-1) 2px var(--imb-space-2);
+  border-left: 2px solid var(--imb-accent-soft);
+  border-radius: var(--imb-radius-chip);
+  /* Anywhere in the row starts editing, so the whole row says so. */
+  cursor: text;
+}
+
+.imb-comment-pending-row:hover {
+  background: var(--imb-row-hover);
+}
+
+/* Editing row: the quote and the remove button stay on the first line, the editor
+   takes a full-width second line and its key hint a third. */
+.imb-comment-pending-row-editing,
+.imb-comment-pending-row-editing:hover {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "ordinal quote remove"
+    "editor  editor editor"
+    "hint    hint   hint";
+  align-items: center;
+  background: transparent;
+  /* Already editing: a further click belongs to the field (caret, selection) and
+     must not re-enter the editor. */
+  cursor: default;
+  /* The hint line needs a little air above the next row. */
+  row-gap: var(--imb-space-1);
+  padding-bottom: var(--imb-space-1);
+}
+
+.imb-comment-pending-ordinal {
+  grid-area: ordinal;
+  font-size: var(--imb-fs-caption);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--imb-accent);
+  white-space: nowrap;
+}
+
+.imb-comment-pending-quote {
+  grid-area: quote;
+  min-width: 0;
+  font-size: var(--imb-fs-caption);
+  color: var(--imb-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The note doubles as the "edit this comment" trigger: it looks like text and
+   behaves like a button, so the row stays one line in its resting state. */
+.imb-comment-pending-note {
+  grid-area: note;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--imb-fg);
+  font: inherit;
+  font-size: var(--imb-fs-small);
+  text-align: left;
+  cursor: text;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imb-comment-pending-note:hover {
+  /* Hover stays opaque (this sits on the composer's own surface): an underline
+     instead of a tint, so nothing shows through from beneath. */
+  text-decoration: underline;
+  text-decoration-color: var(--imb-accent);
+  text-underline-offset: 2px;
+}
+
+.imb-comment-pending-note:focus-visible {
+  outline: none;
+  box-shadow: var(--imb-focus-ring);
+  border-radius: var(--imb-radius-chip);
+}
+
+.imb-comment-pending-editor {
+  grid-area: editor;
+  min-height: 44px;
+  padding: var(--imb-space-1) var(--imb-space-2);
+  border: 1px solid var(--imb-control-border);
+  border-radius: var(--imb-radius-control);
+  background: var(--imb-bg-content);
+  color: var(--imb-fg);
+  font: inherit;
+  font-size: var(--imb-fs-small);
+  line-height: var(--imb-leading-text);
+  resize: vertical;
+}
+
+.imb-comment-pending-editor:focus-visible {
+  outline: none;
+  border-color: var(--imb-accent);
+  box-shadow: var(--imb-focus-ring);
+}
+
+.imb-comment-pending-keyhint {
+  grid-area: hint;
+  font-size: var(--imb-fs-caption);
+  color: var(--imb-muted);
+  user-select: none;
+}
+
+.imb-comment-pending-remove {
+  grid-area: remove;
+  justify-self: end;
+}

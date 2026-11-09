@@ -10,10 +10,12 @@ import type {
   Message,
   MessageAttachment,
   MessageChangedPayload,
+  MessageComment,
   MessageKind,
   MessageSearchResult,
   MessageStep,
 } from "@shared/types";
+import { validateCommentsPayload } from "../comment-prompt";
 import { sendToRenderer } from "../notifications";
 import { bumpUnread, createChatTitleResolver, getChat } from "./chats";
 import { getDB } from "./index";
@@ -21,6 +23,7 @@ import {
   MAX_ATTACH_PATH_LENGTH,
   parseAttachmentTotal,
   parseAttachments,
+  parseComments,
   parseGroupChatId,
   parseImageStatus,
   parseSteps,
@@ -36,6 +39,7 @@ interface MessageRow {
   content: string;
   steps: string | null;
   attachments: string | null;
+  comments: string | null;
   image_status: string | null;
   image_model: string | null;
   created_at: number;
@@ -199,7 +203,18 @@ export function appendMessage(
   if (typeof content !== "string") {
     throw new Error("Message content must be a string.");
   }
-  if (content.length === 0 && kind !== "ack") {
+  // Comments are validated before the content check because they decide whether
+  // empty content is legitimate below (a comment-only send stores "" and lets
+  // the renderer localize that state — see `userMessageContent`).
+  // They are checked against **this** chat: an anchor naming a message from
+  // another conversation (or one that no longer exists) would be a dead
+  // reference forever, so it is rejected rather than stored.
+  const comments = validateComments(options.comments, chatId);
+  // The two reasons a message may legitimately have no text: the app-generated
+  // `ack` receipt (its label is localized at render time) and a send whose whole
+  // content is the comments it carries.
+  const commentsOnly = comments !== undefined && comments.length > 0;
+  if (content.length === 0 && kind !== "ack" && !commentsOnly) {
     throw new Error("Message content must be a non-empty string.");
   }
   if (content.length > MAX_CONTENT_LENGTH) {
@@ -265,6 +280,7 @@ export function appendMessage(
 
   const createdAt = Math.floor(Date.now() / 1000);
   const attachmentsJson = serializeAttachments(attachments, attachmentTotal);
+  const commentsJson = serializeComments(comments);
   // The `steps` column also carries the task-group link; write the blob when
   // either is present (an `interrupted` notice has the link but no steps).
   const stepsJson =
@@ -273,8 +289,8 @@ export function appendMessage(
       : null;
   const result = db
     .prepare(
-      "INSERT INTO messages (chat_id, sender_employee_id, kind, content, steps, attachments, image_status, image_model, created_at) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO messages (chat_id, sender_employee_id, kind, content, steps, attachments, comments, image_status, image_model, created_at) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
       chatId,
@@ -283,6 +299,7 @@ export function appendMessage(
       content,
       stepsJson,
       attachmentsJson,
+      commentsJson,
       imageStatus,
       imageModel,
       createdAt,
@@ -327,6 +344,7 @@ export function appendMessage(
     content,
     steps: stepsJson,
     attachments: attachmentsJson,
+    comments: commentsJson,
     image_status: imageStatus,
     image_model: imageModel,
     created_at: createdAt,
@@ -510,6 +528,7 @@ function toMessage(row: MessageRow): Message {
     steps: parseSteps(row.steps),
     groupChatId: parseGroupChatId(row.steps),
     attachments,
+    comments: parseComments(row.comments),
     attachmentsTotal:
       attachments === null
         ? null
@@ -537,6 +556,48 @@ function serializeSteps(
   if (steps !== undefined) payload.steps = steps;
   if (groupChatId !== undefined) payload.chatId = groupChatId;
   return JSON.stringify(payload);
+}
+
+/**
+ * Serialize the comment list into the single `comments` column (`null` when the
+ * message carries none, so an empty list and "no comments" are the same row).
+ */
+function serializeComments(
+  comments: MessageComment[] | undefined,
+): string | null {
+  if (comments === undefined || comments.length === 0) return null;
+  return JSON.stringify({ comments });
+}
+
+/**
+ * Validate a renderer-supplied comment list for a message in `chatId`.
+ *
+ * Two layers, both required: the shared shape check (`validateCommentsPayload`,
+ * the same trust boundary `agentSession:send` applies) and — only here — the
+ * existence check, because a stored `message` target must belong to the very
+ * conversation the comment is sent in.
+ */
+export function validateComments(
+  comments: MessageComment[] | undefined,
+  chatId: number,
+): MessageComment[] | undefined {
+  const validated = validateCommentsPayload(comments);
+  if (validated === undefined || validated.length === 0) return undefined;
+  const db = getDB();
+  for (const comment of validated) {
+    const target = comment.anchor.target;
+    // A session-entry anchor is legitimate in a conversation whose thread *is* a
+    // session transcript (an employee direct chat), and unverifiable there:
+    // those entries live in the Pi session file, not in `messages`.
+    if (target.kind !== "message") continue;
+    const row = db
+      .prepare("SELECT chat_id AS chatId FROM messages WHERE id = ?")
+      .get(target.messageId) as { chatId: number } | undefined;
+    if (row === undefined || row.chatId !== chatId) {
+      throw new Error("A comment points at a message of another conversation.");
+    }
+  }
+  return validated;
 }
 
 /**

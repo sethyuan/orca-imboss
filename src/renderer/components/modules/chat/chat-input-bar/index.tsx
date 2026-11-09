@@ -4,6 +4,7 @@ import type {
   ChatSummary,
   CommonProject,
   MessageAttachment,
+  MessageComment,
 } from "@shared/types";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { appStore, useAppSync } from "../../../../app-store";
@@ -12,12 +13,14 @@ import {
   nextAttachmentId,
   toPlainAttachment,
 } from "../../../../chat-draft";
+import { EMPTY_COMMENTS, toPlainComments } from "../../../../comment-draft";
 import { IconFolder } from "../../../icons";
 import {
   ComposerCard,
   type ComposerDraftBinding,
   type ComposerHandle,
 } from "../composer-card";
+import { PendingComments } from "../pending-comments";
 import { displayTitle } from "../relative-time";
 import { RefPopup, type RefCandidate, type RefTrigger } from "./ref-popup";
 
@@ -68,7 +71,11 @@ export interface ChatInputBarProps {
    * later remount cannot replay it.
    */
   onComposerResetApplied?: (seq: number) => void;
-  onSend: (text: string, attachments: MessageAttachment[]) => void;
+  onSend: (
+    text: string,
+    attachments: MessageAttachment[],
+    comments?: MessageComment[],
+  ) => void;
   /**
    * Whether the reference popups are offered (default `true`): `@` for an
    * employee and `#` for a task group this conversation created.
@@ -115,6 +122,9 @@ export function ChatInputBar({
   const snap = useAppSync();
   const draft = snap.chatDrafts[chatId] ?? EMPTY_DRAFT;
   const { text, attachments } = draft;
+  // Comments waiting for this send: they are part of the draft (frozen onto the
+  // message when it is sent), so they live next to the text and the chips.
+  const pendingComments = snap.chatComments[chatId] ?? EMPTY_COMMENTS;
 
   const cardRef = useRef<ComposerHandle>(null);
   // Common projects: loaded when the attach menu opens and rendered as flat
@@ -299,15 +309,21 @@ export function ChatInputBar({
 
   const send = (live: string): void => {
     const value = live.trim();
-    if (!value && attachments.length === 0) return;
-    // Rebuild each attachment as a plain object: `attachments` comes from the
+    // A comment-only send is legitimate: the comments themselves are the message.
+    if (!value && attachments.length === 0 && pendingComments.length === 0) {
+      return;
+    }
+    // Rebuild each attachment/comment as a plain object: they come from the
     // Valtio snapshot, and its proxies cannot cross the IPC boundary.
     onSend(
       value,
       attachments.map((item) => toPlainAttachment(item.attachment)),
+      toPlainComments(pendingComments),
     );
-    // Clear the per-chat draft; the store revokes its preview URLs.
+    // Clear the per-chat draft and its queued comments; the store revokes the
+    // attachments' preview URLs.
     cardRef.current?.clear();
+    appStore.clearChatComments(chatId);
   };
 
   /**
@@ -450,7 +466,9 @@ export function ChatInputBar({
       // direct chat keeps the plain prompt (it has no `@` / `#`).
       placeholder={
         mentions
-          ? t("Type @ to mention an employee, # to reference a task chat")
+          ? t(
+              "Shift+Enter for new line. Type @ to mention an employee, # to reference a task chat",
+            )
           : t("What are your instructions?")
       }
       actionLabel={t("Send")}
@@ -459,6 +477,16 @@ export function ChatInputBar({
       onSend={send}
       attachMenuExtra={attachMenuExtra}
       attachMenuOpenChange={setProjectsMenuOpen}
+      pendingComments={{
+        count: pendingComments.length,
+        node: (
+          <PendingComments
+            comments={pendingComments}
+            onEdit={(id, note) => appStore.updateChatComment(chatId, id, note)}
+            onRemove={(id) => appStore.removeChatComment(chatId, id)}
+          />
+        ),
+      }}
       overlay={
         mentions ? (
           <RefPopup

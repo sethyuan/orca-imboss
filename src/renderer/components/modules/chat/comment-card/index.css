@@ -1,0 +1,74 @@
+/*
+ * Sent comments, drawn above the message that carried them.
+ *
+ * A comment card is chrome **inside** a bubble (the boss's own message), so it
+ * uses the raised-surface recipe rather than the popover one: no shadow of its
+ * own beyond a hairline, and a tinted quote band so an excerpt never reads as
+ * prose the sender wrote in that message.
+ */
+.imb-comment-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-1);
+  margin-bottom: var(--imb-space-2);
+}
+
+.imb-comment-card {
+  display: flex;
+  gap: var(--imb-space-2);
+  padding: var(--imb-space-1) var(--imb-space-2);
+  border: 1px solid var(--imb-sep-strong);
+  border-radius: var(--imb-radius-control);
+  background: var(--imb-bg-content);
+  /* The card is context, not the boss's own words: keep it out of a selection
+     that the boss drags over the bubble. */
+  user-select: none;
+}
+
+.imb-comment-card-ordinal {
+  flex: none;
+  font-size: var(--imb-fs-caption);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--imb-accent);
+  padding-top: 1px;
+  min-width: 18px;
+}
+
+.imb-comment-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.imb-comment-card-quote {
+  margin: 0;
+  font-size: var(--imb-fs-caption);
+  line-height: var(--imb-leading-ui);
+  color: var(--imb-muted);
+  /* Two lines say which passage; the passage itself stays highlighted where it
+     lives, so the card never has to reproduce a paragraph. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  border-left: 2px solid var(--imb-accent-soft);
+  padding-left: var(--imb-space-2);
+}
+
+.imb-comment-card-note {
+  margin: 0;
+  font-size: var(--imb-fs-small);
+  line-height: var(--imb-leading-text);
+  color: var(--imb-fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* In a session transcript the card sits on the thread background (not inside a
+   bubble), so it needs its own surface to stay legible. */
+.imb-comment-cards-session .imb-comment-card {
+  background: var(--imb-surface);
+}

@@ -176,12 +176,19 @@ export function agentPrompt(
 
 /**
  * Stored content for a user message. Attachments without text get a neutral
- * file-name list instead of the former hardcoded `"[附件]"`; `appendMessage`
- * rejects empty content.
+ * file-name list instead of the former hardcoded `"[附件]"`.
+ *
+ * A send that carried **nothing but comments** stores `""`: the message's own
+ * meaning is its `comments` column, and any sentence generated here would be
+ * English baked into the database and rendered verbatim in every locale (the
+ * renderer localizes that state instead — `CommentCards` + the chat list's
+ * `commentCount`). `appendMessage` accepts the empty content for exactly this
+ * case, the same way it does for the app-generated `ack` receipt.
  */
 export function userMessageContent(
   content: string,
   attachments: MessageAttachment[] | undefined,
+  commentsOnly = false,
 ): string {
   if (content.length > 0) return content;
   const names = (attachments ?? [])
@@ -189,7 +196,13 @@ export function userMessageContent(
       sanitizePromptField(attachment.name, MAX_PROMPT_ATTACH_NAME_LENGTH),
     )
     .filter((name) => name.length > 0);
-  return names.length > 0 ? `Attached: ${names.join(", ")}` : "Attached files";
+  if (names.length > 0) return `Attached: ${names.join(", ")}`;
+  // A send that carried nothing but comments stores **no text**: the comments
+  // column is its content, and anything written here would be English baked into
+  // the database and shown verbatim in every locale (the renderer localizes this
+  // state: the comment cards in the bubble, `commentCount` in the list preview).
+  if (commentsOnly) return "";
+  return "Attached files";
 }
 
 // --- Reading a prompt back ---------------------------------------------------

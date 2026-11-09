@@ -2,6 +2,7 @@ import type {
   ChatPreview,
   ImageGenStatus,
   MessageAttachment,
+  MessageComment,
   MessageKind,
   MessageStep,
 } from "./types";
@@ -67,6 +68,7 @@ interface Extraction {
   fragments: string[];
   questionCount?: number;
   answerCount?: number;
+  commentCount?: number;
   stepsDone?: number;
   stepsTotal?: number;
   linkChatId?: number;
@@ -83,6 +85,11 @@ export interface ChatPreviewSource {
   attachments?: MessageAttachment[] | null;
   /** True attachment count; may exceed `attachments.length`. */
   attachmentsTotal?: number | null;
+  /**
+   * Comments the message was sent with. A comment-only send has no text, so the
+   * count is what describes it (the renderer localizes the label).
+   */
+  comments?: MessageComment[] | null;
   imageStatus?: ImageGenStatus | null;
   /**
    * Title lookup for a `chat` link card: `null` = the conversation is gone,
@@ -109,6 +116,7 @@ export function buildChatPreview(
     extraction.linkChatId !== undefined ||
     extraction.questionCount !== undefined ||
     extraction.answerCount !== undefined ||
+    extraction.commentCount !== undefined ||
     extraction.stepsTotal !== undefined;
   if (!describes && attachments === undefined) return null;
 
@@ -120,6 +128,9 @@ export function buildChatPreview(
       : {}),
     ...(extraction.answerCount !== undefined
       ? { answerCount: extraction.answerCount }
+      : {}),
+    ...(extraction.commentCount !== undefined
+      ? { commentCount: extraction.commentCount }
       : {}),
     ...(extraction.stepsDone !== undefined
       ? { stepsDone: extraction.stepsDone }
@@ -164,9 +175,13 @@ function extract(source: ChatPreviewSource): Extraction {
   const base: Extraction = { kind, text: "", fragments: [] };
   const attachmentCount = attachmentTotal(source);
   if (attachmentCount !== undefined) base.attachmentCount = attachmentCount;
+  const comments = source.comments;
+  const commentCount =
+    Array.isArray(comments) && comments.length > 0 ? comments.length : undefined;
   const extracted = extractByKind(kind, content, source);
   return {
     ...base,
+    ...(commentCount !== undefined ? { commentCount } : {}),
     ...extracted,
     text: extracted.text ?? "",
     fragments: bounded(extracted.fragments ?? []),

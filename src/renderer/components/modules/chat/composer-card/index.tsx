@@ -124,6 +124,16 @@ export interface ComposerCardProps {
   attachConversations?: boolean;
   /** Overlay drawn above the textarea (chat: the `@`/`#` reference popup). */
   overlay?: ReactNode;
+  /**
+   * Comments waiting to be sent with the next message: the bar itself plus its
+   * count. `null` when there are none.
+   *
+   * Rendered inside the card, above the textarea — the same slot as the draft's
+   * attachment chips, because a pending comment is the same kind of thing. The
+   * count also gates the send button: a comment-only send is legitimate, so
+   * "empty text and no chips" is no longer the whole disabled rule.
+   */
+  pendingComments?: { count: number; node: ReactNode } | null;
   /** Extra class on the outer wrapper (context-specific spacing). */
   className?: string;
   /**
@@ -176,6 +186,7 @@ export function ComposerCard({
   attachMenuMinWidth,
   attachConversations = true,
   overlay,
+  pendingComments = null,
   className,
   onKeyDown,
   onTextChanged,
@@ -206,7 +217,14 @@ export function ComposerCard({
   const send = (): void => {
     if (disabled || sendDisabled) return;
     const value = liveText();
-    if (value.trim().length === 0 && attachments.length === 0) return;
+    // A comment-only send is legitimate: the queued comments are the message.
+    if (
+      value.trim().length === 0 &&
+      attachments.length === 0 &&
+      (pendingComments?.count ?? 0) === 0
+    ) {
+      return;
+    }
     onSend(value);
   };
 
@@ -536,7 +554,9 @@ export function ComposerCard({
   const sendDisabledInternal =
     disabled ||
     sendDisabled ||
-    (draft.text.trim().length === 0 && attachments.length === 0);
+    (draft.text.trim().length === 0 &&
+      attachments.length === 0 &&
+      (pendingComments?.count ?? 0) === 0);
 
   return (
     <div
@@ -571,6 +591,9 @@ export function ComposerCard({
             {error}
           </p>
         )}
+        {pendingComments !== null &&
+          pendingComments.count > 0 &&
+          pendingComments.node}
         {notice !== null && <div className="imb-attach-notice">{notice}</div>}
         {overlay}
         <Textarea
