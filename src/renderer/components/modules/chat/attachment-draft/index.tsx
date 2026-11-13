@@ -118,6 +118,25 @@ export function DraftAttachmentChips({
       : draftMarkViews(annotation.comments, attachmentId);
   const countOf = (attachmentId: number): number =>
     marksOf(attachmentId).length;
+  /**
+   * Whether this chip gets the corner `Annotate` action.
+   *
+   * Only a chip that can actually be opened in the viewer *and annotated there*
+   * earns the button: the action does nothing but open the draft's viewer in
+   * annotation mode, so on anything else it would be a dead button.
+   *  - `previewUrl` is the one image test the draft has (minted by
+   *    `toPendingAttachment` from `isImageFile` only): folders, conversation
+   *    references and plain files never have one.
+   *  - A thumbnail that failed to decode is dropped from `previewables`, so the
+   *    viewer has no position for it — no button either.
+   *  - An already marked copy is not annotatable again (the naming rule decides,
+   *    the same one the viewer's caption uses).
+   */
+  const canAnnotateChip = (item: PendingAttachment): boolean =>
+    annotation !== undefined &&
+    item.previewUrl !== undefined &&
+    !failedPreviews.has(item.id) &&
+    !isAnnotatedCopyName(item.attachment.name);
   const viewerImages: LightboxImage[] = previewables.map((preview) => ({
     name: preview.name,
     src: preview.src,
@@ -222,32 +241,31 @@ export function DraftAttachmentChips({
                     )}
                   </div>
                 )}
-                {annotation !== undefined &&
-                  !isAnnotatedCopyName(item.attachment.name) && (
-                    // The hot path: one click from "the picture I am about to send" to
-                    // a mark on it, without hunting for the viewer's own button.
-                    <button
-                      type="button"
-                      className="imb-attached-file-annotate"
-                      aria-label={t("Annotate")}
-                      title={t("Annotate")}
-                      onClick={(event) => {
-                        const at = previewables.findIndex(
-                          (preview) => preview.id === item.id,
-                        );
-                        if (at < 0) return;
-                        setLightboxOrigin(
-                          event.currentTarget
-                            .closest<HTMLElement>(".imb-attached-file-thumb")
-                            ?.getBoundingClientRect() ?? null,
-                        );
-                        setLightboxAnnotating(true);
-                        setLightbox(at);
-                      }}
-                    >
-                      <IconComment className="imb-icon" />
-                    </button>
-                  )}
+                {canAnnotateChip(item) && (
+                  // The hot path: one click from "the picture I am about to send" to
+                  // a mark on it, without hunting for the viewer's own button.
+                  <button
+                    type="button"
+                    className="imb-attached-file-annotate"
+                    aria-label={t("Annotate")}
+                    title={t("Annotate")}
+                    onClick={(event) => {
+                      const at = previewables.findIndex(
+                        (preview) => preview.id === item.id,
+                      );
+                      if (at < 0) return;
+                      setLightboxOrigin(
+                        event.currentTarget
+                          .closest<HTMLElement>(".imb-attached-file-thumb")
+                          ?.getBoundingClientRect() ?? null,
+                      );
+                      setLightboxAnnotating(true);
+                      setLightbox(at);
+                    }}
+                  >
+                    <IconComment className="imb-icon" />
+                  </button>
+                )}
                 {annotation !== undefined && countOf(item.id) > 0 && (
                   <span
                     className="imb-attached-file-marks"

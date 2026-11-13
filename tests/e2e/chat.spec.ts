@@ -209,3 +209,25 @@ test("a `#group` reference renders as plain text, not a heading", async () => {
   ).toBeVisible();
   await expect(transcript.locator("h1, h2, h3")).toHaveCount(0);
 });
+
+/**
+ * The composer's send action is a **text** button (it used to be a 30px circular
+ * arrow icon): the label is the affordance, so it must stay a real labelled
+ * button from the shared recipe, and it must never grow an icon back.
+ */
+test("the send action is a labelled button, not an icon", async () => {
+  const session = app!;
+  const { window } = session;
+  await createChat(window, "E2E send button");
+  await session.reload();
+
+  await listRows(window).filter({ hasText: "E2E send button" }).click();
+  const actions = detailPane(window).locator(".imb-chat-input-actions");
+  const send = actions.getByRole("button", { name: "Send" });
+  await expect(send).toBeVisible();
+  // Primary text button: the shared `.imb-btn` recipe (30px, 7px radius,
+  // 14px/500), not a circle of its own.
+  await expect(send).toHaveClass(/imb-btn-primary/);
+  await expect(send).toHaveText("Send");
+  await expect(send.locator("svg")).toHaveCount(0);
+});

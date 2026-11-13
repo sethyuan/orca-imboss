@@ -75,46 +75,15 @@
   padding: 0 var(--imb-space-2) var(--imb-space-2) var(--imb-space-3);
 }
 
-.imb-send-btn-circle {
-  width: var(--imb-control-h-large);
-  height: var(--imb-control-h-large);
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--imb-accent);
-  border: none;
-  border-radius: var(--imb-radius-pill);
-  cursor: pointer;
-  color: var(--imb-accent-on);
-  transition:
-    background var(--imb-motion-fast) var(--imb-ease-standard),
-    transform var(--imb-dur-1) var(--imb-ease-standard);
-}
-
-.imb-send-btn-circle:hover:not(:disabled) {
-  background: var(--imb-accent-hover);
-  transform: scale(1.05);
-}
-
-.imb-send-btn-circle:active:not(:disabled) {
-  background: var(--imb-accent-active);
-  transform: scale(var(--imb-press-scale));
-}
-
-.imb-send-btn-circle:focus-visible {
-  box-shadow: var(--imb-focus-ring);
-  outline: none;
-}
-
-.imb-send-btn-circle:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.imb-send-btn-circle svg {
-  width: 18px;
-  height: 18px;
+/*
+ * The composer's send action is a **text** button (`Button` + the shared
+ * `.imb-btn` primary recipe: 30px, 7px radius, 14px/500, accent fill) — the old
+ * circular icon button is gone. Only layout is left here: the row must not
+ * squeeze the label when it grows (`Interject` while a run streams), and the
+ * button keeps the `+` attach button's 30px baseline.
+ */
+.imb-send-btn {
+  flex: none;
 }
 
 /* attach popup — portaled to `document.body` and fixed-positioned from the

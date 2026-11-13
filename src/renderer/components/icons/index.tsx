@@ -144,15 +144,6 @@ export function IconPlus(props: IconProps): React.JSX.Element {
   );
 }
 
-export function IconSend(props: IconProps): React.JSX.Element {
-  return (
-    <svg {...base(props)} strokeWidth={2.2}>
-      <line x1="12" y1="19" x2="12" y2="5" />
-      <polyline points="5 12 12 5 19 12" />
-    </svg>
-  );
-}
-
 export function IconAttach(props: IconProps): React.JSX.Element {
   return (
     <svg {...base(props)} strokeWidth={2}>

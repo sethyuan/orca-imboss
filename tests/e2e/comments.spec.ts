@@ -522,7 +522,7 @@ test("a pending comment can be edited in place, and the edit is what gets sent",
   // A comment-only send wakes the agent like any other; with no model provider
   // configured the run fails and says so, but the message — and its comments —
   // are stored exactly as the renderer sent them.
-  await window.locator(".imb-send-btn-circle").click();
+  await window.getByRole("button", { name: "Send" }).click();
   const card = thread(window).locator(".imb-comment-card");
   await expect(card).toHaveCount(1);
   await expect(card.locator(".imb-comment-card-note")).toHaveText(

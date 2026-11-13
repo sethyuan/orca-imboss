@@ -313,6 +313,52 @@ test("a picture that was never baked still offers annotation", async () => {
   ).toBeVisible();
 });
 
+/**
+ * The chip's corner `Annotate` action is for pictures only.
+ *
+ * It opens the draft's viewer in annotation mode, so on a chip the viewer cannot
+ * show it is a **dead** button — which is exactly what the boss hit: a folder /
+ * file chip carried a red annotate bubble next to its `×` and clicking it did
+ * nothing. The condition is now "this chip is a picture whose thumbnail decoded"
+ * (`previewUrl` is minted from `isImageFile` alone), which also covers folder and
+ * conversation-reference chips, since neither ever gets a `previewUrl`.
+ */
+test("only a picture chip offers the corner Annotate action", async () => {
+  const session = app!;
+  const window = session.window;
+  await createChat(window, "E2E annotate entry");
+  await session.reload();
+  await listRows(window).filter({ hasText: "E2E annotate entry" }).click();
+
+  const chips = window.locator(".imb-attached-file-thumb");
+  const annotate = (index: number) =>
+    chips.nth(index).locator(".imb-attached-file-annotate");
+
+  // A plain file: kind icon instead of a thumbnail, so the viewer can never open
+  // it — only the `×` belongs on that chip. Hovered, because the annotate action
+  // is hover-revealed (a count-only assertion would pass on an invisible button).
+  await window
+    .locator('.imb-chat-input-wrap input[type="file"]')
+    .setInputFiles({
+      name: "notes.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("hello"),
+    });
+  await expect(chips).toHaveCount(1);
+  await chips.nth(0).hover();
+  await expect(annotate(0)).toHaveCount(0);
+  await expect(
+    chips.nth(0).getByRole("button", { name: /Remove/ }),
+  ).toHaveCount(1);
+
+  // A picture next to it: that chip does get the action, and only that chip.
+  await pastePicture(window, "second.png");
+  await expect(chips).toHaveCount(2);
+  await chips.nth(1).hover();
+  await expect(annotate(1)).toBeVisible();
+  await expect(annotate(0)).toHaveCount(0);
+});
+
 test("a dragged area is drawn where it was dragged", async () => {
   const session = app!;
   const window = session.window;

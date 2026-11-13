@@ -29,8 +29,9 @@ import {
   type ComposerDraftView,
   type PendingAttachment,
 } from "../../../../chat-draft";
+import { Button } from "../../../button";
 import { ChatAvatar } from "../../../chat-avatar";
-import { IconChat, IconSend } from "../../../icons";
+import { IconChat } from "../../../icons";
 import { useMentionResolver } from "../../../markdown/use-mention";
 import { Modal } from "../../../modal";
 import { SearchInput } from "../../../search-input";
@@ -663,16 +664,22 @@ export function ComposerCard({
             )}
             {attachMenuExtra}
           </AttachMenuButton>
-          <button
-            type="button"
-            className="imb-send-btn-circle"
-            aria-label={actionLabel}
-            title={actionLabel}
+          {/*
+           * A text button, not the old circular icon: the label *is* the
+           * affordance (`Send`, or `Interject` while a run streams), so the
+           * control needs no tooltip to say what it does. Geometry comes from
+           * the shared `.imb-btn` recipe (30px, 7px radius, 14px/500), which is
+           * also the design system's button spec — hence the same 30px baseline
+           * as the `+` attach button on the left.
+           */}
+          <Button
+            className="imb-send-btn"
+            variant="primary"
             disabled={sendDisabledInternal}
             onClick={send}
           >
-            <IconSend />
-          </button>
+            {actionLabel}
+          </Button>
         </div>
       </div>
       <input
