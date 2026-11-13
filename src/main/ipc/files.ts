@@ -1,8 +1,19 @@
 import { MAX_ATTACHMENT_BYTES } from "@shared/constants/attachments";
+import { MAX_ANNOTATION_SOURCE_BYTES } from "@shared/constants/image-annotation";
+import {
+  imageMimeForPath,
+  isPreviewableImagePath,
+} from "@shared/image-attachments";
 import { t } from "@shared/l10n";
 import { basename, isAbsolute } from "path";
 import { randomUUID } from "crypto";
-import { statSync, writeFileSync } from "fs";
+import {
+  lstatSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import {
   deletePastedFile,
   savePastedFile,
@@ -49,6 +60,60 @@ export function registerFileHandlers(bind: Binder): void {
       return saveUploadedFile(safeChatId, safeName, safeType, toBuffer(data));
     },
   );
+
+  /**
+   * The bytes of one picture, as a `data:` URL.
+   *
+   * Needed because `imb-file:` deliberately withholds them from the renderer
+   * (no `corsEnabled`, no `supportFetchAPI`: an `<img>` may *show* it, a canvas
+   * may not read it). Baking an annotated copy therefore has to be handed the
+   * pixels by main.
+   *
+   * Trust model is the one the `imb-file:` handler already enforces, plus a
+   * tighter size cap: absolute path, previewable-image extension, regular file,
+   * and at most `MAX_ANNOTATION_SOURCE_BYTES`. A `data:` URL (rather than a
+   * Buffer) keeps the reply JSON-shaped, so the remote transport can carry it
+   * without a second framing protocol.
+   */
+  bind("files:readImageBytes", (_ctx, path: unknown) => {
+    const safePath = assertString(path, "image path");
+    if (!isAbsolute(safePath)) {
+      throw new Error("The image path must be absolute.");
+    }
+    if (!isPreviewableImagePath(safePath)) {
+      throw new Error("Only image files can be read for annotation.");
+    }
+    // Ownership checks, in order of cost. `lstat` (not `stat`) on purpose: it does
+    // **not** follow a symlink, so a link named `linked.png` cannot be used to read
+    // the bytes of whatever it points at (the extension gate would otherwise only
+    // see the link's own name — the hole QA found with `linked.png -> /etc/hosts`).
+    let size = 0;
+    try {
+      const stats = lstatSync(safePath);
+      if (!stats.isFile()) throw new Error("not a regular file");
+      size = stats.size;
+    } catch {
+      throw new Error("The image does not exist.");
+    }
+    if (size === 0 || size > MAX_ANNOTATION_SOURCE_BYTES) {
+      throw new Error("The image is too large to annotate.");
+    }
+    // Belt and braces: resolve the real path and re-apply the image gate to *it*, so
+    // a link planted inside an allowed folder cannot smuggle a non-image through
+    // either (a no-op for a plain file, which is the only case that reaches here).
+    let realPath = safePath;
+    try {
+      realPath = realpathSync(safePath);
+    } catch {
+      throw new Error("The image does not exist.");
+    }
+    if (!isPreviewableImagePath(realPath)) {
+      throw new Error("Only image files can be read for annotation.");
+    }
+    const bytes = readFileSync(realPath);
+    const mime = imageMimeForPath(realPath);
+    return { mime, dataUrl: `data:${mime};base64,${bytes.toString("base64")}` };
+  });
 
   // Remove the on-disk copy of a pasted attachment when its chip is discarded.
   // Main verifies the path belongs to the pasted store before deleting, so a

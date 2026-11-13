@@ -273,6 +273,18 @@ export function appendMessage(
     if (!linked) throw new Error("Linked group chat does not exist.");
   }
   const attachments = validateMessageAttachments(options.attachments);
+  // An image annotation of a picture that rides along with **this** message must
+  // name a picture this message actually carries: an out-of-range index would be
+  // a mark drawn on nothing (the attachment list is only known from here on).
+  for (const comment of comments ?? []) {
+    const target = comment.anchor.target;
+    if (target.kind !== "image" || target.source !== null) continue;
+    if (target.attachmentIndex >= (attachments?.length ?? 0)) {
+      throw new Error(
+        "An image annotation points at an attachment this message does not have.",
+      );
+    }
+  }
   const attachmentTotal = validateAttachmentTotal(
     options.attachmentTotal,
     attachments,
@@ -586,13 +598,17 @@ export function validateComments(
   const db = getDB();
   for (const comment of validated) {
     const target = comment.anchor.target;
+    // An image annotation points at a picture *inside* a message; that message is
+    // the one to check (an annotation of this message's own attachment has no
+    // source and is checked against the attachment list by `appendMessage`).
+    const subject = target.kind === "image" ? (target.source ?? null) : target;
     // A session-entry anchor is legitimate in a conversation whose thread *is* a
     // session transcript (an employee direct chat), and unverifiable there:
     // those entries live in the Pi session file, not in `messages`.
-    if (target.kind !== "message") continue;
+    if (subject === null || subject.kind !== "message") continue;
     const row = db
       .prepare("SELECT chat_id AS chatId FROM messages WHERE id = ?")
-      .get(target.messageId) as { chatId: number } | undefined;
+      .get(subject.messageId) as { chatId: number } | undefined;
     if (row === undefined || row.chatId !== chatId) {
       throw new Error("A comment points at a message of another conversation.");
     }

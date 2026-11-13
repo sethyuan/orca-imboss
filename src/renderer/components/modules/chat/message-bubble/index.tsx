@@ -1,3 +1,4 @@
+import { isAttachmentOnlyBlurb } from "@shared/attachment-blurb";
 import type { MessageAttachment, MessageComment } from "@shared/types";
 import { cls } from "reactutils";
 import { Markdown } from "../../../markdown";
@@ -77,7 +78,12 @@ export function MessageBubble({
     attachments,
     attachmentsTotal,
   });
-  const mediaOnly = isMediaOnly(attachmentView, content.length);
+  // A send that carried only files stores the generated `Attached: …` blurb as its
+  // text. It is a duplicate of the thumbnails/chips above (and English baked into the
+  // row), so it is not rendered — and the row is then treated as attachment-only.
+  const blurbOnly = isAttachmentOnlyBlurb(content, attachments);
+  const body = blurbOnly ? "" : content;
+  const mediaOnly = isMediaOnly(attachmentView, body.length);
 
   return (
     <div
@@ -94,16 +100,19 @@ export function MessageBubble({
       {avatar}
       <div className={cls("imb-bubble", mediaOnly && "imb-bubble-media")}>
         <MessageAttachments view={attachmentView} self={self} />
-        <CommentCards comments={comments ?? []} />
-        {content.length > 0 &&
+        <CommentCards
+          comments={comments ?? []}
+          carrier={{ kind: "message", messageId }}
+        />
+        {body.length > 0 &&
           (markdown ? (
             <Markdown
-              content={content}
+              content={body}
               resolveMention={resolveMention}
               onMentionClick={onMentionClick}
             />
           ) : (
-            <span className="imb-bubble-text">{content}</span>
+            <span className="imb-bubble-text">{body}</span>
           ))}
         <MessageTime label={timeLabel} copyMarkdown={copyMarkdown} />
       </div>

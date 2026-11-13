@@ -1,11 +1,41 @@
+import { MAX_COMMENTS_PER_MESSAGE } from "@shared/constants/comments";
+import { isAnnotatedCopyName } from "@shared/constants/image-annotation";
 import { t } from "@shared/l10n";
+import type { ImageMark } from "@shared/types";
 import { useEffect, useMemo, useState } from "react";
 import { cls } from "reactutils";
 import type { PendingAttachment } from "../../../../chat-draft";
-import { IconChat, IconFile, IconFolder } from "../../../icons";
+import type { PendingComment } from "../../../../comment-draft";
+import { draftMarkViews } from "../../../../image-annotation-draft";
+import { IconChat, IconComment, IconFile, IconFolder } from "../../../icons";
 import { Tooltip } from "../../../tooltip";
+import type { MarkView } from "../image-annotation/marks-layer";
+import type { LightboxAnnotation, LightboxImage } from "../image-lightbox";
 import { ImageLightbox } from "../image-lightbox";
 import "./index.css";
+
+/**
+ * Annotation of a **draft** picture, as the composer offers it.
+ *
+ * A draft picture is addressed by its chip id (`attachmentId`), so the marks are
+ * resolved through that id and the marked copy replaces this very chip when the
+ * message is sent — no second attachment, no duplicate picture.
+ */
+export interface DraftAnnotationProps {
+  /** The whole pending batch (`#n` ordinals and the cap are the batch's). */
+  comments: readonly PendingComment[];
+  /** Commit a new mark on one chip (note first: it is required). */
+  add: (
+    attachmentId: number,
+    attachmentName: string,
+    mark: ImageMark,
+    note: string,
+  ) => void;
+  /** Replace one pending annotation's note. */
+  updateNote: (key: string, note: string) => void;
+  /** Drop one pending annotation. */
+  remove: (key: string) => void;
+}
 
 export interface DraftAttachmentChipsProps {
   /** Draft chips, in the order the boss attached them. */
@@ -19,6 +49,8 @@ export interface DraftAttachmentChipsProps {
   onViewerClose?: () => void;
   /** Extra class on the chip row (context-specific spacing). */
   className?: string;
+  /** Annotation of the draft's pictures; omitted ⇒ chips are not annotatable. */
+  annotation?: DraftAnnotationProps;
 }
 
 /**
@@ -36,11 +68,14 @@ export function DraftAttachmentChips({
   onRemove,
   onViewerClose,
   className,
+  annotation,
 }: DraftAttachmentChipsProps): React.JSX.Element | null {
   // Full-screen viewer for the image chips: index within `previewables` (the
   // draft's image attachments), plus the chip rect the viewer grows out of.
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [lightboxOrigin, setLightboxOrigin] = useState<DOMRect | null>(null);
+  /** Open the viewer straight into annotation mode (the chip's hover action). */
+  const [lightboxAnnotating, setLightboxAnnotating] = useState(false);
   /** Chips whose thumbnail failed to decode — they fall back to the file icon. */
   const [failedPreviews, setFailedPreviews] = useState<ReadonlySet<number>>(
     () => new Set(),
@@ -72,6 +107,50 @@ export function DraftAttachmentChips({
       value === null || value < previewCount ? value : null,
     );
   }, [previewCount]);
+
+  /**
+   * Marks of the chip the viewer is showing: pending annotations bound to that
+   * chip, numbered by their position in the batch (the number the model answers).
+   */
+  const marksOf = (attachmentId: number): MarkView[] =>
+    annotation === undefined
+      ? []
+      : draftMarkViews(annotation.comments, attachmentId);
+  const countOf = (attachmentId: number): number =>
+    marksOf(attachmentId).length;
+  const viewerImages: LightboxImage[] = previewables.map((preview) => ({
+    name: preview.name,
+    src: preview.src,
+    ...(marksOf(preview.id).length === 0 ? {} : { marks: marksOf(preview.id) }),
+  }));
+  const viewerAnnotation: LightboxAnnotation | undefined =
+    annotation === undefined
+      ? undefined
+      : {
+          batchCount: annotation.comments.length,
+          // A chip is always the original file (a marked copy only ever replaces it
+          // at send time), but the guard stays: the naming rule is what decides, not
+          // who is asking.
+          canAnnotate: (index) => {
+            const preview = previewables[index];
+            return (
+              preview !== undefined &&
+              !isAnnotatedCopyName(preview.name) &&
+              annotation.comments.length < MAX_COMMENTS_PER_MESSAGE
+            );
+          },
+          autoStart: lightboxAnnotating,
+          unavailableReason: t("Already ${count} annotations in this batch.", {
+            count: String(MAX_COMMENTS_PER_MESSAGE),
+          }),
+          onCreate: (index, mark, note) => {
+            const preview = previewables[index];
+            if (preview === undefined) return;
+            annotation.add(preview.id, preview.name, mark, note);
+          },
+          onEditNote: (_index, key, note) => annotation.updateNote(key, note),
+          onRemove: (_index, key) => annotation.remove(key),
+        };
 
   if (items.length === 0) return null;
 
@@ -115,6 +194,7 @@ export function DraftAttachmentChips({
                       setLightboxOrigin(
                         event.currentTarget.getBoundingClientRect(),
                       );
+                      setLightboxAnnotating(false);
                       setLightbox(at);
                     }}
                   >
@@ -142,6 +222,42 @@ export function DraftAttachmentChips({
                     )}
                   </div>
                 )}
+                {annotation !== undefined &&
+                  !isAnnotatedCopyName(item.attachment.name) && (
+                    // The hot path: one click from "the picture I am about to send" to
+                    // a mark on it, without hunting for the viewer's own button.
+                    <button
+                      type="button"
+                      className="imb-attached-file-annotate"
+                      aria-label={t("Annotate")}
+                      title={t("Annotate")}
+                      onClick={(event) => {
+                        const at = previewables.findIndex(
+                          (preview) => preview.id === item.id,
+                        );
+                        if (at < 0) return;
+                        setLightboxOrigin(
+                          event.currentTarget
+                            .closest<HTMLElement>(".imb-attached-file-thumb")
+                            ?.getBoundingClientRect() ?? null,
+                        );
+                        setLightboxAnnotating(true);
+                        setLightbox(at);
+                      }}
+                    >
+                      <IconComment className="imb-icon" />
+                    </button>
+                  )}
+                {annotation !== undefined && countOf(item.id) > 0 && (
+                  <span
+                    className="imb-attached-file-marks"
+                    aria-label={t("${count} annotations", {
+                      count: String(countOf(item.id)),
+                    })}
+                  >
+                    {countOf(item.id)}
+                  </span>
+                )}
                 <button
                   type="button"
                   className="imb-attached-file-remove"
@@ -157,13 +273,15 @@ export function DraftAttachmentChips({
       </div>
       {lightbox !== null && (
         <ImageLightbox
-          images={previewables.map(({ name, src }) => ({ name, src }))}
+          images={viewerImages}
+          annotation={viewerAnnotation}
           index={lightbox}
           origin={lightboxOrigin}
           onIndexChange={setLightbox}
           onClose={() => {
             setLightbox(null);
             setLightboxOrigin(null);
+            setLightboxAnnotating(false);
             onViewerClose?.();
           }}
         />

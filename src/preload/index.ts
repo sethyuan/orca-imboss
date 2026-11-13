@@ -143,6 +143,19 @@ const api = {
         data,
       ) as Promise<MessageAttachment>,
     /**
+     * Bytes of one picture as a `data:` URL, for baking an annotated copy.
+     *
+     * `imb-file:` serves pictures to `<img>` only (no CORS, no fetch), so the
+     * renderer cannot read the pixels of what it is displaying; this is the one
+     * controlled way to get them. Main enforces absolute path + image extension +
+     * a size cap.
+     */
+    readImageBytes: (path: string) =>
+      ipcRenderer.invoke("files:readImageBytes", path) as Promise<{
+        mime: string;
+        dataUrl: string;
+      }>,
+    /**
      * Remove the on-disk copy of a pasted attachment (chip discarded). Main
      * verifies ownership and silently ignores anything outside the pasted
      * store, so a disk-backed user file is never deleted.
@@ -222,6 +235,12 @@ const api = {
       on<boolean>("window:maximized", cb),
     /** Fired when the OS window regains focus (used to re-clear unread). */
     onFocus: (cb: () => void) => on<undefined>("window:focus", cb),
+    /**
+     * Fired when the window stops being the foreground window (focus lost, hidden,
+     * minimized). The renderer's own `blur`/`visibilitychange` are not reliable in
+     * Electron, so "a key is held down" state has to be released from here.
+     */
+    onBlur: (cb: () => void) => on<undefined>("window:blur", cb),
 
     /** Global show/hide shortcut state (persisted value + OS registration). */
     getShortcut: () =>

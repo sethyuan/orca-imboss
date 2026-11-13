@@ -20,6 +20,7 @@
  * Exit code 0 = every check passed.
  */
 
+import { isAttachmentOnlyBlurb } from "../../src/shared/attachment-blurb";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -149,6 +150,10 @@ async function main(): Promise<void> {
     // session view relies on the split to show the cards again) and keep its
     // place **before** the `[Attachments]` block.
     runCommentChecks();
+    // The generated `Attached: …` line is hidden in the thread, but only when the
+    // files are ones the app stored itself — a sentence the boss typed by hand must
+    // never disappear (QA round 4).
+    runAttachmentBlurbChecks();
     // The generated system prompt must not carry anything volatile (Pi records a
     // new `preamble` revision — the whole system prompt — on every change), and
     // the two role variants must stay distinct.
@@ -306,6 +311,77 @@ function runRefNameChecks(): void {
 }
 
 /**
+ * `isAttachmentOnlyBlurb()`: hide the generated blurb, never the boss's own words.
+ *
+ * The two directions matter equally: leaving the line visible is cosmetic, but
+ * swallowing a real message is data the boss cannot get back (the thread is where he
+ * reads it).
+ */
+function runAttachmentBlurbChecks(): void {
+  const pasted = [{ name: "pasted-20261113-101010.png" }];
+  const annotated = [
+    { name: "annotated-pasted-20261113-101010.png" },
+    { name: "annotated-shot-2.png" },
+  ];
+  check(
+    "the generated blurb of an app-stored file is recognised",
+    isAttachmentOnlyBlurb("Attached: pasted-20261113-101010.png", pasted),
+  );
+  check(
+    "several app-stored files are recognised (comma list, in order)",
+    isAttachmentOnlyBlurb(
+      "Attached: annotated-pasted-20261113-101010.png, annotated-shot-2.png",
+      annotated,
+    ),
+  );
+  check(
+    "the placeholder wording with no names is recognised",
+    isAttachmentOnlyBlurb("Attached files", pasted),
+  );
+  check(
+    "a hand-typed blurb over the boss's own file name stays visible",
+    !isAttachmentOnlyBlurb("Attached: a.png", [{ name: "a.png" }]),
+  );
+  check(
+    "a hand-typed blurb in Chinese stays visible",
+    !isAttachmentOnlyBlurb("Attached: 我的截图.png", [{ name: "我的截图.png" }]),
+  );
+  check(
+    "a sentence that only starts like the blurb stays visible",
+    !isAttachmentOnlyBlurb(
+      "Attached: pasted-20261113-101010.png 里的第三行不对",
+      pasted,
+    ),
+  );
+  check(
+    "naming one of two attachments is the boss talking, not the generator",
+    !isAttachmentOnlyBlurb(
+      "Attached: pasted-20261113-101010.png",
+      [{ name: "pasted-20261113-101010.png" }, { name: "upload-9-report.pdf" }],
+    ),
+  );
+  check(
+    "a mix of minted and user files is never treated as generated",
+    !isAttachmentOnlyBlurb("Attached: pasted-a.png, 我的截图.png", [
+      { name: "pasted-a.png" },
+      { name: "我的截图.png" },
+    ]),
+  );
+  check(
+    "no attachments means no blurb (the text is the message)",
+    !isAttachmentOnlyBlurb("Attached files", []) &&
+      !isAttachmentOnlyBlurb("Attached files", null),
+  );
+  check(
+    "a truncated name still matches its file",
+    isAttachmentOnlyBlurb(
+      `Attached: ${"pasted-" + "x".repeat(40)}…`,
+      [{ name: "pasted-" + "x".repeat(80) + ".png" }],
+    ),
+  );
+}
+
+/**
  * Comments ↔ prompt plumbing (`comment-prompt.ts`) and their storage round-trip.
  *
  * The session projection trusts `splitCommentPrompt()` to hand back exactly what
@@ -366,11 +442,12 @@ function runCommentChecks(): void {
   );
   const recovered = promptCommentToMessageComment(split.comments[0]!);
   check(
-    "a recovered comment is a quote-only anchor (offsets unknown, both -1)",
-    recovered.anchor.start === -1 &&
-      recovered.anchor.end === -1 &&
-      recovered.anchor.textLength === -1 &&
-      recovered.anchor.occurrence === 0,
+    "a recovered comment is a quote-only anchor (offsets unknown)",
+    recovered.anchor.start === undefined &&
+      recovered.anchor.end === undefined &&
+      recovered.anchor.textLength === undefined &&
+      recovered.anchor.occurrence === undefined &&
+      recovered.anchor.quote === "the answer",
   );
   const entryComment = {
     anchor: {
@@ -473,6 +550,160 @@ function runCommentChecks(): void {
     "a comment pointing at another conversation's message is rejected",
     throws(() =>
       appendMessage(foreign.id, null, "nope", { comments: [comment] }),
+    ),
+  );
+  // --- Image annotations ------------------------------------------------------
+  // Same block, same numbering axis, one extra line shape: the middle line is
+  // `quote:` for a passage and `at:` for a picture. Everything below is the same
+  // guarantee the text records already have (byte-exact round trip, validation,
+  // storage), because the session projection cannot tell the two apart.
+  const imageComment = {
+    anchor: {
+      target: {
+        kind: "image" as const,
+        attachmentIndex: 1,
+        attachmentName: "shot.png",
+        source: { kind: "message" as const, messageId: target.id },
+      },
+      mark: {
+        kind: "point" as const,
+        x: 0.88,
+        y: 0.06,
+        imageWidth: 2400,
+        imageHeight: 1600,
+      },
+    },
+    note: "the badge shows 3 but the list is empty",
+  };
+  const regionComment = {
+    anchor: {
+      target: {
+        kind: "image" as const,
+        attachmentIndex: 0,
+        attachmentName: "chart.png",
+        source: null,
+      },
+      // Corners deliberately "wrong way round": the reader canonicalizes them.
+      mark: {
+        kind: "region" as const,
+        x: 0.5,
+        y: 0.2,
+        x2: 0.4,
+        y2: 0.1,
+        imageWidth: 0,
+        imageHeight: 0,
+      },
+    },
+    note: "this curve should not rebound",
+  };
+  const mixedBlock = composeCommentBlock([
+    comment,
+    imageComment,
+    regionComment,
+  ]);
+  check(
+    "a picture record is still three lines, with an at: line instead of a quote",
+    mixedBlock.split("\n").length === 1 + 3 * 3 &&
+      mixedBlock.includes("at: point 88.0%, 6.0%") &&
+      !mixedBlock.includes("quote: at:"),
+    mixedBlock.replace(/\n/g, "⏎"),
+  );
+  check(
+    "the picture record names which picture of which message it annotates",
+    mixedBlock.includes("#2 on image 2 of message #" + target.id) &&
+      mixedBlock.includes("(shot.png)") &&
+      mixedBlock.includes("#3 on image 1 of this message (chart.png)"),
+  );
+  check(
+    "a region writes its two corners in canonical order",
+    mixedBlock.includes("at: region 40.0%, 10.0% \u2192 50.0%, 20.0%"),
+  );
+  const mixedSplit = splitCommentPrompt(`look:\n\n${mixedBlock}`);
+  check(
+    "a mixed batch splits back byte-exactly (one numbering axis)",
+    mixedSplit.text === "look:" && mixedSplit.comments.length === 3,
+    String(mixedSplit.comments.length),
+  );
+  check(
+    "the recovered picture record keeps its geometry, owner and no offsets",
+    mixedSplit.comments[1]?.image?.attachmentIndex === 1 &&
+      mixedSplit.comments[1]?.image?.attachmentName === "shot.png" &&
+      mixedSplit.comments[1]?.image?.mark.kind === "point" &&
+      mixedSplit.comments[1]?.image?.mark.x === 0.88 &&
+      mixedSplit.comments[1]?.image?.source?.kind === "message",
+  );
+  check(
+    "the picture record of *this* message recovers as source-less",
+    mixedSplit.comments[2]?.image?.source === null,
+  );
+  const storedImage = appendMessage(chat.id, null, "look at this", {
+    attachments: [
+      {
+        name: "chart.png",
+        size: 10,
+        type: "image/png",
+        path: "/tmp/chart.png",
+      },
+    ],
+    comments: [regionComment],
+  });
+  const storedImageRow = listMessages(chat.id).find(
+    (message) => message.id === storedImage.id,
+  );
+  check(
+    "an image annotation survives the comments column with its mark",
+    storedImageRow?.comments?.length === 1 &&
+      storedImageRow.comments[0]?.anchor.mark?.kind === "region" &&
+      storedImageRow.comments[0]?.anchor.mark.x === 0.4 &&
+      storedImageRow.comments[0]?.anchor.target.kind === "image",
+  );
+  check(
+    "an image annotation without a mark is rejected",
+    throws(() =>
+      validateCommentsPayload([
+        { ...imageComment, anchor: { target: imageComment.anchor.target } },
+      ]),
+    ),
+  );
+  check(
+    "a mark on a passage annotation is rejected",
+    throws(() =>
+      validateCommentsPayload([
+        {
+          ...comment,
+          anchor: { ...comment.anchor, mark: imageComment.anchor.mark },
+        },
+      ]),
+    ),
+  );
+  check(
+    "a coordinate outside the picture is rejected",
+    throws(() =>
+      validateCommentsPayload([
+        {
+          ...imageComment,
+          anchor: {
+            ...imageComment.anchor,
+            mark: { ...imageComment.anchor.mark, x: 1.2 },
+          },
+        },
+      ]),
+    ),
+  );
+  check(
+    "an annotation of a picture this message does not carry is rejected",
+    throws(() =>
+      appendMessage(chat.id, null, "nothing here", {
+        comments: [
+          {
+            ...regionComment,
+            anchor: {
+              ...regionComment.anchor,
+              target: { ...regionComment.anchor.target, attachmentIndex: 7 },
+            },
+          },
+        ],
+      }),
     ),
   );
   check(

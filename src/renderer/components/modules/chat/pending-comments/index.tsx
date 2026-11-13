@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { MAX_COMMENT_NOTE_LENGTH } from "@shared/constants/comments";
 import { cls } from "reactutils";
 import { IconTrash } from "../../../icons";
+import { MarkThumb } from "../image-annotation/thumbs";
 import { IconButton } from "../../../icon-button";
 import type { PendingComment } from "../../../../comment-draft";
 import "./index.css";
@@ -114,12 +115,24 @@ export function PendingComments({
             }}
           >
             <span className="imb-comment-pending-ordinal">{`#${index + 1}`}</span>
-            {/* No `title`: the native tooltip is not this app's design language,
-                and the full passage stays readable where it was selected (it is
-                only ellipsized visually — assistive tech reads it in full). */}
-            <span className="imb-comment-pending-quote">
-              {comment.anchor.quote}
-            </span>
+            {/* Two row shapes, one list: a quoted passage, or a thumbnail with the
+                mark on it. The thumbnail keeps the picture's aspect ratio, so
+                "where on the picture" reads even before the picture is opened. */}
+            {comment.anchor.mark !== undefined ? (
+              <MarkThumb
+                mark={comment.anchor.mark}
+                ordinal={index + 1}
+                note={comment.note}
+                className="imb-comment-pending-thumb"
+              />
+            ) : (
+              // No `title`: the native tooltip is not this app's design language,
+              // and the full passage stays readable where it was selected (it is
+              // only ellipsized visually — assistive tech reads it in full).
+              <span className="imb-comment-pending-quote">
+                {comment.anchor.quote}
+              </span>
+            )}
             {editing ? (
               <>
                 <textarea

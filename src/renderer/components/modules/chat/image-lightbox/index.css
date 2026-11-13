@@ -1,4 +1,42 @@
+/*
+ * The viewer's cursor, in three registers — the whole view shares one, so nothing is
+ * "half draggable":
+ * - `grab`: this surface pans (browsing and the model view always do — a plain drag
+ *   works there, so the cursor says so without a key; in annotation mode it appears
+ *   only while `Space` is held, which is that mode's one "panning is available now"
+ *   signal, since the banner's wording is the only other hint);
+ * - `grabbing`: a pan is in flight (left/right/middle button, ctrl+drag, two fingers);
+ * - `crosshair`: annotation mode at rest — a press draws.
+ * Standard values on purpose: this app already uses `grab`/`grabbing` for its other
+ * draggable surfaces (nav reorder, the image deck, the avatar crop), and the design
+ * system has no cursor token to extend.
+ */
+.imb-lightbox-cursor-grab {
+  cursor: grab;
+}
+
+.imb-lightbox-cursor-grabbing {
+  cursor: grabbing;
+}
+
+.imb-lightbox-cursor-crosshair {
+  cursor: crosshair;
+}
+
 .imb-lightbox {
+  /* Horizontal room the picture may use. Annotation mode narrows it so the
+     「本图标注」 list (236px + margins) never covers the picture; the reset below
+     is the only thing that has to change for that. */
+  --imb-lightbox-avail: 90vw;
+  /* The viewer's own padding, named so the caption (absolutely positioned against
+     this box) can sit on the same rhythm instead of a second magic number. */
+  --imb-lightbox-gutter-y: 48px;
+  --imb-lightbox-gutter-x: 64px;
+  /* The caption's own height (its tallest control) and the air above it: the picture
+     area gives them up, or a tall/portrait picture is drawn *under* the caption (QA: a
+     600×2400 picture lost its bottom 9px, and the full 28px when it filled the box). */
+  --imb-lightbox-caption-h: 28px;
+  --imb-lightbox-caption-gap: 10px;
   position: fixed;
   inset: 0;
   /* Above every in-app layer (the deck's cards/badge sit near 10-20, the app's
@@ -7,7 +45,7 @@
   background: rgba(0, 0, 0, 0.86);
   display: grid;
   place-items: center;
-  padding: 48px 64px;
+  padding: var(--imb-lightbox-gutter-y) var(--imb-lightbox-gutter-x);
   /* A zoomed picture is intentionally larger than the window; clip it here so
      nothing paints over the app behind the backdrop. */
   overflow: hidden;
@@ -26,18 +64,29 @@
 .imb-lightbox-figure {
   margin: 0;
   max-width: 100%;
-  max-height: 100%;
+  height: 100%;
+  /* The picture area is this box minus the caption band, which the caption occupies
+     (it is positioned against the *viewer*, so it takes no space in here). Reserving it
+     with padding — rather than letting the picture be centred in the full height — is
+     what keeps a portrait picture's bottom edge from sliding underneath the caption. */
+  padding-bottom: calc(
+    var(--imb-lightbox-caption-h) + var(--imb-lightbox-caption-gap)
+  );
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  gap: var(--imb-lightbox-caption-gap);
   min-width: 0;
 }
 
 .imb-lightbox-image {
   display: block;
-  max-width: 90vw;
-  max-height: 80vh;
+  max-width: var(--imb-lightbox-avail);
+  /* Never taller than the picture area (the figure's content box already had the
+     caption band subtracted from it). */
+  max-height: min(80vh, 100%);
   object-fit: contain;
   border-radius: var(--imb-radius-md);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
@@ -106,18 +155,83 @@
   /* Own every touch gesture over the picture (no browser scroll/zoom). */
   touch-action: none;
   user-select: none;
-  /* Panning works at any scale, so the picture is always draggable. */
-  cursor: grab;
+  /* The cursor is owned by the viewer, not by the picture (see
+     `.imb-lightbox-cursor-*`): the whole view is one surface, so dragging over the
+     letterboxing beside a panned picture behaves like dragging over the picture. */
+  cursor: inherit;
+}
+
+/*
+ * Annotation mode: the picture re-fits into the space left of the side list, and
+ * a plain drag draws instead of panning (panning is `Space`+drag).
+ */
+.imb-lightbox-annotating {
+  --imb-lightbox-avail: min(90vw, calc(100vw - 64px - 300px));
+  padding-right: calc(300px + 16px);
+}
+
+/* The caption must stop where the side list starts, or its actions (标注 / 模型视角 /
+   在文件夹中显示) slide under the panel. Same reserve as the picture's padding. */
+.imb-lightbox-annotating .imb-lightbox-caption {
+  right: calc(300px + 16px);
+}
+
+/* 「标注」 / 「模型视角」: the viewer's own actions, sitting with the caption's
+   other controls (a lighter, pill-shaped variant of the reveal button). */
+.imb-lightbox-action {
+  flex: none;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--imb-radius-pill);
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: var(--imb-text-sm);
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--imb-motion-fast) var(--imb-ease-standard);
+}
+
+.imb-lightbox-action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.imb-lightbox-action-on {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #1c1c20;
+  font-weight: 600;
+}
+
+.imb-lightbox-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.imb-lightbox-action:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
+.imb-annot-model-view-badge {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 6px 12px;
+  border-radius: var(--imb-radius-pill);
+  background: rgba(28, 28, 32, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: var(--imb-text-sm);
 }
 
 .imb-lightbox-zoom img {
   /* The wrapper is the pointer target: presses anywhere on the picture start a
      pan/pinch, and the image never initiates a native drag. */
   pointer-events: none;
-}
-
-.imb-lightbox-zoom.imb-lightbox-grabbing {
-  cursor: grabbing;
 }
 
 @keyframes imb-lightbox-image-fade {
@@ -130,10 +244,25 @@
 }
 
 .imb-lightbox-caption {
+  /* Painted above the picture's transformed layer: a magnified picture is drawn
+     out of its own box, and without this it covered the caption's actions — the
+     press then landed on the annotation surface behind them and drew a new mark
+     instead of switching the view.
+
+     Pinned to the viewer's bottom edge (not floated under the picture): a picture
+     that does not fill the window used to leave the caption hovering mid-screen,
+     which read as if it belonged to the picture above it rather than to the viewer.
+     Being positioned against the viewer also makes it immune to zoom, pan and the
+     mode switches — nothing about the picture's transform moves it. */
+  position: absolute;
+  left: var(--imb-lightbox-gutter-x);
+  right: var(--imb-lightbox-gutter-x);
+  bottom: var(--imb-lightbox-gutter-y);
+  z-index: 2;
+  justify-content: center;
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: 90vw;
   color: rgba(255, 255, 255, 0.82);
   font-size: var(--imb-text-sm);
 }

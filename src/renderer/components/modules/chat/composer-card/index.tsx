@@ -35,7 +35,10 @@ import { useMentionResolver } from "../../../markdown/use-mention";
 import { Modal } from "../../../modal";
 import { SearchInput } from "../../../search-input";
 import { Textarea } from "../../../textarea";
-import { DraftAttachmentChips } from "../attachment-draft";
+import {
+  DraftAttachmentChips,
+  type DraftAnnotationProps,
+} from "../attachment-draft";
 import { AttachMenuButton } from "../attachment-draft/attach-menu";
 import { formatChatPreview } from "../preview-text";
 import { displayTitle } from "../relative-time";
@@ -134,6 +137,12 @@ export interface ComposerCardProps {
    * "empty text and no chips" is no longer the whole disabled rule.
    */
   pendingComments?: { count: number; node: ReactNode } | null;
+  /**
+   * Annotation of the draft's pictures (marks already made, plus where a new one
+   * goes). Omitted ⇒ the chips are plain, non-annotatable previews — the ask card's
+   * answer draft, which has no `[Comments]` channel of its own.
+   */
+  draftAnnotation?: DraftAnnotationProps;
   /** Extra class on the outer wrapper (context-specific spacing). */
   className?: string;
   /**
@@ -187,6 +196,7 @@ export function ComposerCard({
   attachConversations = true,
   overlay,
   pendingComments = null,
+  draftAnnotation,
   className,
   onKeyDown,
   onTextChanged,
@@ -579,6 +589,7 @@ export function ComposerCard({
       <div className="imb-chat-input-card">
         <DraftAttachmentChips
           items={attachments}
+          annotation={draftAnnotation}
           onRemove={(_item, index) => binding.removeAttachment(index)}
           onViewerClose={() => {
             // Hand the caret back to the composer: closing the viewer returns

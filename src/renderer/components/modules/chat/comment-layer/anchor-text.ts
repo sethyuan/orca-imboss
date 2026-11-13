@@ -307,18 +307,21 @@ export function resolveAnchor(
   index: TextIndex,
   anchor: CommentAnchor,
 ): AnchorResolution {
-  const { quote } = anchor;
-  const hasOffsets =
-    anchor.start >= 0 &&
-    anchor.end > anchor.start &&
-    anchor.end <= index.text.length;
-  if (hasOffsets && index.text.slice(anchor.start, anchor.end) === quote) {
+  const quote = anchor.quote ?? "";
+  // An image annotation has no passage to resolve: it is drawn on a picture, not
+  // tinted in the text.
+  if (quote.length === 0) return { kind: "unresolved" };
+  const start0 = anchor.start ?? -1;
+  const end0 = anchor.end ?? -1;
+  const hasOffsets = start0 >= 0 && end0 > start0 && end0 <= index.text.length;
+  const occurrence = anchor.occurrence ?? 0;
+  if (hasOffsets && index.text.slice(start0, end0) === quote) {
     return {
       kind: anchor.textLength === index.text.length ? "exact" : "relocated",
-      span: { start: anchor.start, end: anchor.end },
+      span: { start: start0, end: end0 },
     };
   }
-  const exact = findOccurrence(index.text, quote, anchor.occurrence);
+  const exact = findOccurrence(index.text, quote, occurrence);
   if (exact >= 0) {
     return {
       kind: "relocated",

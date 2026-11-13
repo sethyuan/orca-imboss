@@ -660,6 +660,8 @@ function rangeForComment(
   anchor: CommentAnchor,
   contentSelector: string,
 ): Range | null {
+  // Image annotations are drawn on the picture, not tinted in the text.
+  if (anchor.target.kind === "image") return null;
   const id =
     anchor.target.kind === "message"
       ? String(anchor.target.messageId)

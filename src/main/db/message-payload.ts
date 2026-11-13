@@ -2,6 +2,7 @@ import type {
   CommentAnchor,
   CommentTarget,
   ImageGenStatus,
+  ImageTargetSource,
   MessageAttachment,
   MessageComment,
   MessageStep,
@@ -12,6 +13,8 @@ import {
   MAX_COMMENT_QUOTE_LENGTH,
   MAX_COMMENTS_PER_MESSAGE,
 } from "@shared/constants/comments";
+import { MAX_COMMENT_ATTACHMENT_NAME_LENGTH } from "@shared/constants/image-annotation";
+import { normalizeImageMark } from "@shared/image-annotation";
 import { parseJsonObject } from "./json";
 
 /**
@@ -197,6 +200,17 @@ function parseOneComment(value: unknown): MessageComment | null {
   const anchorRecord = record["anchor"];
   if (typeof anchorRecord !== "object" || anchorRecord === null) return null;
   const raw = anchorRecord as Record<string, unknown>;
+  const target = parseCommentTarget(raw["target"]);
+  if (target === null) return null;
+  // An image annotation carries geometry and no text at all; everything else is
+  // a passage annotation (which may be quote-only, see below).
+  if (target.kind === "image") {
+    if (raw["quote"] !== undefined) return null;
+    const mark = normalizeImageMark(raw["mark"]);
+    if (mark === null) return null;
+    return { anchor: { target, mark }, note };
+  }
+  if (raw["mark"] !== undefined) return null;
   const quote = raw["quote"];
   if (
     typeof quote !== "string" ||
@@ -205,14 +219,20 @@ function parseOneComment(value: unknown): MessageComment | null {
   ) {
     return null;
   }
-  const target = parseCommentTarget(raw["target"]);
-  if (target === null) return null;
   const start = raw["start"];
   const end = raw["end"];
   const occurrence = raw["occurrence"];
   const textLength = raw["textLength"];
-  // A quote-only anchor (`-1`/`-1`/`0`/`-1`) is the shape recovered from a
-  // prompt block: no offsets, resolved by searching the quote.
+  // No offsets at all (the shape a prompt-recovered anchor has) and the legacy
+  // `-1` sentinel both mean "quote-only": resolved by searching the quote.
+  if (
+    start === undefined &&
+    end === undefined &&
+    occurrence === undefined &&
+    textLength === undefined
+  ) {
+    return { anchor: { target, quote }, note };
+  }
   const quoteOnly =
     start === -1 && end === -1 && occurrence === 0 && textLength === -1;
   if (!quoteOnly) {
@@ -232,8 +252,59 @@ function parseOneComment(value: unknown): MessageComment | null {
   return { anchor, note };
 }
 
-/** Parse one anchor target (exactly one of the two shapes). */
+/** Parse one anchor target (exactly one of the three shapes). */
 function parseCommentTarget(value: unknown): CommentTarget | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (record["kind"] === "message") {
+    const messageId = record["messageId"];
+    if (!isSafeInt(messageId) || messageId <= 0) return null;
+    return { kind: "message", messageId };
+  }
+  if (record["kind"] === "entry") {
+    const entryId = record["entryId"];
+    if (
+      typeof entryId !== "string" ||
+      entryId.length === 0 ||
+      entryId.length > MAX_COMMENT_ENTRY_ID_LENGTH ||
+      /\s/.test(entryId)
+    ) {
+      return null;
+    }
+    return { kind: "entry", entryId };
+  }
+  if (record["kind"] === "image") {
+    return parseImageTarget(record);
+  }
+  return null;
+}
+
+/** Parse the picture an image annotation points at. */
+function parseImageTarget(
+  record: Record<string, unknown>,
+): CommentTarget | null {
+  const attachmentIndex = record["attachmentIndex"];
+  if (!isSafeInt(attachmentIndex) || attachmentIndex < 0) return null;
+  const attachmentName = record["attachmentName"];
+  if (
+    typeof attachmentName !== "string" ||
+    attachmentName.length === 0 ||
+    attachmentName.length > MAX_COMMENT_ATTACHMENT_NAME_LENGTH ||
+    /\s{2,}|[\r\n]/.test(attachmentName)
+  ) {
+    return null;
+  }
+  const raw = record["source"];
+  if (raw === null) {
+    return { kind: "image", attachmentIndex, attachmentName, source: null };
+  }
+  const source = parseImageSource(raw);
+  if (source === null) return null;
+  return { kind: "image", attachmentIndex, attachmentName, source };
+}
+
+/** Parse the "where does that picture live" half of an image target. */
+function parseImageSource(value: unknown): ImageTargetSource | null {
   if (typeof value !== "object" || value === null) return null;
   const record = value as Record<string, unknown>;
   if (record["kind"] === "message") {

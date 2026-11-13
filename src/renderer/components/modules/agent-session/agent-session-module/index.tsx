@@ -11,6 +11,10 @@ import { IconHalt, IconSearch } from "../../../icons";
 import { Tooltip } from "../../../tooltip";
 import { MyMessageJump } from "../../chat/my-message-jump";
 import { SessionComposer } from "../session-composer";
+import {
+  useSessionImageAnnotations,
+  type AnnotatableRow,
+} from "../../chat/image-annotation/use-image-annotations";
 import { SessionThread } from "../agent-session-view/session-thread";
 import { useSessionView } from "../agent-session-view/use-session-view";
 import "./index.css";
@@ -85,6 +89,26 @@ export function AgentSessionModule({
     }),
     [draftKey, pendingComments, sentComments],
   );
+
+  /**
+   * Image annotations of this transcript: the batch is the session composer's
+   * (`draftKey`), so the pictures join the very same list the text annotations do.
+   */
+  const annotationRows = useMemo<AnnotatableRow[]>(
+    () =>
+      view.entries.flatMap((entry) =>
+        entry.kind === "user"
+          ? [
+              {
+                source: { kind: "entry" as const, entryId: entry.id },
+                comments: entry.comments ?? null,
+              },
+            ]
+          : [],
+      ),
+    [view.entries],
+  );
+  const chatAnnotation = useSessionImageAnnotations(draftKey, annotationRows);
 
   const sessionItem = openedItems.find(
     (item) =>
@@ -227,7 +251,11 @@ export function AgentSessionModule({
           </Tooltip>
         </div>
       </div>
-      <SessionThread view={view} comments={commentSurface} />
+      <SessionThread
+        view={view}
+        comments={commentSurface}
+        annotation={chatAnnotation}
+      />
       {view.error !== null || view.runError !== null || linkError !== null ? (
         // In flow, above the composer: the shared `.imb-chat-error` is a fixed
         // toast that would land on top of the composer here.

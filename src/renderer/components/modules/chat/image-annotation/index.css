@@ -1,0 +1,520 @@
+/*
+ * Image annotation: the marks drawn on a picture, the banner and side list of the
+ * lightbox's annotation mode, and the note editor.
+ *
+ * The mark color is `--imb-mark` (a fixed red, theme-independent) because a mark
+ * is *picture ink*: it is baked into the delivered copy, so it must not follow the
+ * window's theme. Everything around it (banner, list, editor) stands on the
+ * lightbox's dark backdrop and uses the dark recipe in both themes — the light
+ * "menu" material reads as a hole there.
+ */
+
+/* --- Marks ------------------------------------------------------------------ */
+
+.imb-mark-layer {
+  position: absolute;
+  inset: 0;
+  /* Above the picture copies (the full-resolution one is absolutely positioned
+     inside the same frame), below the lightbox chrome. */
+  z-index: 1;
+  /* The layer itself never eats pointer events; only badges do. */
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.imb-mark-layer-inert .imb-mark-badge,
+.imb-mark-layer-inert .imb-mark-region-box {
+  pointer-events: none;
+}
+
+.imb-mark {
+  position: absolute;
+  /* An empty box: `left`/`top` place its origin, the children position against
+     it. Per-mark `transform` is reserved for the hover emphasis. */
+  width: 0;
+  height: 0;
+  transition:
+    opacity var(--imb-motion-fast) var(--imb-ease-standard),
+    transform var(--imb-motion-fast) var(--imb-ease-standard);
+}
+
+.imb-mark-dim {
+  opacity: 0.5;
+}
+
+/* The mark whose editor is open, or that a card/list row is pointing at. */
+.imb-mark-focus .imb-mark-badge,
+.imb-mark-editing .imb-mark-badge {
+  transform: scale(1.45);
+}
+
+.imb-mark-focus .imb-mark-region-box,
+.imb-mark-editing .imb-mark-region-box {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--imb-mark) 45%, transparent);
+}
+
+.imb-mark-region-box {
+  position: absolute;
+  box-sizing: border-box;
+  border-style: solid;
+  border-color: var(--imb-mark);
+  /* Not a click target by default: inside a bubble or a thumbnail the press belongs
+     to the picture (it opens the viewer), not to the mark. */
+  pointer-events: none;
+  background: color-mix(
+    in oklab,
+    var(--imb-mark) calc(var(--imb-mark-fill, 0.14) * 100%),
+    transparent
+  );
+}
+
+/* In an interactive layer (annotation mode) the rectangle is a click target too: on a
+   tiny area the badge is only a dot, and the mark still has to be reachable. */
+.imb-mark-layer:not(.imb-mark-layer-inert) .imb-mark-region-box {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* A point's ring: centred on the marked pixel, drawn under the badge. */
+.imb-mark-ring {
+  position: absolute;
+  box-sizing: border-box;
+  border-style: solid;
+  border-color: var(--imb-mark);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.imb-mark-badge {
+  position: absolute;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--imb-mark);
+  color: #ffffff;
+  border-style: solid;
+  border-color: #ffffff;
+  border-radius: 50%;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0;
+  transition: transform var(--imb-motion-fast) var(--imb-ease-standard);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.imb-mark-layer-inert .imb-mark-badge {
+  cursor: default;
+}
+
+/*
+ * An earlier batch's mark: grey, dashed, no number. Deliberately a different
+ * register from the live red marks, so "which of these is `#1`" can never be
+ * ambiguous (decision ③).
+ */
+.imb-mark-history .imb-mark-region-box {
+  border-color: rgba(255, 255, 255, 0.72);
+  border-style: dashed;
+  background: transparent;
+}
+
+.imb-mark-history .imb-mark-ring {
+  border-color: rgba(255, 255, 255, 0.72);
+  border-style: dashed;
+}
+
+/* A historical mark has no badge at all (it is not rendered): it is a position, not
+   an ordinal — two batches cannot both own `#1`. */
+
+/* A mark inside a 40×25 list thumbnail: the same layer, scaled down. */
+.imb-mark-thumb {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--imb-radius-xs, 3px);
+  background: var(--imb-sep-strong);
+  vertical-align: middle;
+}
+
+.imb-mark-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* --- Banner ---------------------------------------------------------------- */
+
+.imb-annot-banner {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(92vw, 860px);
+  height: 36px;
+  padding: 0 8px 0 14px;
+  border-radius: var(--imb-radius-pill);
+  background: rgba(28, 28, 32, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: var(--imb-shadow-3);
+  color: #ffffff;
+  font-size: var(--imb-text-sm);
+  white-space: nowrap;
+}
+
+.imb-annot-banner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--imb-mark);
+  flex: none;
+}
+
+.imb-annot-banner-main {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.imb-annot-banner-hint,
+.imb-annot-banner-count {
+  color: rgba(255, 255, 255, 0.55);
+  flex: none;
+}
+
+.imb-annot-banner-done {
+  flex: none;
+  height: 26px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--imb-radius-pill);
+  background: #ffffff;
+  color: #1c1c20;
+  font-family: inherit;
+  font-size: var(--imb-text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.imb-annot-banner-done:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
+/* --- Side list ------------------------------------------------------------- */
+
+.imb-annot-list {
+  position: absolute;
+  top: 64px;
+  /* Flush with the viewer's bottom edge, like the picture area beside it: the panel
+     is a full-height column, not a card that shrinks to its content (and the gap it
+     used to leave showed the thread through underneath). */
+  bottom: 16px;
+  right: 16px;
+  z-index: 2;
+  width: 236px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--imb-radius-md);
+  background: rgba(28, 28, 32, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: var(--imb-shadow-3);
+  color: #ffffff;
+  overflow: hidden;
+}
+
+.imb-annot-list-title {
+  margin: 0;
+  font-size: var(--imb-text-sm);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.imb-annot-list-empty {
+  margin: 0;
+  font-size: var(--imb-text-sm);
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.imb-annot-list-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* The list takes the leftover height and scrolls inside it; the header stays put. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.imb-annot-list-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  border-radius: var(--imb-radius-sm);
+  transition: background var(--imb-motion-fast) var(--imb-ease-standard);
+}
+
+.imb-annot-list-row-hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.imb-annot-list-row-editing {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.imb-annot-list-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  padding: 6px 2px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--imb-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.imb-annot-list-open:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+  border-radius: var(--imb-radius-sm);
+}
+
+.imb-annot-list-ordinal {
+  flex: none;
+  /* The baked mark red is too dark for text on this near-black backdrop; the list
+     lifts it to a lighter red (text only — the mark itself stays `--imb-mark`,
+     because that is the ink baked into the picture). */
+  color: #ff8a80;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.imb-annot-list-note {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.imb-annot-list-remove {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 4px;
+  border: none;
+  border-radius: var(--imb-radius-sm);
+  background: none;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.imb-annot-list-remove:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+/* --- The note editor ------------------------------------------------------- */
+
+.imb-annot-panel {
+  /* Above the lightbox (300) — it is opened from inside it. */
+  z-index: 320;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.imb-annot-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--imb-text-sm);
+}
+
+.imb-annot-panel-ordinal {
+  font-weight: 600;
+  color: var(--imb-mark);
+  font-variant-numeric: tabular-nums;
+}
+
+.imb-annot-panel-kind {
+  color: var(--imb-fg-muted);
+}
+
+.imb-annot-panel-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 72px;
+  max-height: 40vh;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--imb-sep-strong);
+  border-radius: var(--imb-radius-sm);
+  background: var(--imb-bg-content);
+  color: var(--imb-fg);
+  font: inherit;
+  font-size: var(--imb-text-sm);
+  line-height: 1.5;
+}
+
+.imb-annot-panel-input:focus-visible {
+  outline: none;
+  border-color: var(--imb-accent);
+  box-shadow: var(--imb-focus-ring);
+}
+
+.imb-annot-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.imb-annot-panel-trash {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--imb-radius-sm);
+  background: none;
+  color: var(--imb-fg-muted);
+  cursor: pointer;
+}
+
+.imb-annot-panel-trash:hover:not(:disabled) {
+  background: var(--imb-danger-tint);
+  color: var(--imb-danger);
+}
+
+.imb-annot-panel-trash:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.imb-annot-panel-trash svg {
+  width: 15px;
+  height: 15px;
+}
+
+.imb-annot-panel-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--imb-fg-muted);
+  font-size: var(--imb-text-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imb-mark,
+  .imb-mark-badge {
+    transition: none;
+  }
+}
+
+/* --- Capture surface ------------------------------------------------------- */
+
+.imb-annot-capture {
+  position: absolute;
+  inset: 0;
+  /* Above the marks (which sit at 1) so a press never lands on a badge by
+     accident while drawing; a badge that must stay clickable is drawn by the
+     side list instead. */
+  z-index: 2;
+  /* Own every touch gesture: no native scroll/zoom inside the picture. */
+  touch-action: none;
+  /* The viewer owns the cursor (grab / grabbing / crosshair) so that holding `Space`
+     inside annotation mode turns the whole surface into "you can pan now" — a
+     `crosshair` here would win over the viewer's class and hide that signal. */
+  cursor: inherit;
+}
+
+/* The rectangle being dragged: dashed, so it cannot be mistaken for a saved
+   mark (which is solid and carries a badge). */
+.imb-annot-capture-rect {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px dashed var(--imb-mark);
+  background: var(--imb-mark-fill);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* --- Marked copies (decision ⑥) -------------------------------------------- */
+
+.imb-annot-copies {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.imb-annot-copy {
+  position: relative;
+  display: block;
+  width: 96px;
+  height: 60px;
+  padding: 0;
+  border: 1px solid var(--imb-sep-strong);
+  border-radius: var(--imb-radius-sm);
+  overflow: hidden;
+  background: var(--imb-row-hover);
+  cursor: pointer;
+}
+
+.imb-annot-copy img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The label sits on the thumbnail's bottom edge: it says what this picture *is*
+   (a derived copy), which the picture alone cannot. */
+.imb-annot-copy-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 1px 0 2px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ffffff;
+  font-size: var(--imb-fs-caption);
+  line-height: 1.2;
+  text-align: center;
+}
+
+.imb-annot-copy:focus-visible {
+  outline: 2px solid var(--imb-accent);
+  outline-offset: 2px;
+}
+
+/* A delivered mark's row: listed for locating, but there is nothing to press. */
+.imb-annot-list-open-static {
+  cursor: default;
+}

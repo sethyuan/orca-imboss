@@ -24,6 +24,11 @@ import { cls } from "reactutils";
 import { appStore, IS_MAC, useApp } from "../../../../app-store";
 import { EMPTY_COMMENTS, nextCommentId } from "../../../../comment-draft";
 import type { CommentSurface } from "../../../../comment-draft";
+import { ImageAnnotationContext } from "../image-annotation/context";
+import {
+  useChatImageAnnotations,
+  type AnnotatableRow,
+} from "../image-annotation/use-image-annotations";
 import { useDebouncedValue } from "../../../../hooks/use-debounced-value";
 import { useInfiniteList } from "../../../../hooks/use-infinite-list";
 import { useModuleFilter } from "../../../../hooks/use-module-filter";
@@ -272,6 +277,24 @@ export function ChatModule(): React.JSX.Element {
       remove: (id) => appStore.removeChatComment(chatId, id),
     };
   }, [selectedId, pendingComments, sentComments]);
+  /**
+   * Image annotations of the open conversation: the batch is the composer's
+   * (`chatComments[chatId]`), and the read-only marks are derived from every loaded
+   * message's own comment list (an annotation lives on the message that carried it,
+   * not on the message holding the picture).
+   */
+  const annotationRows = useMemo<AnnotatableRow[]>(
+    () =>
+      messages.map((message) => ({
+        source: { kind: "message" as const, messageId: message.id },
+        comments: message.comments,
+      })),
+    [messages],
+  );
+  const imageAnnotation = useChatImageAnnotations(
+    selectedId ?? 0,
+    annotationRows,
+  );
   const selectedIdRef = useRef<number | null>(null);
   selectedIdRef.current = selectedId;
   // Whether the thread is scrolled to (near) the bottom. Auto-scroll only
@@ -1498,6 +1521,10 @@ export function ChatModule(): React.JSX.Element {
         void loadMessages(chatId);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
+        // Rethrown so the composer knows the send did **not** land: it keeps the
+        // draft, the chips and the batch, so nothing typed or annotated is lost and
+        // the boss can just press send again.
+        throw err;
       }
     },
     [selectedId, loadMessages, dropUnseen],
@@ -1967,79 +1994,86 @@ export function ChatModule(): React.JSX.Element {
           header (a floating control over the transcript was covering message
           text), so the thread needs no reserved space for it. */}
         <div className="imb-chat-thread-wrap">
-          <div
-            className="imb-thread"
-            ref={threadRef}
-            // Focus target after the find bar closes when nothing better is
-            // available (a message row keeps `focus-within` styling intact).
-            tabIndex={-1}
-            onScroll={handleThreadScroll}
+          <ImageAnnotationContext.Provider
+            value={selectedId === null ? null : imageAnnotation}
           >
-            {visibleMessages.map((message, index) => {
-              const run = progressRuns.runByMessageId.get(message.id);
-              // A run renders once, at its anchor (oldest card): it shows the
-              // newest card and keeps the others in its history layer.
-              if (run !== undefined && run.anchorId !== message.id) return null;
-              return (
-                <Fragment key={`${message.chatId}-${message.id}`}>
-                  {shouldShowTimeSeparator(
-                    visibleMessages[index - 1],
-                    message,
-                  ) && <TimeSeparator secs={message.createdAt} />}
-                  {run === undefined ? (
-                    <MessageItem
-                      message={message}
-                      onAnswered={handleAnswered}
-                      askAnswer={pairing.answerByAskId.get(message.id)}
-                    />
-                  ) : (
-                    <ProgressGroup
-                      run={run}
-                      cards={run.ids
-                        .map((id) => messageById.get(id))
-                        .filter((card): card is Message => card !== undefined)}
-                      shownId={shownCardId(run)}
-                      revealId={
-                        revealTarget !== null &&
-                        revealTarget.anchorId === run.anchorId
-                          ? revealTarget.messageId
-                          : null
-                      }
-                      onPage={pageRun}
-                      onRevealed={handleRevealed}
-                    />
-                  )}
-                </Fragment>
-              );
-            })}
-            {selectedRunStatus !== undefined && (
-              // Reserved, fixed-height slot: it is present for the whole run, so
-              // toggling the compaction text never shifts the messages above it.
-              <div className="imb-run-status" role="status">
-                {selectedRunStatus.compacting ? t("Compacting…") : ""}
-              </div>
+            <div
+              className="imb-thread"
+              ref={threadRef}
+              // Focus target after the find bar closes when nothing better is
+              // available (a message row keeps `focus-within` styling intact).
+              tabIndex={-1}
+              onScroll={handleThreadScroll}
+            >
+              {visibleMessages.map((message, index) => {
+                const run = progressRuns.runByMessageId.get(message.id);
+                // A run renders once, at its anchor (oldest card): it shows the
+                // newest card and keeps the others in its history layer.
+                if (run !== undefined && run.anchorId !== message.id)
+                  return null;
+                return (
+                  <Fragment key={`${message.chatId}-${message.id}`}>
+                    {shouldShowTimeSeparator(
+                      visibleMessages[index - 1],
+                      message,
+                    ) && <TimeSeparator secs={message.createdAt} />}
+                    {run === undefined ? (
+                      <MessageItem
+                        message={message}
+                        onAnswered={handleAnswered}
+                        askAnswer={pairing.answerByAskId.get(message.id)}
+                      />
+                    ) : (
+                      <ProgressGroup
+                        run={run}
+                        cards={run.ids
+                          .map((id) => messageById.get(id))
+                          .filter(
+                            (card): card is Message => card !== undefined,
+                          )}
+                        shownId={shownCardId(run)}
+                        revealId={
+                          revealTarget !== null &&
+                          revealTarget.anchorId === run.anchorId
+                            ? revealTarget.messageId
+                            : null
+                        }
+                        onPage={pageRun}
+                        onRevealed={handleRevealed}
+                      />
+                    )}
+                  </Fragment>
+                );
+              })}
+              {selectedRunStatus !== undefined && (
+                // Reserved, fixed-height slot: it is present for the whole run, so
+                // toggling the compaction text never shifts the messages above it.
+                <div className="imb-run-status" role="status">
+                  {selectedRunStatus.compacting ? t("Compacting…") : ""}
+                </div>
+              )}
+            </div>
+            {threadFind.open && <ThreadFindBar find={threadFind} />}
+            {commentSurface !== null && (
+              // Commenting on a passage of any prose row (the agent's or the
+              // boss's own): the layer reads the selection inside a
+              // `[data-commentable]` row and keeps the pending comment on the store
+              // until the next send freezes it onto the message.
+              <CommentLayer
+                threadRef={threadRef}
+                comments={commentSurface}
+                contentSelector={CHAT_COMMENT_CONTENT_SELECTOR}
+                revision={messages}
+              />
             )}
-          </div>
-          {threadFind.open && <ThreadFindBar find={threadFind} />}
-          {commentSurface !== null && (
-            // Commenting on a passage of any prose row (the agent's or the
-            // boss's own): the layer reads the selection inside a
-            // `[data-commentable]` row and keeps the pending comment on the store
-            // until the next send freezes it onto the message.
-            <CommentLayer
-              threadRef={threadRef}
-              comments={commentSurface}
-              contentSelector={CHAT_COMMENT_CONTENT_SELECTOR}
-              revision={messages}
-            />
-          )}
-          {/* Messages that arrived while the boss was reading history: floating
+            {/* Messages that arrived while the boss was reading history: floating
             pill over the bottom-right corner of the transcript, above the
             composer. Centering the start of the batch keeps a slice of the
             older context visible, so the batch can be read forwards. */}
-          {unseen !== null && (
-            <NewMessagesJump count={unseen.count} onReveal={jumpToUnseen} />
-          )}
+            {unseen !== null && (
+              <NewMessagesJump count={unseen.count} onReveal={jumpToUnseen} />
+            )}
+          </ImageAnnotationContext.Provider>
         </div>
         <ChatInputBar
           chatId={selected.id}
@@ -2151,6 +2185,28 @@ function DirectChatDetail({
     [chat.id, pendingComments, sentComments],
   );
 
+  /**
+   * Image annotations of this transcript. The batch is the **chat** composer's
+   * (`chatComments[chat.id]`) because that is the composer this detail renders, so
+   * a picture's annotation and a passage's comment end up in one list, one send and
+   * one `#n` axis.
+   */
+  const annotationRows = useMemo<AnnotatableRow[]>(
+    () =>
+      view.entries.flatMap((entry) =>
+        entry.kind === "user"
+          ? [
+              {
+                source: { kind: "entry" as const, entryId: entry.id },
+                comments: entry.comments ?? null,
+              },
+            ]
+          : [],
+      ),
+    [view.entries],
+  );
+  const imageAnnotation = useChatImageAnnotations(chat.id, annotationRows);
+
   const send = useCallback(
     async (
       text: string,
@@ -2171,6 +2227,9 @@ function DirectChatDetail({
         );
       } catch (err) {
         setSendError(err instanceof Error ? err.message : String(err));
+        // Same contract as `handleSend`: the composer keeps the draft and the
+        // annotation batch when the message did not land.
+        throw err;
       }
     },
     [chat.id, view.addPendingChatSend],
@@ -2181,7 +2240,11 @@ function DirectChatDetail({
   return (
     <>
       {renderHeader(view, employeeId)}
-      <SessionThread view={view} comments={commentSurface} />
+      <SessionThread
+        view={view}
+        comments={commentSurface}
+        annotation={imageAnnotation}
+      />
       {error !== null ? (
         // In flow, above the composer: the shared `.imb-chat-error` is a fixed
         // toast that would land on top of the composer here.

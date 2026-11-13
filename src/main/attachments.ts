@@ -11,6 +11,7 @@ import { randomUUID } from "crypto";
 import { rm } from "fs/promises";
 import { basename, extname, isAbsolute, join, resolve, sep } from "path";
 import { MAX_ATTACHMENT_BYTES } from "@shared/constants/attachments";
+import { isAppMintedFileName } from "@shared/attachment-names";
 import type { MessageAttachment } from "@shared/types";
 import { getAttachmentsDir } from "./data-dir";
 
@@ -33,12 +34,10 @@ import { getAttachmentsDir } from "./data-dir";
  */
 
 /**
- * Name prefixes this module mints itself. Only these may be deleted from the
- * attachments store: a chip dropped from the composer must never be able to
- * remove a file the user picked from their own disk (those live outside the
- * store anyway, but the check keeps the trust model in one place).
- */
-const APP_MINTED_PREFIXES = ["pasted-", "upload-"];
+ * Name prefixes this app mints itself (shared with the renderer's provenance rule —
+ * see `shared/attachment-names.ts`, which is the one place that list lives). Only
+ * these may be deleted from the attachments store: a chip dropped from the composer
+ * must never be able to remove a file the user picked from their own disk.
 
 /** A filesystem-safe extension (letters/digits only, short). */
 const SAFE_EXTENSION = /^[a-z0-9]{1,8}$/;
@@ -212,11 +211,7 @@ export function deletePastedFile(path: string): void {
   const root = getAttachmentsDir();
   const resolved = resolve(path);
   if (!resolved.startsWith(root + sep)) return;
-  if (
-    !APP_MINTED_PREFIXES.some((prefix) => basename(resolved).startsWith(prefix))
-  ) {
-    return;
-  }
+  if (!isAppMintedFileName(basename(resolved))) return;
   try {
     if (!lstatSync(resolved).isFile()) return;
   } catch {

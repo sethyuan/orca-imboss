@@ -1,8 +1,15 @@
+import {
+  BADGE_MIN_BAKE_PX,
+  BADGE_MIN_SCREEN_PX,
+  CLICK_JITTER_PX,
+} from "@shared/constants/image-annotation";
 import { t } from "@shared/l10n";
+import type { ImageMark } from "@shared/types";
 import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -11,11 +18,62 @@ import {
 import { createPortal } from "react-dom";
 import { cls } from "reactutils";
 import { IconChevronDown, IconFolder, IconX } from "../../../icons";
+import { CaptureLayer } from "../image-annotation/capture-layer";
+import { AnnotationBanner, AnnotationList } from "../image-annotation/chrome";
+import { markGeometry } from "../image-annotation/geometry";
+import { MarkLayer, type MarkView } from "../image-annotation/marks-layer";
+import { AnnotationPanel } from "../image-annotation/panel";
 import "./index.css";
 
 export interface LightboxImage {
   name: string;
   src: string;
+  /**
+   * Marks to draw on this picture (already resolved by the caller). Present only
+   * for a picture that can be annotated — see {@link LightboxAnnotation}.
+   */
+  marks?: readonly MarkView[];
+}
+
+/**
+ * Annotation, as the viewer needs it. Absent ⇒ the viewer offers no annotation at
+ * all (a generated picture, a picture whose owner cannot take one).
+ *
+ * The viewer owns the *interaction* (mode, gestures, editor, list); the caller
+ * owns the *data* — where a mark is stored, and what a new one becomes. That split
+ * keeps the draft batch (composer chips) and the already-sent pictures on the same
+ * UI while their storage differs.
+ */
+export interface LightboxAnnotation {
+  /** Annotations waiting in the composer, text ones included (banner total). */
+  batchCount: number;
+  /**
+   * Whether the picture at `imageIndex` takes new marks right now.
+   *
+   * Per picture, not per viewer: a stack can hold a copy this app already baked
+   * (which takes none — its marks are pixels) next to a picture that does. The
+   * action is simply absent for the former.
+   */
+  canAnnotate: (imageIndex: number) => boolean;
+  /** Why not, shown on the disabled action. */
+  unavailableReason?: string;
+  /**
+   * Open with annotation mode already on. Used by the composer chip's hover action:
+   * annotating the picture you are about to send is the hot path, so it must not cost
+   * "open the viewer, then find the button" (decision ①).
+   */
+  autoStart?: boolean;
+  /** Commit a new mark (the note is required; it arrives with the save). */
+  onCreate: (imageIndex: number, mark: ImageMark, note: string) => void;
+  /** Replace one existing mark's note (its geometry never moves). */
+  onEditNote: (imageIndex: number, key: string, note: string) => void;
+  /** Drop one mark of this batch. */
+  onRemove: (imageIndex: number, key: string) => void;
+  /**
+   * Called when a mark is clicked on the picture: the caller may open the thread
+   * context it belongs to. Omitted in the lightbox (the list does that job).
+   */
+  onOpenMark?: (imageIndex: number, key: string) => void;
 }
 
 export interface ImageLightboxProps {
@@ -38,6 +96,8 @@ export interface ImageLightboxProps {
    * button.
    */
   onReveal?: () => void | Promise<void>;
+  /** Annotation support; omitted ⇒ no annotation UI at all. */
+  annotation?: LightboxAnnotation;
 }
 
 /** Duration of the open transform animation (the backdrop fades via CSS). */
@@ -186,6 +246,43 @@ const prefersReducedMotion = (): boolean =>
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /**
+ * Is the key event going to a text field? Space is annotation mode's pan modifier,
+ * and swallowing it globally would make a space impossible to type in the note
+ * editor that mode opens.
+ */
+/**
+ * How much of the picture must stay inside the window after a **zoom**.
+ *
+ * Free panning is the boss's call, so this is deliberately tiny: it only fires when a
+ * zoom would leave the picture entirely outside the picture area (which can only happen
+ * after panning it out), and it moves it back by the smallest amount that puts this many
+ * pixels back on screen. Panning never calls it.
+ */
+const KEEP_IN_REACH_PX = 24;
+
+/**
+ * Is this press the "pan" one? The right button, or macOS's ctrl+click (which the OS
+ * reports as a primary press with `ctrlKey` — treating it as a draw press is what made
+ * "ctrl+click to pan" paint a mark instead).
+ */
+function isPanPress(event: {
+  button: number;
+  ctrlKey: boolean;
+  pointerType: string;
+}): boolean {
+  if (event.button === 2 || event.button === 1) return true;
+  return event.button === 0 && event.ctrlKey;
+}
+
+function isEditingText(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return (
+    tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable === true
+  );
+}
+
+/**
  * True at the neutral framing: `1×` and centred (so a *shrunk* picture is not
  * fitted — Esc steps it back up to `1×` instead of closing).
  */
@@ -210,9 +307,15 @@ const isFitted = (zoom: ZoomState): boolean =>
  * Gestures: the wheel zooms about the pointer (a trackpad pinch arrives as the
  * same wheel path) within `0.5×` of the fitted size up to 400% of the original
  * pixels, double-click toggles the neutral framing / `2×`, `+` `-` `0` zoom in
- * place and reset, and a drag pans the picture at *any* scale — a fitted or
- * shrunk picture can be nudged to a corner, and none of it can ever be moved out
- * of sight. Arrow keys / the on-screen arrows (with the `n / m` counter) step
+ * place and reset, and a drag pans the picture at *any* scale.
+ *
+ * Panning is **free** (no bounds): the picture may be pushed past the window's edges,
+ * which is how a detail near its border gets to the middle of the screen. `0` and the
+ * Esc ladder's "step back to the fitted framing" remain the way home. A mouse pans with
+ * the **right button** as well as a left drag — in annotation mode the left button draws,
+ * so the right one is that mode's pan (and macOS's ctrl+click, which arrives as a primary
+ * press with `ctrlKey`, counts as the right button; the frame suppresses the native
+ * context menu so releasing a right-drag opens nothing). Arrow keys / the on-screen arrows (with the `n / m` counter) step
  * between images — the wheel no longer does. A click on the backdrop closes;
  * Esc undoes a zoom/pan first and closes on the second press. Switching images
  * always resets the framing, so one picture's zoom can never leak into another's.
@@ -224,6 +327,7 @@ export function ImageLightbox({
   onIndexChange,
   onClose,
   onReveal,
+  annotation,
 }: ImageLightboxProps): React.JSX.Element | null {
   const count = images.length;
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -273,6 +377,21 @@ export function ImageLightbox({
     message: string;
   } | null>(null);
 
+  /** Annotation mode: click marks a point, drag marks a region. */
+  /** Where a press on the backdrop started (a release without travel closes). */
+  const backdropPress = useRef<{ x: number; y: number } | null>(null);
+  const [annotating, setAnnotating] = useState(annotation?.autoStart === true);
+  /** "Model view": the marks as they will be baked, no editing, no side list. */
+  const [modelView, setModelView] = useState(false);
+  /** `Space` held: the press pans instead of drawing. */
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  /** A fresh mark waiting for its note (not yet in the batch). */
+  const [draft, setDraft] = useState<ImageMark | null>(null);
+  /** Key of an existing mark whose note is being edited. */
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  /** Key of the mark hovered from the side list. */
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
+
   const fitScale = fit?.scale ?? 1;
   const degraded = fit?.overBudget ?? false;
   const crisp = fit !== null && hiLoaded?.index === index && handOverReady;
@@ -280,13 +399,102 @@ export function ImageLightbox({
   // what the fitted box is measured from, so it comes back whenever the shown
   // picture has no measurement of its own (e.g. flipping back to a picture whose
   // measurement was replaced by the one in between).
-  const showFitted = fit === null || fittedGone?.index !== index;
+  const showFitted = fit === null || fittedGone?.index !== index || annotating;
   const maxZoom = degraded
     ? DEGRADED_MAX_ZOOM
     : Math.max(DEGRADED_MAX_ZOOM, MAX_ABS_ZOOM / fitScale);
   /** Absolute magnification, in the same unit Preview.app uses for "100%". */
   const percent = Math.round(zoom.scale * fitScale * 100);
   const error = revealError?.index === index ? revealError.message : null;
+  /** The boss may add marks to the picture on screen (and the batch has room). */
+  const canAnnotate =
+    annotation === undefined ? false : annotation.canAnnotate(index);
+
+  const current = images[index];
+  /**
+   * Next ordinal for a fresh mark: the batch is numbered by position, so a mark
+   * being written is the one *after* the last stored one.
+   */
+  const nextOrdinal = (annotation?.batchCount ?? 0) + 1;
+  /**
+   * Marks of the shown picture, in the register the mode dictates: live red with
+   * their ordinals, as the batch has them. (`historical` marks are prepared by the
+   * caller — they carry no ordinal and draw grey.)
+   */
+  const marks = useMemo<readonly MarkView[]>(
+    () => (annotation === undefined ? [] : (current?.marks ?? [])),
+    [annotation, current],
+  );
+  /**
+   * What is painted: the batch's marks, plus the one just drawn.
+   *
+   * The draft mark is drawn immediately (with the ordinal it is about to take) so
+   * the boss sees the geometry they made while writing the note — the note is what
+   * turns it into an annotation, the position is already theirs.
+   */
+  const liveMarks = useMemo<readonly MarkView[]>(() => {
+    if (draft === null) return marks;
+    return [
+      ...marks,
+      { key: "draft", mark: draft, ordinal: nextOrdinal, note: "" },
+    ];
+  }, [draft, marks, nextOrdinal]);
+  /**
+   * The badge floor, in the box's CSS px.
+   *
+   * Screen: a badge smaller than this cannot be clicked. Model view: the floor the
+   * **bake** uses, converted to the displayed scale — which is exactly the point
+   * of that view: it shows the delivered picture's proportions rather than the
+   * screen's minimums.
+   */
+  const minBadgePx =
+    modelView && fit !== null
+      ? BADGE_MIN_BAKE_PX * fitScale
+      : BADGE_MIN_SCREEN_PX;
+  /** The mark whose editor is open (a draft one has no key yet). */
+  const editingMark =
+    editingKey === null
+      ? null
+      : (marks.find((view) => view.key === editingKey) ?? null);
+  const showPanel =
+    annotation !== undefined && (draft !== null || editingMark !== null);
+  const panelMark = draft ?? editingMark?.mark ?? null;
+  /**
+   * Where the editor card hangs from: the mark's **screen** box, measured from the
+   * zoom frame (which is transformed, so its rect is the displayed one). The card
+   * then places itself to the right/left/below/above of that box and never covers
+   * the mark.
+   */
+  const panelAnchor = (() => {
+    if (panelMark === null) return null;
+    const frame = frameRef.current;
+    if (frame === null) return null;
+    const box = frame.getBoundingClientRect();
+    if (box.width <= 0 || box.height <= 0) return null;
+    const geometry = markGeometry(
+      panelMark,
+      { width: box.width, height: box.height },
+      minBadgePx,
+    );
+    // The badge's own box is the anchor: it is never bigger than the mark and it is
+    // where the boss's eye already is.
+    return {
+      left: box.left + geometry.badgeBox.left,
+      top: box.top + geometry.badgeBox.top,
+      width: Math.max(geometry.badgeBox.width, 1),
+      height: Math.max(geometry.badgeBox.height, 1),
+    };
+  })();
+  const panelOrdinal =
+    draft !== null ? nextOrdinal : (editingMark?.ordinal ?? 0);
+
+  // Leaving the picture (or the mode) drops an unfinished mark: it was never in
+  // the batch, so there is nothing to keep.
+  useEffect(() => {
+    setDraft(null);
+    setEditingKey(null);
+    setHoverKey(null);
+  }, [index, annotating, modelView]);
 
   const commitZoom = useCallback((next: ZoomState): void => {
     zoomRef.current = next;
@@ -334,31 +542,50 @@ export function ImageLightbox({
    * scales, so the formula is unchanged by rendering the picture at its natural
    * size inside it.
    */
-  const clampOffset = useCallback(
-    (scale: number, x: number, y: number): { x: number; y: number } => {
-      const frame = frameRef.current;
-      const overlay = overlayRef.current;
-      const center = imageCenter();
-      if (!frame || !overlay || !center) return { x, y };
-      const box = overlay.getBoundingClientRect();
-      const halfWidth = (frame.offsetWidth * scale) / 2;
-      const halfHeight = (frame.offsetHeight * scale) / 2;
-      const nearX = halfWidth - (center.x - box.left);
-      const farX = overlay.clientWidth - halfWidth - (center.x - box.left);
-      const nearY = halfHeight - (center.y - box.top);
-      const farY = overlay.clientHeight - halfHeight - (center.y - box.top);
-      return {
-        x: clamp(x, Math.min(nearX, farX), Math.max(nearX, farX)),
-        y: clamp(y, Math.min(nearY, farY), Math.max(nearY, farY)),
-      };
-    },
-    [imageCenter],
-  );
 
   /**
    * Zoom to `nextScale`, keeping whatever sits under `(clientX, clientY)` in
    * place — the picture grows away from the pointer instead of the centre.
    */
+  /**
+   * Nudge a zoom result so the picture cannot end up completely off screen.
+   *
+   * Only ever called from {@link zoomAt}: panning is free (the boss drags a border
+   * detail to the middle), but a zoom must not be able to lose the picture — `0`/`Esc`
+   * is the only way home and it should not be the *only* thing keeping it findable.
+   */
+  const keepInReach = useCallback(
+    (scale: number, x: number, y: number): { x: number; y: number } => {
+      const frame = frameRef.current;
+      const overlay = overlayRef.current;
+      if (!frame || !overlay) return { x, y };
+      const width = frame.offsetWidth * scale;
+      const height = frame.offsetHeight * scale;
+      if (width <= 0 || height <= 0) return { x, y };
+      const center = imageCenter();
+      if (!center) return { x, y };
+      const box = overlay.getBoundingClientRect();
+      // Where the picture's box sits, relative to the window.
+      const left = center.x + x - width / 2 - box.left;
+      const top = center.y + y - height / 2 - box.top;
+      const right = left + width;
+      const bottom = top + height;
+      const reach = Math.min(KEEP_IN_REACH_PX, width, height);
+      let dx = 0;
+      let dy = 0;
+      if (right < reach) dx = reach - right;
+      else if (left > overlay.clientWidth - reach) {
+        dx = overlay.clientWidth - reach - left;
+      }
+      if (bottom < reach) dy = reach - bottom;
+      else if (top > overlay.clientHeight - reach) {
+        dy = overlay.clientHeight - reach - top;
+      }
+      return { x: x + dx, y: y + dy };
+    },
+    [imageCenter],
+  );
+
   const zoomAt = useCallback(
     (nextScale: number, clientX: number, clientY: number): void => {
       const current = zoomRef.current;
@@ -369,14 +596,20 @@ export function ImageLightbox({
       const ratio = scale / current.scale;
       const centerX = center.x + current.x;
       const centerY = center.y + current.y;
-      const offset = clampOffset(
+      // Panning itself has **no bounds** (see the class doc): the picture may be pushed
+      // past the window's edges so a detail near its border can be brought to the middle.
+      // Zooming, though, never strands it: with the anchor at the viewport centre, zooming
+      // a picture that is already off screen would push it further away, and the boss's
+      // only way back is `0`/Esc — so a zoom that would leave *nothing* visible is nudged
+      // just enough to keep a sliver in reach.
+      const next = keepInReach(
         scale,
         clientX - (clientX - centerX) * ratio - center.x,
         clientY - (clientY - centerY) * ratio - center.y,
       );
-      commitZoom({ scale, ...offset });
+      commitZoom({ scale, ...next });
     },
-    [clampOffset, commitZoom, imageCenter, maxZoom],
+    [commitZoom, imageCenter, keepInReach, maxZoom],
   );
 
   /**
@@ -386,12 +619,14 @@ export function ImageLightbox({
    */
   const zoomFromCenter = useCallback(
     (nextScale: number): void => {
-      const center = imageCenter();
-      if (!center) return;
-      const current = zoomRef.current;
-      zoomAt(nextScale, center.x + current.x, center.y + current.y);
+      // Anchored on the **viewport**, not on the picture: with a free pan the picture's
+      // own centre can be off screen, and `+`/`-` must act on what is visible.
+      const overlay = overlayRef.current;
+      if (!overlay) return;
+      const box = overlay.getBoundingClientRect();
+      zoomAt(nextScale, box.left + box.width / 2, box.top + box.height / 2);
     },
-    [imageCenter, zoomAt],
+    [zoomAt],
   );
 
   const resetZoom = useCallback((): void => {
@@ -416,6 +651,24 @@ export function ImageLightbox({
   useEffect(() => {
     closeRef.current?.focus();
   }, []);
+
+  /**
+   * Release everything a held key or a live drag could have left behind.
+   *
+   * Called on the main process's window-blur (focus lost, hidden, minimized) — which is
+   * the only reliable signal in Electron — and the in-renderer `blur` /
+   * `visibilitychange` listeners below stay as a second line of defence.
+   */
+  const releaseTransientInput = useCallback((): void => {
+    setSpaceHeld(false);
+    pointers.current.clear();
+    gesture.current = null;
+    setGrabbing(false);
+  }, []);
+
+  useEffect(() => {
+    return imb.windowControls.onBlur(releaseTransientInput);
+  }, [releaseTransientInput]);
 
   // A new picture starts fitted. `goTo` already does this; this effect is the
   // guard for an index changed from outside (the parent clamping a stale one).
@@ -443,7 +696,35 @@ export function ImageLightbox({
       height,
       overBudget: loaded.width * loaded.height > MAX_CRISP_PIXELS,
     });
-  }, [loaded, index]);
+    // `annotating` is a dependency because entering the mode narrows the box the
+    // picture may use (the side list takes ~290px on the right), and the zoom/pan
+    // maths is stated against the measured box.
+  }, [loaded, index, annotating]);
+
+  // A window resize invalidates the measured box: the picture's fitted size, and every
+  // zoom/pan bound derived from it, belonged to the old window. The reliable way to
+  // get a fresh measurement is to forget the old one — the fitted copy then re-mounts,
+  // is measured again, and the hand-over to the original pixels replays (the same path
+  // as a fresh open). Without this a window resized while a picture was open left the
+  // picture stuck at the previous size, overflowing the new window.
+  useEffect(() => {
+    let frame = 0;
+    const onResize = (): void => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        commitZoom(FIT);
+        setFitState(null);
+        setLoaded(null);
+        setHiLoaded(null);
+        setFittedGone(null);
+      });
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [commitZoom]);
 
   // A picture served from the cache can finish before React attaches `onLoad`
   // (the deck thumbnail has usually fetched the same `imb-file:` URL already),
@@ -501,13 +782,31 @@ export function ImageLightbox({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      // A key pressed in a text field belongs to that field. The annotation editor is
+      // opened *by* this viewer, so without this guard typing "3x5 = 15" zooms the
+      // picture (`=`/`+`/`-`/`0` are the viewer's zoom keys), and `←`/`→` would flip
+      // to another picture mid-sentence. `Escape` never reaches here from the editor —
+      // the editor handles it and stops propagation — so nothing is lost by returning
+      // early for every other key.
+      if (isEditingText(event.target)) return;
       if (event.key === "Escape") {
         event.stopPropagation();
-        // While panned or zoomed, Esc steps back to the fitted framing first (a
-        // second press closes); the ✕ and the backdrop still dismiss in one
-        // step.
-        if (!isFitted(zoomRef.current)) resetZoom();
+        // One level per press, in the order the boss built them up: the mark
+        // being written, then the annotation mode, then the framing, and only
+        // then the viewer itself. (The editor card handles its own Esc and stops
+        // the event before it gets here.)
+        if (draft !== null || editingKey !== null) {
+          setDraft(null);
+          setEditingKey(null);
+        } else if (modelView) setModelView(false);
+        else if (annotating) setAnnotating(false);
+        else if (!isFitted(zoomRef.current)) resetZoom();
         else onClose();
+      } else if (annotating && event.code === "Space") {
+        // Panning moved to `Space`+drag because a plain drag now draws. Held
+        // (not toggled) so the gesture never sticks.
+        event.preventDefault();
+        setSpaceHeld(true);
       } else if (count > 1 && event.key === "ArrowLeft") {
         event.stopPropagation();
         goTo((index - 1 + count) % count);
@@ -525,9 +824,38 @@ export function ImageLightbox({
         resetZoom();
       }
     };
+    const onKeyUp = (event: KeyboardEvent): void => {
+      if (event.code === "Space") setSpaceHeld(false);
+    };
+    // A keyup outside the window (or while the window is hidden) never arrives, so the
+    // "ready to pan" cursor would stick. Reset on anything that means "the press is over".
+    const releaseSpace = releaseTransientInput;
+    const onVisibility = (): void => {
+      if (document.visibilityState === "hidden") releaseSpace();
+    };
     document.addEventListener("keydown", onKeyDown, true);
-    return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [count, index, goTo, onClose, resetZoom, zoomFromCenter]);
+    document.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", releaseSpace);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      document.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", releaseSpace);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [
+    annotating,
+    count,
+    draft,
+    editingKey,
+    goTo,
+    index,
+    modelView,
+    onClose,
+    releaseTransientInput,
+    resetZoom,
+    zoomFromCenter,
+  ]);
 
   // Wheel: a plain wheel zooms about the pointer at any scale — no modifier
   // needed. A trackpad pinch arrives as `wheel` with `ctrlKey` set, so it takes
@@ -539,6 +867,10 @@ export function ImageLightbox({
     const element = overlayRef.current;
     if (!element) return;
     const onWheel = (event: WheelEvent): void => {
+      // The same rule as the keyboard: what is typed or scrolled *in* a text field
+      // belongs to the field. The note editor lives inside this overlay, and a wheel
+      // there has to scroll the note, not zoom the picture.
+      if (isEditingText(event.target)) return;
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1;
       const delta = event.deltaY * unit;
       event.preventDefault();
@@ -601,8 +933,22 @@ export function ImageLightbox({
 
   const onZoomPointerDown = (
     event: ReactPointerEvent<HTMLDivElement>,
+    forcePan = false,
   ): void => {
-    if (event.pointerType === "mouse" && event.button !== 0) return;
+    // Two kinds of press reach the picture: a **primary** one (the left button, or a
+    // finger) and a **pan** one (right button, middle button, macOS ctrl+click — see
+    // `isPanPress`), which pans in every mode. The primary press pans too, *except* where
+    // it draws: annotation mode owns it (the drawing surface is what actually receives
+    // it; this is the guard for a press the surface did not take), and there `Space` gives
+    // it back to panning. Deciding on "does the primary press draw here" — rather than on
+    // "is this a pan button" — is what keeps a plain left-drag panning in browsing and
+    // model view, which is the gesture everyone tries first.
+    // `forcePan` is used for the backdrop: it is not a drawing surface, so a press
+    // there pans in every mode (the viewer's whole area shares one cursor, and that
+    // cursor says "grabbable").
+    const drawsPrimary = !forcePan && annotating && !modelView && !spaceHeld;
+    if (!isPanPress(event) && drawsPrimary) return;
+    if (isPanPress(event)) event.preventDefault();
     pointers.current.set(event.pointerId, {
       x: event.clientX,
       y: event.clientY,
@@ -654,12 +1000,13 @@ export function ImageLightbox({
     if (!current) return;
     if (current.kind === "pan") {
       if (!pointers.current.has(current.pointerId)) return;
-      const offset = clampOffset(
-        zoomRef.current.scale,
-        current.originX + (event.clientX - current.startX),
-        current.originY + (event.clientY - current.startY),
-      );
-      commitZoom({ scale: zoomRef.current.scale, ...offset });
+      // Free pan: no clamping to the window (the boss drags a border detail to the
+      // middle; `0` / Esc bring the picture back).
+      commitZoom({
+        scale: zoomRef.current.scale,
+        x: current.originX + (event.clientX - current.startX),
+        y: current.originY + (event.clientY - current.startY),
+      });
       return;
     }
     const [a, b] = current.ids.map((pointerId) =>
@@ -678,12 +1025,17 @@ export function ImageLightbox({
     if (!center) return;
     // Keep the picture under the fingers: the pinch also follows the midpoint.
     const ratio = scale / current.startScale;
-    const offset = clampOffset(
+    commitZoom({
       scale,
-      midX - (current.startMidX - center.x - current.startX) * ratio - center.x,
-      midY - (current.startMidY - center.y - current.startY) * ratio - center.y,
-    );
-    commitZoom({ scale, ...offset });
+      x:
+        midX -
+        (current.startMidX - center.x - current.startX) * ratio -
+        center.x,
+      y:
+        midY -
+        (current.startMidY - center.y - current.startY) * ratio -
+        center.y,
+    });
   };
 
   const onZoomPointerEnd = (event: ReactPointerEvent<HTMLDivElement>): void => {
@@ -738,18 +1090,58 @@ export function ImageLightbox({
     }
   }, [index, onReveal, revealing]);
 
-  const current = images[index];
   if (!current) return null;
 
   return createPortal(
     <div
       ref={overlayRef}
-      className="imb-lightbox"
+      className={cls(
+        "imb-lightbox",
+        annotating && "imb-lightbox-annotating",
+        modelView && "imb-lightbox-model-view",
+        // One cursor for the whole view (see the CSS block): grabbing beats grab beats
+        // crosshair, and only annotation mode at rest draws.
+        grabbing
+          ? "imb-lightbox-cursor-grabbing"
+          : spaceHeld || !annotating || modelView
+            ? "imb-lightbox-cursor-grab"
+            : "imb-lightbox-cursor-crosshair",
+      )}
       role="dialog"
       aria-modal="true"
       aria-label={current.name}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+      // A press on the black backdrop: **drag pans, click closes**.
+      //
+      // Closing on `mousedown` alone was wrong twice over — a drag starts with a press
+      // too (so "drag the picture back" from the empty area closed the viewer instead),
+      // and the viewer's cursor says that area is grabbable. So the close waits for the
+      // release and only fires when the pointer did not travel; a drag pans the picture,
+      // which is what the cursor promised.
+      onPointerDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        backdropPress.current = { x: event.clientX, y: event.clientY };
+        onZoomPointerDown(event, true);
+      }}
+      onPointerMove={onZoomPointerMove}
+      onPointerUp={(event) => {
+        const start = backdropPress.current;
+        backdropPress.current = null;
+        onZoomPointerEnd(event);
+        if (start === null) return;
+        const travel = Math.hypot(
+          event.clientX - start.x,
+          event.clientY - start.y,
+        );
+        if (travel > CLICK_JITTER_PX) return;
+        // A click on the backdrop still only dismisses while merely *viewing*: in
+        // annotation mode a stray click outside the picture must not throw away the
+        // batch and the mark being written.
+        if (annotating || modelView) return;
+        onClose();
+      }}
+      onPointerCancel={(event) => {
+        backdropPress.current = null;
+        onZoomPointerEnd(event);
       }}
     >
       <button
@@ -781,6 +1173,7 @@ export function ImageLightbox({
           className={cls(
             "imb-lightbox-zoom",
             grabbing && "imb-lightbox-grabbing",
+            annotating && !spaceHeld && "imb-lightbox-drawing",
           )}
           style={
             {
@@ -798,7 +1191,17 @@ export function ImageLightbox({
           onPointerMove={onZoomPointerMove}
           onPointerUp={onZoomPointerEnd}
           onPointerCancel={onZoomPointerEnd}
-          onDoubleClick={onZoomDoubleClick}
+          // A pan whose pointer capture is lost (released outside the window, the
+          // window losing focus mid-drag) must not leave the view stuck in `grabbing`.
+          onLostPointerCapture={onZoomPointerEnd}
+          // Right-drag pans, so the native menu must not appear when the button is
+          // released (nor on a right press that does not move). Scoped to the picture:
+          // a text field's own context menu (copy/paste in the note editor) stays.
+          onContextMenu={(event) => event.preventDefault()}
+          // Double-click is off in annotation mode: it would be read as two
+          // marks, and "zoom by accident instead of marking" is not a trade the
+          // boss should have to learn.
+          onDoubleClick={annotating ? undefined : onZoomDoubleClick}
         >
           {/* The fitted-size copy: what the viewer opens with, and the element
               the thumbnail grows into. It stays fully opaque underneath while
@@ -844,6 +1247,28 @@ export function ImageLightbox({
               onLoad={() => setHiLoaded({ index })}
             />
           )}
+          {liveMarks.length > 0 && (
+            <MarkLayer
+              marks={liveMarks}
+              minBadgePx={minBadgePx}
+              focusKey={hoverKey}
+              editingKey={editingKey}
+              inert={!annotating || modelView}
+              onSelect={
+                annotating && !modelView
+                  ? (key) => setEditingKey(key)
+                  : undefined
+              }
+            />
+          )}
+          {annotating && canAnnotate && !modelView && fit !== null && (
+            <CaptureLayer
+              naturalWidth={fit.naturalWidth}
+              naturalHeight={fit.naturalHeight}
+              panning={spaceHeld}
+              onCommit={(mark) => setDraft(mark)}
+            />
+          )}
         </div>
         <figcaption className="imb-lightbox-caption">
           <span className="imb-lightbox-name">{current.name}</span>
@@ -858,6 +1283,44 @@ export function ImageLightbox({
             >
               {t("Downscaled preview (very large image)")}
             </span>
+          )}
+          {annotation !== undefined &&
+            !modelView &&
+            (canAnnotate || annotating) && (
+              <button
+                type="button"
+                className={cls(
+                  "imb-lightbox-action",
+                  annotating && "imb-lightbox-action-on",
+                )}
+                onClick={() => {
+                  setDraft(null);
+                  setEditingKey(null);
+                  setAnnotating(!annotating);
+                }}
+                title={canAnnotate ? undefined : annotation.unavailableReason}
+                aria-pressed={annotating}
+              >
+                {t("Annotate")}
+              </button>
+            )}
+          {(annotating || modelView) && (
+            <button
+              type="button"
+              className={cls(
+                "imb-lightbox-action",
+                modelView && "imb-lightbox-action-on",
+              )}
+              onClick={() => {
+                setModelView(!modelView);
+                setEditingKey(null);
+                setDraft(null);
+              }}
+              title={t("What the model will see")}
+              aria-pressed={modelView}
+            >
+              {t("Model view")}
+            </button>
           )}
           {onReveal !== undefined && (
             <button
@@ -876,6 +1339,38 @@ export function ImageLightbox({
         {error !== null && <p className="imb-lightbox-error">{error}</p>}
       </figure>
 
+      {annotating && modelView && (
+        <div className="imb-annot-model-view-badge" role="status">
+          {t("Model view — read-only")}
+        </div>
+      )}
+
+      {annotating && !modelView && annotation !== undefined && (
+        <>
+          <AnnotationBanner
+            batchCount={annotation.batchCount}
+            onDone={() => {
+              setDraft(null);
+              setEditingKey(null);
+              setAnnotating(false);
+            }}
+          />
+          <AnnotationList
+            // Everything on this picture: the header's number must match what the
+            // boss can see on it (delivered marks are listed read-only).
+            marks={marks}
+            editingKey={editingKey}
+            hoverKey={hoverKey}
+            onSelect={(key) => setEditingKey(key)}
+            onHover={setHoverKey}
+            onRemove={(key) => {
+              if (editingKey === key) setEditingKey(null);
+              annotation.onRemove(index, key);
+            }}
+          />
+        </>
+      )}
+
       {count > 1 && (
         <button
           type="button"
@@ -887,6 +1382,42 @@ export function ImageLightbox({
           <IconChevronDown />
         </button>
       )}
+
+      {annotation !== undefined &&
+        showPanel &&
+        panelMark !== null &&
+        panelAnchor !== null && (
+          <AnnotationPanel
+            // A fresh editor per mark: the field's draft text belongs to the mark
+            // it was opened for, never to whatever was selected before.
+            key={draft !== null ? "draft" : (editingKey ?? "none")}
+            ordinal={panelOrdinal}
+            mark={panelMark}
+            note={editingMark?.note ?? ""}
+            anchor={panelAnchor}
+            saved={draft === null}
+            onSave={(note) => {
+              if (draft !== null) {
+                annotation.onCreate(index, draft, note);
+                setDraft(null);
+                return;
+              }
+              if (editingKey !== null) {
+                annotation.onEditNote(index, editingKey, note);
+                setEditingKey(null);
+              }
+            }}
+            onCancel={() => {
+              setDraft(null);
+              setEditingKey(null);
+            }}
+            onDelete={() => {
+              if (editingKey !== null) annotation.onRemove(index, editingKey);
+              setEditingKey(null);
+              setDraft(null);
+            }}
+          />
+        )}
     </div>,
     document.body,
   );

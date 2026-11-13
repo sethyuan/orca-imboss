@@ -14,6 +14,9 @@ import {
   toPlainAttachment,
 } from "../../../../chat-draft";
 import { EMPTY_COMMENTS, toPlainComments } from "../../../../comment-draft";
+import { newImageAnnotation } from "../../../../image-annotation-draft";
+import { prepareAnnotatedSend } from "../../../../image-annotation-send";
+import type { DraftAnnotationProps } from "../attachment-draft";
 import { IconFolder } from "../../../icons";
 import {
   ComposerCard,
@@ -29,6 +32,13 @@ import { RefPopup, type RefCandidate, type RefTrigger } from "./ref-popup";
  * of the line or after whitespace (see `TRIGGER_PATTERNS`), so a `@` inside an
  * email address or a `#` inside a tag never opens a popup.
  */
+/**
+ * How long a post-send notice stays. Long enough to be read after the message
+ * lands, short enough that it is gone before the boss types the next one (a line
+ * still sitting there then reads as a warning about that message).
+ */
+const NOTICE_MS = 6000;
+
 const REF_TRIGGERS: readonly RefTrigger[] = ["@", "#"];
 
 /**
@@ -71,11 +81,16 @@ export interface ChatInputBarProps {
    * later remount cannot replay it.
    */
   onComposerResetApplied?: (seq: number) => void;
+  /**
+   * Hand one message to the host. It may reject: a rejection means the message did
+   * **not** land, and the composer then keeps the draft and the annotation batch
+   * (retrying is one press of Send). Resolving is what clears them.
+   */
   onSend: (
     text: string,
     attachments: MessageAttachment[],
     comments?: MessageComment[],
-  ) => void;
+  ) => void | Promise<void>;
   /**
    * Whether the reference popups are offered (default `true`): `@` for an
    * employee and `#` for a task group this conversation created.
@@ -125,6 +140,36 @@ export function ChatInputBar({
   // Comments waiting for this send: they are part of the draft (frozen onto the
   // message when it is sent), so they live next to the text and the chips.
   const pendingComments = snap.chatComments[chatId] ?? EMPTY_COMMENTS;
+
+  /**
+   * Annotation of the draft's pictures. Bound to the chip id (not its position),
+   * so removing an earlier chip can never move an annotation onto the wrong
+   * picture; the attachment index is resolved once, when the batch is frozen.
+   */
+  const draftAnnotation = useMemo<DraftAnnotationProps>(
+    () => ({
+      comments: pendingComments,
+      add: (attachmentId, attachmentName, mark, note) =>
+        appStore.addChatComment(
+          chatId,
+          newImageAnnotation(
+            { kind: "draft", attachmentId, attachmentName },
+            mark,
+            note,
+          ),
+        ),
+      updateNote: (key, note) => {
+        const id = Number(key);
+        if (Number.isSafeInteger(id))
+          appStore.updateChatComment(chatId, id, note);
+      },
+      remove: (key) => {
+        const id = Number(key);
+        if (Number.isSafeInteger(id)) appStore.removeChatComment(chatId, id);
+      },
+    }),
+    [chatId, pendingComments],
+  );
 
   const cardRef = useRef<ComposerHandle>(null);
   // Common projects: loaded when the attach menu opens and rendered as flat
@@ -313,17 +358,58 @@ export function ChatInputBar({
     if (!value && attachments.length === 0 && pendingComments.length === 0) {
       return;
     }
-    // Rebuild each attachment/comment as a plain object: they come from the
-    // Valtio snapshot, and its proxies cannot cross the IPC boundary.
-    onSend(
-      value,
-      attachments.map((item) => toPlainAttachment(item.attachment)),
-      toPlainComments(pendingComments),
+    // Snapshot before clearing: baking is async, and the draft (chips, their
+    // previews, the queued annotations) must not be read after it is gone.
+    const plainAttachments = attachments.map((item) =>
+      toPlainAttachment(item.attachment),
     );
-    // Clear the per-chat draft and its queued comments; the store revokes the
-    // attachments' preview URLs.
-    cardRef.current?.clear();
-    appStore.clearChatComments(chatId);
+    const draftAttachments = attachments.map((item) => ({
+      id: item.id,
+      attachment: toPlainAttachment(item.attachment),
+    }));
+    const pending = [...pendingComments];
+    cardRef.current?.notify(null);
+    void (async () => {
+      // Annotated pictures are baked into marked copies first; a failed bake never
+      // blocks the send (the coordinates still travel in `[Comments]`).
+      const prepared = await prepareAnnotatedSend({
+        chatId,
+        attachments: plainAttachments,
+        draftAttachments,
+        pending,
+      });
+      try {
+        // The frozen records are exactly the batch, with the batch's own ordinals.
+        await onSend(
+          value,
+          prepared.attachments,
+          prepared.comments ?? toPlainComments(pending),
+        );
+      } catch {
+        // The message did not land: the draft, the chips and the batch stay exactly
+        // as they were (the caller shows the reason), so one more press of Send
+        // retries the whole thing. Losing annotations here is the one outcome this
+        // feature must never have.
+        return;
+      }
+      // Only once it landed: clear the per-chat draft and its queued comments (the
+      // store revokes the attachments' preview URLs).
+      cardRef.current?.clear();
+      appStore.clearChatComments(chatId);
+      if (prepared.warnings.length > 0) {
+        // After the send, not before: it describes the picture that just went out
+        // (unmarked, with its coordinates), so it must not scroll away with the
+        // draft. No internal file name — the boss never saw one. It also clears
+        // itself: a line left above an empty composer reads as a warning about the
+        // *next* message.
+        cardRef.current?.notify(
+          t(
+            "The marked copy could not be made, so the picture was sent as-is.",
+          ),
+        );
+        window.setTimeout(() => cardRef.current?.notify(null), NOTICE_MS);
+      }
+    })();
   };
 
   /**
@@ -477,6 +563,7 @@ export function ChatInputBar({
       onSend={send}
       attachMenuExtra={attachMenuExtra}
       attachMenuOpenChange={setProjectsMenuOpen}
+      draftAnnotation={draftAnnotation}
       pendingComments={{
         count: pendingComments.length,
         node: (

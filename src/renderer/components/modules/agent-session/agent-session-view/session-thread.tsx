@@ -1,3 +1,4 @@
+import { isAttachmentOnlyBlurb } from "@shared/attachment-blurb";
 import { t } from "@shared/l10n";
 import type { AgentSessionViewEntry } from "@shared/types";
 import { useCallback, useEffect, useState } from "react";
@@ -9,6 +10,10 @@ import { IconChevronDown, IconChevronUp } from "../../../icons";
 import { Markdown } from "../../../markdown";
 import { CommentCards } from "../../chat/comment-card";
 import { CommentLayer } from "../../chat/comment-layer";
+import {
+  ImageAnnotationContext,
+  type ImageAnnotationApi,
+} from "../../chat/image-annotation/context";
 import { ThreadFindBar } from "../../chat/thread-find";
 import {
   isMediaOnlyAttachments,
@@ -71,6 +76,7 @@ const COMMENT_CONTENT_SELECTOR = ".imb-session-text, .imb-session-user-text";
 export function SessionThread({
   view,
   comments,
+  annotation = null,
 }: {
   view: SessionView;
   /**
@@ -79,6 +85,13 @@ export function SessionThread({
    * how a host without a composer for this session states that.
    */
   comments?: CommentSurface;
+  /**
+   * Annotation surface for the pictures in this transcript (`null` ⇒ they are
+   * inert). The host owns it because only the host knows which store the batch
+   * lives in — an agent-session prompt and a chat message use different ones even
+   * though this component renders both.
+   */
+  annotation?: ImageAnnotationApi | null;
 }): React.JSX.Element {
   const {
     employeeId,
@@ -102,83 +115,85 @@ export function SessionThread({
   } = view;
 
   return (
-    <>
-      {/* The thread and the floating jump control share a positioned wrapper so
+    <ImageAnnotationContext.Provider value={annotation}>
+      <>
+        {/* The thread and the floating jump control share a positioned wrapper so
           the control can sit above the composer without a fixed offset. */}
-      <div className="imb-session-thread-wrap">
-        <div
-          className={cls(
-            "imb-thread imb-session-thread",
-            dividerCount > 0 && "imb-has-jumps",
-          )}
-          ref={threadRef}
-          // Focus target after the find bar closes (nothing to restore when the
-          // composer was not the trigger).
-          tabIndex={-1}
-          onScroll={handleScroll}
-        >
-          {!loading &&
-          entries.length === 0 &&
-          liveBlocks.length === 0 &&
-          pending.length === 0 ? (
-            <div className="imb-chat-empty-detail">
-              {t("No session content yet")}
-            </div>
-          ) : (
-            <>
-              {entries.map((entry, index) => (
-                <SessionEntry
-                  key={entry.id}
-                  entry={entry}
-                  first={index === 0}
-                  resolveMention={resolveMention}
-                  employeeId={employeeId}
-                  chatId={chatId}
-                  isThinkingOpen={isThinkingOpen}
-                  onToggleThinking={onToggleThinking}
-                />
-              ))}
-              {liveBlocks.map((block) => (
-                <LiveBlockView
-                  key={block.key}
-                  block={block}
-                  resolveMention={resolveMention}
-                  isThinkingOpen={isThinkingOpen}
-                  onToggleThinking={onToggleThinking}
-                />
-              ))}
-            </>
-          )}
-          {pending.map((item) => (
-            <PendingSendRow
-              key={item.id}
-              item={item}
-              onDismiss={dismissPending}
-              onWithdraw={withdrawPending}
-              onOpenConversation={openConversationById}
+        <div className="imb-session-thread-wrap">
+          <div
+            className={cls(
+              "imb-thread imb-session-thread",
+              dividerCount > 0 && "imb-has-jumps",
+            )}
+            ref={threadRef}
+            // Focus target after the find bar closes (nothing to restore when the
+            // composer was not the trigger).
+            tabIndex={-1}
+            onScroll={handleScroll}
+          >
+            {!loading &&
+            entries.length === 0 &&
+            liveBlocks.length === 0 &&
+            pending.length === 0 ? (
+              <div className="imb-chat-empty-detail">
+                {t("No session content yet")}
+              </div>
+            ) : (
+              <>
+                {entries.map((entry, index) => (
+                  <SessionEntry
+                    key={entry.id}
+                    entry={entry}
+                    first={index === 0}
+                    resolveMention={resolveMention}
+                    employeeId={employeeId}
+                    chatId={chatId}
+                    isThinkingOpen={isThinkingOpen}
+                    onToggleThinking={onToggleThinking}
+                  />
+                ))}
+                {liveBlocks.map((block) => (
+                  <LiveBlockView
+                    key={block.key}
+                    block={block}
+                    resolveMention={resolveMention}
+                    isThinkingOpen={isThinkingOpen}
+                    onToggleThinking={onToggleThinking}
+                  />
+                ))}
+              </>
+            )}
+            {pending.map((item) => (
+              <PendingSendRow
+                key={item.id}
+                item={item}
+                onDismiss={dismissPending}
+                onWithdraw={withdrawPending}
+                onOpenConversation={openConversationById}
+              />
+            ))}
+          </div>
+          {threadFind.open && <ThreadFindBar find={threadFind} />}
+          {comments !== undefined && (
+            // Mounted inside the positioned wrapper (not the scrolling thread) so
+            // the portaled toolbar survives scrolling. Commenting only applies to
+            // **settled** rows: a live streaming block carries no
+            // `data-commentable`, because its text is still growing and its id is
+            // replaced by the persisted entry id when the run ends — an anchor
+            // written there could never be resolved again.
+            <CommentLayer
+              threadRef={threadRef}
+              comments={comments}
+              contentSelector={COMMENT_CONTENT_SELECTOR}
+              revision={entries}
             />
-          ))}
+          )}
+          {dividerCount > 0 && (
+            <SessionJumpButtons availability={jump} onJump={jumpTo} />
+          )}
         </div>
-        {threadFind.open && <ThreadFindBar find={threadFind} />}
-        {comments !== undefined && (
-          // Mounted inside the positioned wrapper (not the scrolling thread) so
-          // the portaled toolbar survives scrolling. Commenting only applies to
-          // **settled** rows: a live streaming block carries no
-          // `data-commentable`, because its text is still growing and its id is
-          // replaced by the persisted entry id when the run ends — an anchor
-          // written there could never be resolved again.
-          <CommentLayer
-            threadRef={threadRef}
-            comments={comments}
-            contentSelector={COMMENT_CONTENT_SELECTOR}
-            revision={entries}
-          />
-        )}
-        {dividerCount > 0 && (
-          <SessionJumpButtons availability={jump} onJump={jumpTo} />
-        )}
-      </div>
-    </>
+      </>
+    </ImageAnnotationContext.Provider>
   );
 }
 
@@ -308,9 +323,13 @@ function SessionUserRow({
     void appStore.openConversationById(targetChatId);
   }, []);
 
-  // An attachment-only prompt shows just the image deck, so the bubble chrome
-  // is dropped exactly like an image-only chat bubble does.
-  const mediaOnly = isMediaOnlyAttachments(attachments, entry.text.length);
+  // An attachment-only prompt shows just the image deck, so the bubble chrome is
+  // dropped exactly like an image-only chat bubble does. A prompt whose stored text is
+  // only the generated `Attached: …` blurb counts as attachment-only: the line is a
+  // duplicate of the chips above it (and English baked into the transcript).
+  const blurbOnly = isAttachmentOnlyBlurb(entry.text, attachments);
+  const body = blurbOnly ? "" : entry.text;
+  const mediaOnly = isMediaOnlyAttachments(attachments, body.length);
 
   return (
     <div
@@ -321,14 +340,17 @@ function SessionUserRow({
       {attachments.length > 0 && (
         <SessionAttachments
           attachments={attachments}
+          source={{ kind: "entry", entryId: entry.id }}
           onReveal={reveal}
           onOpenConversation={openConversation}
         />
       )}
-      <CommentCards comments={entry.comments ?? []} surface="session" />
-      {entry.text.length > 0 && (
-        <div className="imb-session-user-text">{entry.text}</div>
-      )}
+      <CommentCards
+        comments={entry.comments ?? []}
+        carrier={{ kind: "entry", entryId: entry.id }}
+        surface="session"
+      />
+      {body.length > 0 && <div className="imb-session-user-text">{body}</div>}
       {revealError !== null && (
         <div className="imb-session-attachment-error" role="alert">
           {revealError}

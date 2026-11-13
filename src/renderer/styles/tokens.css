@@ -200,9 +200,11 @@
      the chrome needs to give more of itself up. Tuning band for a second pass:
      55–65% (too transparent → text on busy wallpapers loses contrast; too solid
      → back to an opaque rail). */
-  --imb-material-chrome: color-mix(in oklab,
-      var(--imb-p-window) 60%,
-      transparent);
+  --imb-material-chrome: color-mix(
+    in oklab,
+    var(--imb-p-window) 60%,
+    transparent
+  );
   /* Sheen: the faint top-lit gradient that makes an opaque surface read as a
      material when there is no real backdrop to sample. */
   --imb-chrome-sheen: none;
@@ -216,10 +218,7 @@
   --imb-dur-2: 200ms;
   --imb-dur-3: 240ms;
   --imb-ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
-  --imb-ease-emphasized: cubic-bezier(0.22,
-      1,
-      0.36,
-      1);
+  --imb-ease-emphasized: cubic-bezier(0.22, 1, 0.36, 1);
   /* selection slides in */
   --imb-ease-exit: cubic-bezier(0.4, 0, 1, 1);
   /* dismissals get out fast */
@@ -248,12 +247,16 @@
   --imb-row-hover: color-mix(in oklch, var(--imb-p-ink) 6%, transparent);
   /* Track fill for capsule controls (segmented control, switch off-state). */
   --imb-track-bg: color-mix(in oklab, var(--imb-p-ink) 8%, transparent);
-  --imb-row-active: color-mix(in oklch,
-      var(--imb-accent) 15%,
-      var(--imb-bg-content));
-  --imb-row-selected: color-mix(in oklch,
-      var(--imb-accent) 12%,
-      var(--imb-bg-content));
+  --imb-row-active: color-mix(
+    in oklch,
+    var(--imb-accent) 15%,
+    var(--imb-bg-content)
+  );
+  --imb-row-selected: color-mix(
+    in oklch,
+    var(--imb-accent) 12%,
+    var(--imb-bg-content)
+  );
   /* Sidebar selection: on mac it is a tinted capsule, not a solid accent block. */
   --imb-sel-bg: var(--imb-row-selected);
   --imb-sel-fg: var(--imb-fg);
@@ -277,14 +280,24 @@
 
   /* Two danger tints: a soft *fill* for banners, and a translucent one for
      hover states that must sit on any surface. */
-  --imb-danger-soft: color-mix(in oklch,
-      var(--imb-p-danger) 12%,
-      var(--imb-bg-content));
+  --imb-danger-soft: color-mix(
+    in oklch,
+    var(--imb-p-danger) 12%,
+    var(--imb-bg-content)
+  );
   --imb-danger-tint: color-mix(in oklch, var(--imb-p-danger) 14%, transparent);
 
   --imb-success: var(--imb-p-success);
   --imb-warn: var(--imb-p-warn);
   --imb-danger: var(--imb-p-danger);
+
+  /* The ink of an image annotation: a red that is **baked into a picture**, not a
+     UI state. It is a fixed value in both themes on purpose (the mark does not
+     change with the window, because the model and the boss must see the same
+     picture), and it is darker than `--imb-danger` so white digits on it reach
+     AA: white on `#c93a3a` is 5.06:1, on the theme red `#fa5151` only 3.30:1. */
+  --imb-mark: #c93a3a;
+  --imb-mark-fill: color-mix(in oklab, var(--imb-mark) 14%, transparent);
   --imb-bubble-self: var(--imb-p-bubble-self);
   --imb-bubble-text: var(--imb-p-bubble-ink);
 
@@ -397,9 +410,11 @@
 
 :root:not([data-platform="darwin"]) {
   --imb-material-chrome: var(--imb-p-window);
-  --imb-chrome-sheen: linear-gradient(180deg,
-      color-mix(in oklab, var(--imb-p-specular) 55%, transparent),
-      transparent);
+  --imb-chrome-sheen: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--imb-p-specular) 55%, transparent),
+    transparent
+  );
 }
 
 /* ============================================================================
@@ -427,9 +442,11 @@
        transparent": the chrome collapses onto its solid backdrop and keeps the
        sheen (a gradient is not a transparency effect). */
     --imb-material-chrome: var(--imb-p-window);
-    --imb-chrome-sheen: linear-gradient(180deg,
-        color-mix(in oklab, var(--imb-p-specular) 55%, transparent),
-        transparent);
+    --imb-chrome-sheen: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--imb-p-specular) 55%, transparent),
+      transparent
+    );
   }
 }
 
@@ -439,8 +456,10 @@
     --imb-fg-muted: color-mix(in oklab, var(--imb-p-ink) 70%, transparent);
     --imb-sep: color-mix(in oklab, var(--imb-p-ink) 22%, transparent);
     --imb-sep-strong: color-mix(in oklab, var(--imb-p-ink) 34%, transparent);
-    --imb-control-border: color-mix(in oklab,
-        var(--imb-p-ink) 34%,
-        transparent);
+    --imb-control-border: color-mix(
+      in oklab,
+      var(--imb-p-ink) 34%,
+      transparent
+    );
   }
 }

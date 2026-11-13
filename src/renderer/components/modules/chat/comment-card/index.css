@@ -72,3 +72,36 @@
 .imb-comment-cards-session .imb-comment-card {
   background: var(--imb-surface);
 }
+
+/*
+ * The picture half of a comment card: a framed thumbnail (the picture's aspect
+ * ratio, its mark drawn on it) beside the file name. The pixels are deliberately
+ * absent — the annotated picture belongs to an earlier message, so this row has no
+ * attachment to read; the frame still says where on the picture the mark sits, and
+ * the lightbox shows the real thing.
+ */
+.imb-comment-card-image {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.imb-comment-card-image-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--imb-muted);
+  font-size: var(--imb-fs-caption);
+}
+
+/*
+ * Hover linkage between a card and the mark it talks about: the card that owns the
+ * mark currently under the pointer (from either end) gets the mark's colour as its
+ * outline. `#n` is the linkage — no connector lines, no extra copy.
+ */
+.imb-comment-card-focus {
+  border-color: var(--imb-mark);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--imb-mark) 35%, transparent);
+}

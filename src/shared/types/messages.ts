@@ -65,56 +65,129 @@ export interface MessageAttachment {
 /**
  * Which earlier rendered block a comment points at.
  *
- * Two shapes, because the two surfaces that offer commenting address their rows
- * differently:
+ * Three shapes, because the three surfaces that offer commenting address their
+ * subjects differently:
  * - `message`: a stored chat message, by its row id (the chat thread);
  * - `entry`: a Pi session entry, by its (string) entry id (the agent-session
  *   view and an employee direct chat, which render the session transcript).
  *   Those prompts are never written to `messages`, so there is no row to point
  *   at.
+ * - `image`: one picture an of the message above — see {@link ImageTarget}.
  */
 export type CommentTarget =
+  | { kind: "message"; messageId: number }
+  | { kind: "entry"; entryId: string }
+  | ImageTarget;
+
+/**
+ * Where the annotated picture itself lives, for an annotation of an image that
+ * is **not** carried by the message holding the comment.
+ *
+ * Reuses the two row shapes of {@link CommentTarget} (a stored message, a session
+ * entry). `null` on {@link ImageTarget} means "the message carrying this
+ * comment": the picture rides along with the very message the annotation is sent
+ * in (a draft attachment, whose marked copy replaces it before the send).
+ */
+export type ImageTargetSource =
   { kind: "message"; messageId: number } | { kind: "entry"; entryId: string };
+
+/**
+ * One annotated picture: which attachment, and which message it belongs to.
+ *
+ * `attachmentIndex` is the 0-based position in the owner's `attachments` array
+ * (the same index the bubble's image slots carry), and `attachmentName` is kept
+ * for two reasons: the prompt line has to say *which* picture, and a name that no
+ * longer matches the stored attachment means the picture was swapped (the mark is
+ * then not drawn at all — see `.pi/facts/image-annotation.md` §3.2).
+ */
+export interface ImageTarget {
+  kind: "image";
+  /** Position of the picture in its owner's `attachments` array (0-based). */
+  attachmentIndex: number;
+  /** File name of the annotated picture, as stored on the attachment. */
+  attachmentName: string;
+  /** The message/entry the picture belongs to; `null` = the carrying message. */
+  source: ImageTargetSource | null;
+}
+
+/**
+ * The geometry of one image annotation, in **normalized image coordinates**
+ * (0..1, top-left origin; `x`/`y` is the point or the region's first corner,
+ * `x2`/`y2` the region's opposite corner).
+ *
+ * Normalized rather than pixels because the picture the model reads may have been
+ * resized by its own profile (2000px cap, and that cap is per-model *data*), so
+ * pixels are a coordinate system nobody promised us. `imageWidth`/`imageHeight`
+ * keep the pixel size the boss annotated, purely as a drift check: a stored size
+ * that disagrees with the file today means the picture was replaced.
+ *
+ * A `region` stores its two corners in any order; readers normalize to
+ * min/max. `kind: "image"` (the whole picture) carries no coordinates at all.
+ */
+export interface ImageMark {
+  kind: "image" | "point" | "region";
+  /** point: the centre; region: the first corner. */
+  x?: number;
+  y?: number;
+  /** region: the opposite corner. */
+  x2?: number;
+  y2?: number;
+  /** Pixel size of the picture when it was annotated (0 = unknown). */
+  imageWidth: number;
+  imageHeight: number;
+}
 
 /**
  * Where one comment sits inside the message it annotates.
  *
- * The anchor is **two anchors in one**: character offsets into the message's
- * *rendered* plain text (cheap, exact, and what the inline highlight uses), plus
- * the quoted text itself (the fallback when the rendering drifted, and the part
- * the model reads). Consumers must try the offsets, fall back to
- * `quote` + `occurrence`, and give up on the highlight rather than guess wrong —
- * see `renderer/components/modules/chat/comment-layer/anchor-text.ts`.
+ * Two mutually exclusive shapes share this anchor:
  *
- * **Quote-only anchors:** `start === -1`, `end === -1`, `occurrence === 0` and
- * `textLength === -1` together mean "no offsets known" — the state of an anchor
- * recovered from a prompt's `[Comments]` block (`promptCommentToMessageComment`),
- * which carries the quote but not the offsets. Such an anchor is always resolved
- * by searching the quote inside the named target. Partial sentinels are invalid.
+ * **A text annotation** (`target.kind` is `message` or `entry`) is **two anchors
+ * in one**: character offsets into the message's *rendered* plain text (cheap,
+ * exact, and what the inline highlight uses), plus the quoted text itself (the
+ * fallback when the rendering drifted, and the part the model reads). Consumers
+ * must try the offsets, fall back to `quote` + `occurrence`, and give up on the
+ * highlight rather than guess wrong — see
+ * `renderer/components/modules/chat/comment-layer/anchor-text.ts`.
+ * Of those fields, `quote` is the only required one; the offsets are absent when
+ * nothing is known about them (a quote-only anchor).
+ *
+ * **An image annotation** (`target.kind` is `image`) carries {@link ImageMark}
+ * and **no** text fields: there is no passage to quote and no offsets to keep.
+ * Both shapes are addressed the same way — by position in the comment list, which
+ * is what the model answers (`#1:`, `#2:`) — see `src/main/comment-prompt.ts`.
+ *
+ * **Quote-only anchors:** absent offsets (`start`/`end`/`textLength` undefined)
+ * mean "no offsets known" — the state of an anchor recovered from a prompt's
+ * `[Comments]` block (`promptCommentToMessageComment`), which carries the quote
+ * but not the offsets. Such an anchor is always resolved by searching the quote
+ * inside the named target. Partial spans are invalid.
  */
 export interface CommentAnchor {
-  /** The annotated block. */
+  /** The annotated block, or the annotated picture. */
   target: CommentTarget;
   /**
    * The selected passage, as rendered (whitespace-normalized, trimmed, capped
-   * at `MAX_COMMENT_QUOTE_LENGTH`).
+   * at `MAX_COMMENT_QUOTE_LENGTH`). Text annotations only.
    */
-  quote: string;
+  quote?: string;
   /** Start offset in the target's rendered plain text (inclusive). */
-  start: number;
+  start?: number;
   /** End offset in the target's rendered plain text (exclusive). */
-  end: number;
+  end?: number;
   /**
    * Which occurrence of `quote` inside the target this is (0-based). Only used
    * when the offsets no longer line up; 0 for the common case.
    */
-  occurrence: number;
+  occurrence?: number;
   /**
    * Length of the target's rendered plain text when the comment was written: a
    * mismatch means the rendering changed, so the offsets are not trusted and
    * the quote fallback takes over.
    */
-  textLength: number;
+  textLength?: number;
+  /** Geometry of an image annotation. Image annotations only. */
+  mark?: ImageMark;
 }
 
 /**

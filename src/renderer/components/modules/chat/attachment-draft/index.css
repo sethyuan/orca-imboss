@@ -203,3 +203,67 @@
 .imb-attached-file-remove:hover {
   background: var(--imb-danger);
 }
+
+/*
+ * How many annotations a draft picture carries. A red pill (the mark color, not
+ * the danger color) in the chip's bottom-left corner: it is "what I have said about
+ * this picture", which is the same thing the badges say on the picture itself.
+ */
+.imb-attached-file-marks {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--imb-radius-pill);
+  background: var(--imb-mark);
+  color: #ffffff;
+  font-size: var(--imb-fs-caption);
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/*
+ * The chip's own annotation action: a hover-revealed button in the bottom-left
+ * corner, mirroring the `×` in the other corner. It opens the viewer *in annotation
+ * mode*, which is the point of having it at all (one click instead of two for the
+ * picture that is about to be sent).
+ */
+.imb-attached-file-annotate {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.imb-attached-file-thumb:hover .imb-attached-file-annotate,
+.imb-attached-file-annotate:focus-visible {
+  display: inline-flex;
+}
+
+.imb-attached-file-annotate:hover {
+  background: var(--imb-mark);
+}
+
+.imb-attached-file-annotate svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* While the action is showing, the count pill steps aside (same corner). */
+.imb-attached-file-thumb:hover .imb-attached-file-marks {
+  left: 24px;
+}

@@ -4,16 +4,22 @@ import type {
   AgentSessionAttachment,
   AgentSessionSendResult,
 } from "@shared/types";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appStore, sessionKey, useAppSync } from "../../../../app-store";
 import { EMPTY_DRAFT, toPlainAttachment } from "../../../../chat-draft";
 import { EMPTY_COMMENTS, toPlainComments } from "../../../../comment-draft";
+import { newImageAnnotation } from "../../../../image-annotation-draft";
+import { prepareAnnotatedSend } from "../../../../image-annotation-send";
+import type { DraftAnnotationProps } from "../../chat/attachment-draft";
 import { PendingComments } from "../../chat/pending-comments";
 import {
   ComposerCard,
   type ComposerDraftBinding,
   type ComposerHandle,
 } from "../../chat/composer-card";
+
+/** How long a post-send notice stays (mirrors the chat composer's). */
+const NOTICE_MS = 6000;
 
 export interface SessionComposerProps {
   employeeId: number;
@@ -80,6 +86,33 @@ export function SessionComposer({
   // storage a session prompt has (nothing is written to `messages`), so they
   // must travel with this exact send.
   const pendingComments = snap.sessionComments[draftKey] ?? EMPTY_COMMENTS;
+  /** Annotation of the draft's pictures, bound to the chip ids of this draft. */
+  const draftAnnotation = useMemo<DraftAnnotationProps>(
+    () => ({
+      comments: pendingComments,
+      add: (attachmentId, attachmentName, mark, note) =>
+        appStore.addSessionComment(
+          draftKey,
+          newImageAnnotation(
+            { kind: "draft", attachmentId, attachmentName },
+            mark,
+            note,
+          ),
+        ),
+      updateNote: (key, note) => {
+        const id = Number(key);
+        if (Number.isSafeInteger(id))
+          appStore.updateSessionComment(draftKey, id, note);
+      },
+      remove: (key) => {
+        const id = Number(key);
+        if (Number.isSafeInteger(id))
+          appStore.removeSessionComment(draftKey, id);
+      },
+    }),
+    [draftKey, pendingComments],
+  );
+
   const cardRef = useRef<ComposerHandle>(null);
   /** Guards a double submit before the first render lands (`sending` is async). */
   const sendingRef = useRef(false);
@@ -103,15 +136,25 @@ export function SessionComposer({
       sendingRef.current = true;
       setSending(true);
       setError(null);
+      const plainAttachments = attachments.map((item) =>
+        toPlainAttachment(item.attachment),
+      );
+      const prepared = await prepareAnnotatedSend({
+        chatId,
+        attachments: plainAttachments,
+        draftAttachments: attachments.map((item) => ({
+          id: item.id,
+          attachment: toPlainAttachment(item.attachment),
+        })),
+        pending: pendingComments,
+      });
       try {
         const result = await imb.agentSession.send(
           employeeId,
           chatId,
           value,
-          attachments.length > 0
-            ? attachments.map((item) => toPlainAttachment(item.attachment))
-            : undefined,
-          toPlainComments(pendingComments),
+          prepared.attachments.length > 0 ? prepared.attachments : undefined,
+          prepared.comments ?? toPlainComments(pendingComments),
         );
         // Accepted: clear the DOM and the draft together, otherwise a remount
         // would resurrect text that is already on its way to the agent.
@@ -120,11 +163,26 @@ export function SessionComposer({
         // The placeholder row shows the same chips the transcript will, so a
         // file-only send is not an empty bubble (and the row still matches its
         // projection, which strips the prompt's attachment block to `""`).
+        // The placeholder row shows the pictures that were actually sent — the
+        // marked copies, not the originals.
         onSent(
           value,
           result,
-          attachments.map((item) => toSessionAttachment(item.attachment)),
+          prepared.attachments.map((attachment) =>
+            toSessionAttachment(attachment),
+          ),
         );
+        if (prepared.warnings.length > 0) {
+          // After the send: it describes the picture that just went out unmarked
+          // (the coordinates still travelled), and no internal file name. It clears
+          // itself, so it can never be read as a warning about the next message.
+          cardRef.current?.notify(
+            t(
+              "The marked copy could not be made, so the picture was sent as-is.",
+            ),
+          );
+          window.setTimeout(() => cardRef.current?.notify(null), NOTICE_MS);
+        }
         cardRef.current?.focus();
       } catch (err) {
         // Keep the text (nothing typed may be lost) and surface the reason: only
@@ -181,6 +239,7 @@ export function SessionComposer({
       error={error}
       resetKey={draftKey}
       onSend={(live) => void send(live)}
+      draftAnnotation={draftAnnotation}
       pendingComments={{
         count: pendingComments.length,
         node: (

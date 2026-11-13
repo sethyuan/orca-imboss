@@ -147,6 +147,22 @@ export function createMainWindow(): BrowserWindow {
   // selectedId effect never runs again.
   win.on("focus", () => win.webContents.send("window:focus"));
 
+  /**
+   * Tell the renderer when the window stops being the foreground window.
+   *
+   * The renderer cannot rely on its own `blur`/`visibilitychange` here: in Electron a
+   * window that loses focus (Cmd+Tab, hide, minimize) may never deliver either of them,
+   * which leaves any "key is held" state stuck — the image viewer, for one, would keep
+   * `Space` down forever and stop drawing. The main process always knows, so it says so.
+   */
+  const notifyWindowBlurred = (): void => {
+    if (win.isDestroyed()) return;
+    win.webContents.send("window:blur");
+  };
+  win.on("blur", notifyWindowBlurred);
+  win.on("hide", notifyWindowBlurred);
+  win.on("minimize", notifyWindowBlurred);
+
   // Close = hide (the app keeps running in the tray); a real close only happens
   // while the app is quitting.
   win.on("close", (event) => {

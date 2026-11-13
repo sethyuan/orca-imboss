@@ -2,10 +2,12 @@ import { MAX_VISIBLE_ATTACHMENTS } from "@shared/constants/attachments";
 import { isPreviewableImage } from "@shared/image-attachments";
 import { toImbFileUrl } from "@shared/imb-file";
 import { t } from "@shared/l10n";
-import type { AgentSessionAttachment } from "@shared/types";
+import type { AgentSessionAttachment, ImageTargetSource } from "@shared/types";
 import { useState } from "react";
 import { cls } from "reactutils";
+import { isAnnotatedCopyName } from "@shared/constants/image-annotation";
 import { IconChat, IconFile, IconFolder } from "../../../icons";
+import { AnnotatedCopies } from "../../chat/image-annotation/copies";
 import {
   IMAGE_PREVIEW_ENABLED,
   ImageStack,
@@ -30,6 +32,11 @@ export interface SessionAttachmentsProps {
   onOpenConversation?: (chatId: number) => void;
   /** Extra class for the block (context-specific spacing). */
   className?: string;
+  /**
+   * Which session entry these pictures belong to, so an annotation can address one
+   * of them ("image 1 of session entry …"). Omitted ⇒ not annotatable.
+   */
+  source?: ImageTargetSource;
 }
 
 /**
@@ -85,6 +92,7 @@ export function SessionAttachments({
   onReveal,
   onOpenConversation,
   className,
+  source,
 }: SessionAttachmentsProps): React.JSX.Element | null {
   /**
    * Attachment indices whose `<img>` failed to decode. Keyed by position within
@@ -113,13 +121,17 @@ export function SessionAttachments({
             : [];
         })
       : [];
-  const stack: ImageStackImage[] = imageSlots
+  const drawable: ImageStackImage[] = imageSlots
     .filter((slot) => !failedImages.has(slot.index))
     .map((slot) => ({
       index: slot.index,
       name: slot.name,
       src: toImbFileUrl(slot.path),
     }));
+  // Same split as the chat bubble: a baked copy is a derived picture and is shown
+  // compact, never at full size next to the original (`image-annotation/copies`).
+  const copies = drawable.filter((image) => isAnnotatedCopyName(image.name));
+  const stack = drawable.filter((image) => !isAnnotatedCopyName(image.name));
   const imageIndices = new Set(imageSlots.map((slot) => slot.index));
 
   // Everything that is not (still) an image in the deck: files, folders,
@@ -139,6 +151,7 @@ export function SessionAttachments({
       {stack.length > 0 && (
         <ImageStack
           images={stack}
+          source={source}
           // A prompt row is the boss's own message (right-aligned), so the deck
           // leans away from the outer edge exactly like a self chat bubble.
           self
@@ -154,6 +167,10 @@ export function SessionAttachments({
           }
         />
       )}
+      <AnnotatedCopies
+        copies={copies}
+        onReveal={onReveal === undefined ? undefined : (index) => onReveal(index)}
+      />
       {(chips.length > 0 || hidden > 0) && (
         <div className="imb-bubble-chips">
           {chips.map(({ attachment, index }) => {

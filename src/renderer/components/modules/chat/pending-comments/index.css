@@ -28,7 +28,10 @@
 /* Resting row: one line — ordinal | quote | note | remove. */
 .imb-comment-pending-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 45%) minmax(0, 1fr) auto;
+  /* The reference column is sized by its content and only *capped* at 45%: a short
+     quote (or a 40px image thumbnail) used to sit in a full-width 45% cell, leaving a
+     visibly empty block between it and the note. */
+  grid-template-columns: auto fit-content(45%) minmax(0, 1fr) auto;
   grid-template-areas: "ordinal quote note remove";
   align-items: center;
   gap: var(--imb-space-2);
@@ -48,7 +51,7 @@
    takes a full-width second line and its key hint a third. */
 .imb-comment-pending-row-editing,
 .imb-comment-pending-row-editing:hover {
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto fit-content(45%) auto;
   grid-template-areas:
     "ordinal quote remove"
     "editor  editor editor"
@@ -144,4 +147,11 @@
 .imb-comment-pending-remove {
   grid-area: remove;
   justify-self: end;
+}
+
+/* The thumbnail of an image annotation sits in the quote column: it is the same
+   "what this row points at" slot, just as a picture. */
+.imb-comment-pending-thumb {
+  grid-area: quote;
+  justify-self: start;
 }

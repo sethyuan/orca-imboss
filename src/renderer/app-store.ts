@@ -859,6 +859,10 @@ export const appStore = proxy({
     if (!draft) return;
     const [removed] = draft.attachments.splice(index, 1);
     if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+    // An annotation of *that* picture has nothing left to point at, so it goes with
+    // it (no confirmation: the chip was the thing being dropped, and a mark without
+    // its picture is unreadable and unsendable).
+    dropImageAnnotations(chatId, removed?.id);
     // Delete the on-disk copy of a pasted attachment. Main verifies ownership,
     // so a disk-backed user file (original path) is never removed.
     if (removed?.attachment.path) {
@@ -912,6 +916,7 @@ export const appStore = proxy({
     if (!draft) return;
     const [removed] = draft.attachments.splice(index, 1);
     if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+    dropSessionImageAnnotations(key, removed?.id);
     // Delete the on-disk copy of a pasted attachment. Main verifies ownership,
     // so a disk-backed user file (original path) is never removed.
     if (removed?.attachment.path) {
@@ -1536,6 +1541,41 @@ export async function initAppStore(): Promise<void> {
       void appStore.openSettings(section);
     }
   });
+}
+
+/**
+ * Drop the pending image annotations bound to one draft chip.
+ *
+ * Called when the chip itself is removed: its pictures (and the marked copy that is
+ * baked from them) are gone, so the annotation would either point at nothing or hold
+ * a slot of the 20-entry batch for nothing. Binding by id — not by position — is what
+ * makes this exact: removing a *different* chip leaves these alone.
+ */
+function dropImageAnnotations(chatId: number, attachmentId?: number): void {
+  if (attachmentId === undefined) return;
+  const list = appStore.chatComments[chatId];
+  if (!list) return;
+  const kept = list.filter((comment) => comment.attachmentId !== attachmentId);
+  if (kept.length === list.length) return;
+  if (kept.length === 0) {
+    delete appStore.chatComments[chatId];
+    return;
+  }
+  appStore.chatComments[chatId] = kept;
+}
+
+/** Session-composer counterpart of {@link dropImageAnnotations}. */
+function dropSessionImageAnnotations(key: string, attachmentId?: number): void {
+  if (attachmentId === undefined) return;
+  const list = appStore.sessionComments[key];
+  if (!list) return;
+  const kept = list.filter((comment) => comment.attachmentId !== attachmentId);
+  if (kept.length === list.length) return;
+  if (kept.length === 0) {
+    delete appStore.sessionComments[key];
+    return;
+  }
+  appStore.sessionComments[key] = kept;
 }
 
 /** Reactive app-state hook (valtio snapshot). */

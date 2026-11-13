@@ -2,11 +2,13 @@ import { MAX_VISIBLE_ATTACHMENTS } from "@shared/constants/attachments";
 import { isPreviewableImage } from "@shared/image-attachments";
 import { toImbFileUrl } from "@shared/imb-file";
 import { t } from "@shared/l10n";
-import type { MessageAttachment } from "@shared/types";
+import type { ImageTargetSource, MessageAttachment } from "@shared/types";
 import { useState } from "react";
 import { cls } from "reactutils";
 import { appStore } from "../../../../app-store";
 import { IconChat, IconFile, IconFolder } from "../../../icons";
+import { isAnnotatedCopyName } from "@shared/constants/image-annotation";
+import { AnnotatedCopies } from "../image-annotation/copies";
 import {
   IMAGE_PREVIEW_ENABLED,
   ImageStack,
@@ -41,10 +43,18 @@ export interface MessageAttachmentsView {
   hidden: number;
   /** Images rendered as the preview stack (in message order). */
   stack: ImageStackImage[];
+  /**
+   * Marked copies (`annotated-*`): rendered as compact thumbnails with a label, not
+   * at full size — they are derived pictures, and the original they came from is
+   * still in the conversation it belongs to.
+   */
+  copies: ImageStackImage[];
   /** Non-image / failed-image attachments rendered as chips, in message order. */
   chips: AttachmentChip[];
   /** At least one image survived to the stack. */
   showStack: boolean;
+  /** Which row the pictures belong to, for image annotations. */
+  source: ImageTargetSource;
   /** Inline error from the last reveal / open-conversation attempt. */
   revealError: string | null;
   /** Drop an attachment index from the stack (its `<img>` failed to load). */
@@ -58,6 +68,11 @@ export interface MessageAttachmentsView {
 export interface UseMessageAttachmentsOptions {
   /** Global message id; the reveal IPC resolves the stored path from it. */
   messageId: number;
+  /**
+   * How an annotation addresses these pictures. Defaults to the chat message
+   * itself; an agent-session row overrides it with its entry id.
+   */
+  source?: ImageTargetSource;
   attachments: MessageAttachment[] | null;
   /**
    * True attachment count. May exceed `attachments.length` when an agent only
@@ -80,6 +95,7 @@ export function useMessageAttachments({
   messageId,
   attachments,
   attachmentsTotal,
+  source = { kind: "message", messageId },
 }: UseMessageAttachmentsOptions): MessageAttachmentsView {
   const [revealError, setRevealError] = useState<string | null>(null);
   // Attachment indices whose `imb-file:` image failed to load (missing file,
@@ -134,13 +150,17 @@ export function useMessageAttachments({
 
   // Images still in the stack (those whose `<img>` has not errored) plus the
   // non-image / failed chips.
-  const stack: ImageStackImage[] = imageSlots
+  const drawable: ImageStackImage[] = imageSlots
     .filter((slot) => !failedImages.has(slot.index))
     .map((slot) => ({
       index: slot.index,
       name: slot.name,
       src: toImbFileUrl(slot.path),
     }));
+  // A baked copy is the *delivered* form of a picture that already appeared in the
+  // conversation, so it is shown compact (decision ⑥) instead of at full size.
+  const copies = drawable.filter((image) => isAnnotatedCopyName(image.name));
+  const stack = drawable.filter((image) => !isAnnotatedCopyName(image.name));
   const imageIndices = new Set(imageSlots.map((slot) => slot.index));
 
   const chips: AttachmentChip[] = visible
@@ -190,8 +210,10 @@ export function useMessageAttachments({
     total,
     hidden,
     stack,
+    copies,
     chips,
     showStack: stack.length > 0,
+    source,
     revealError,
     markImageFailed,
     reveal,
@@ -234,18 +256,23 @@ export function MessageAttachments({
   self,
 }: MessageAttachmentsProps): React.JSX.Element | null {
   if (!view.hasAttachments) return null;
-  const { stack, chips, hidden, total, revealError } = view;
+  const { stack, copies, chips, hidden, total, revealError } = view;
   return (
     <>
       <div className="imb-bubble-attachments">
         {view.showStack && (
           <ImageStack
             images={stack}
+            source={view.source}
             self={self}
             onImageError={view.markImageFailed}
             onRevealImage={(index) => view.reveal(index)}
           />
         )}
+        <AnnotatedCopies
+          copies={copies}
+          onReveal={(index) => view.reveal(index)}
+        />
         {(chips.length > 0 || hidden > 0) && (
           <div className="imb-bubble-chips">
             {chips.map(({ attachment, index }) => {

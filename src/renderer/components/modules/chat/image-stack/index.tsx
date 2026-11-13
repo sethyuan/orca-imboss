@@ -1,6 +1,9 @@
+import { BADGE_MIN_THREAD_PX } from "@shared/constants/image-annotation";
 import { t } from "@shared/l10n";
+import type { ImageTargetSource } from "@shared/types";
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -9,6 +12,13 @@ import {
 } from "react";
 import { cls } from "reactutils";
 import { IconOpen } from "../../../icons";
+import {
+  decorateForLightbox,
+  lightboxAnnotation,
+  stackPictures,
+  useImageAnnotation,
+} from "../image-annotation/context";
+import { MarkLayer } from "../image-annotation/marks-layer";
 import { ImageLightbox } from "../image-lightbox";
 import "./index.css";
 
@@ -39,6 +49,13 @@ export const IMAGE_PREVIEW_ENABLED = true;
 
 export interface ImageStackProps {
   images: ImageStackImage[];
+  /**
+   * Which message / session entry these pictures belong to, so an annotation can
+   * address one of them ("image 2 of message #1201"). Omit it and the pictures are
+   * not annotatable — which is also what a caller that has no identity to give
+   * (a generated picture) relies on.
+   */
+  source?: ImageTargetSource;
   /** Message side; the deck leans away from the bubble's outer edge. */
   self: boolean;
   /**
@@ -113,12 +130,19 @@ interface DragState {
  */
 export function ImageStack({
   images,
+  source,
   self,
   onImageError,
   onRevealImage,
   size = DEFAULT_STACK_SIZE,
   pending,
 }: ImageStackProps): React.JSX.Element {
+  const annotationApi = useImageAnnotation();
+  /** The pictures in the annotation dialect (`[]` without an owner). */
+  const pictures = useMemo(
+    () => stackPictures(source, images),
+    [source, images],
+  );
   const count = images.length;
   const single = count === 1;
   // The fan is authored for the default deck; scale it with the frame so a
@@ -259,6 +283,20 @@ export function ImageStack({
                 <IconOpen />
               </span>
             )}
+            {isFront &&
+              annotationApi !== null &&
+              pictures[position] !== undefined && (
+                <MarkLayer
+                  marks={[
+                    ...annotationApi.sentMarks(pictures[position]),
+                    ...(annotationApi.pending?.viewsFor(pictures[position]) ??
+                      []),
+                  ]}
+                  minBadgePx={BADGE_MIN_THREAD_PX}
+                  focusKey={annotationApi.focusKey}
+                  inert
+                />
+              )}
           </button>
         );
       })}
@@ -271,7 +309,8 @@ export function ImageStack({
 
       {lightbox !== null && (
         <ImageLightbox
-          images={images.map(({ name, src }) => ({ name, src }))}
+          images={decorateForLightbox(annotationApi, pictures, images)}
+          annotation={lightboxAnnotation(annotationApi, pictures)}
           index={lightbox}
           origin={origin}
           onIndexChange={setLightbox}
