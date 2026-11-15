@@ -1,6 +1,7 @@
-import { mkdir, rm } from "fs/promises";
+import { mkdir, rm, writeFile } from "fs/promises";
 import { basename, extname, join } from "path";
 import { INTEGRATION_PLATFORMS } from "@shared/constants/integrations";
+import { MAX_ATTACHMENT_BYTES } from "@shared/constants/attachments";
 import type { IntegrationPlatform, MessageAttachment } from "@shared/types";
 import { getIntegrationsMediaDir } from "../data-dir";
 import type { InboundMedia } from "./types";
@@ -37,6 +38,16 @@ const MIME_BY_EXT: Record<string, string> = {
   mov: "video/quicktime",
   webm: "video/webm",
   pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  rtf: "application/rtf",
+  csv: "text/csv",
+  md: "text/markdown",
+  html: "text/html",
   txt: "text/plain",
   zip: "application/zip",
   gz: "application/gzip",
@@ -55,6 +66,86 @@ export function chatMediaDir(
   chatId: number,
 ): string {
   return join(getIntegrationsMediaDir(), platform, String(chatId));
+}
+
+/**
+ * Largest inbound file we keep: the DB rejects a bigger attachment row, which
+ * would drop the whole message (text included), so oversized platform files are
+ * skipped instead.
+ */
+const MAX_INBOUND_FILE_BYTES = MAX_ATTACHMENT_BYTES;
+
+/** Platform CDN downloads are bounded: a hung request must not stall a session. */
+const DOWNLOAD_TIMEOUT_MS = 60 * 1000;
+
+/**
+ * Download an untrusted platform media URL into `targetDir`, bounded in time and
+ * size. Returns null (never throws) when the file is unavailable, too large, or
+ * the transfer fails, so one bad attachment cannot lose the message text.
+ */
+export async function downloadInboundFile(
+  url: string,
+  targetDir: string,
+  fileName: string,
+): Promise<{ path: string; size: number } | null> {
+  const name = safeFileName(fileName);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    });
+  } catch (err) {
+    console.warn(
+      `[integrations] media download failed (${name}):`,
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+  if (!response.ok || !response.body) {
+    console.warn(
+      `[integrations] media download rejected (${name}): HTTP ${response.status}`,
+    );
+    return null;
+  }
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_INBOUND_FILE_BYTES) {
+    console.warn(
+      `[integrations] media skipped (${name}): ${declared} bytes exceeds ${MAX_INBOUND_FILE_BYTES}`,
+    );
+    return null;
+  }
+  const chunks: Buffer[] = [];
+  let size = 0;
+  const reader = response.body.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.byteLength === 0) continue;
+      size += value.byteLength;
+      // The declared length can lie (or be absent): cap the bytes we keep.
+      if (size > MAX_INBOUND_FILE_BYTES) {
+        console.warn(
+          `[integrations] media skipped (${name}): exceeds ${MAX_INBOUND_FILE_BYTES} bytes`,
+        );
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } catch (err) {
+    console.warn(
+      `[integrations] media download aborted (${name}):`,
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+  if (size === 0) return null;
+  const target = join(targetDir, name);
+  await writeFile(target, Buffer.concat(chunks, size));
+  return { path: target, size };
 }
 
 /** Download and attach all inbound media; failures degrade to no attachment. */

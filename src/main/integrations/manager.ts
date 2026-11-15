@@ -11,6 +11,7 @@ import type {
   IntegrationStatus,
   Message,
 } from "@shared/types";
+import { agentPrompt } from "../attachment-prompt";
 import { appendMessage, onMessageAppended } from "../db/messages";
 import * as dbChats from "../db/chats";
 import * as dbIntegrations from "../db/integrations";
@@ -320,8 +321,12 @@ export class IntegrationManager {
       );
     }
     // An inbound human message steers a live run the same way a composer send
-    // does; internal wakes use the default serialized queue.
-    void deliver(ASSISTANT_ID, chatId, content, { mode: "steer" });
+    // does; internal wakes use the default serialized queue. The prompt carries
+    // the downloaded files' absolute paths exactly like `chat:send`, otherwise
+    // the model is told "N attachments" but never learns where they live.
+    void deliver(ASSISTANT_ID, chatId, agentPrompt(content, attachments), {
+      mode: "steer",
+    });
     // Same content-based title generation as a user-created chat.
     maybeGenerateChatTitle(chatId, content);
   }
