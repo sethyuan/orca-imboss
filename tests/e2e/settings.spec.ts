@@ -1,13 +1,15 @@
 import { expect, test } from "@playwright/test";
 import { launchApp, type LaunchedApp } from "./helpers/app";
-import { listRows, readTheme } from "./helpers/fixtures";
+import { detailPane, listRows, readTheme } from "./helpers/fixtures";
 
 /**
- * A settings round trip: renderer → IPC → main (nativeTheme + SQLite) → push back
- * to the renderer, then a reload to prove it was persisted.
+ * Theme round trips: renderer → IPC → main (nativeTheme + SQLite) → push back to
+ * the renderer, then a reload to prove it was persisted.
  *
  * Theme is picked because it is completely deterministic (no network, no model),
- * yet exercises the same channel machinery every settings page uses.
+ * yet exercises the same channel machinery every settings page uses. Both entry
+ * points are covered: the settings page's text segmented control and the chrome
+ * band's icon-only switch (which must land on the *same* stored value).
  */
 
 let app: LaunchedApp | undefined;
@@ -35,7 +37,11 @@ test("changing the theme mode is applied and persisted", async () => {
     window.getByRole("radiogroup", { name: "Accent color" }),
   ).toBeVisible();
 
-  await window.getByRole("button", { name: "Dark", exact: true }).click();
+  // Scoped to the pane: the chrome band carries a second Light/Dark/System
+  // control, whose segments have the same accessible names.
+  await detailPane(window)
+    .getByRole("button", { name: "Dark", exact: true })
+    .click();
 
   // Renderer painted it…
   await expect(window.locator("html")).toHaveAttribute(
@@ -51,4 +57,36 @@ test("changing the theme mode is applied and persisted", async () => {
     "data-theme-mode",
     "dark",
   );
+});
+
+test("the titlebar theme switch applies and persists the mode", async () => {
+  const session = app!;
+  const { window } = session;
+
+  // The band's switch is the only segmented group with an accessible name (the
+  // settings page's has none), and it is icon-only — the labels are its
+  // `aria-label`s, which is what makes it clickable here at all.
+  const titlebarSwitch = window.getByRole("group", { name: "Theme mode" });
+  await expect(titlebarSwitch).toBeVisible();
+
+  await titlebarSwitch.getByRole("button", { name: "Dark" }).click();
+
+  await expect(window.locator("html")).toHaveAttribute(
+    "data-theme-mode",
+    "dark",
+  );
+  expect((await readTheme(window)).mode).toBe("dark");
+
+  // Still in the band after a reload, and showing the restored selection: the
+  // thumb offset and `aria-pressed` both come from the persisted value.
+  await session.reload();
+  await expect(window.locator("html")).toHaveAttribute(
+    "data-theme-mode",
+    "dark",
+  );
+  await expect(
+    window
+      .getByRole("group", { name: "Theme mode" })
+      .getByRole("button", { name: "Dark" }),
+  ).toHaveAttribute("aria-pressed", "true");
 });

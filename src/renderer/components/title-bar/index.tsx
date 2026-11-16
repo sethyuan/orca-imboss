@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { cls } from "reactutils";
 import { IS_MAC } from "../../app-store";
+import { ThemeModeSwitch } from "./theme-mode-switch";
 import "./index.css";
 
 const stroke = { stroke: "currentColor", strokeWidth: 1.4 } as const;
@@ -11,6 +12,10 @@ const stroke = { stroke: "currentColor", strokeWidth: 1.4 } as const;
  * macOS: the native traffic lights sit on its left and the band is otherwise
  * empty. Windows/Linux: custom small min/max/close buttons on the right (native
  * controls are hidden via the absence of `titleBarOverlay`).
+ *
+ * The theme-mode switch sits at the right end in both cases: last item on macOS,
+ * immediately left of the window buttons on Windows/Linux. Both are `no-drag`
+ * islands inside a band that drags the window.
  *
  * The band owns its own material (`.imb-chrome` + `.imb-chrome-top`). Because it
  * is a grid row rather than an overlay, the rail below it is a separate box that
@@ -36,6 +41,7 @@ export function TitleBar(): React.JSX.Element {
 
   return (
     <header className="imb-titlebar imb-chrome imb-chrome-top">
+      <ThemeModeSwitch />
       {!IS_MAC && (
         <div className="imb-winbtns">
           <WindowButton

@@ -375,6 +375,39 @@ export function IconPlay(props: IconProps): React.JSX.Element {
 }
 
 /**
+ * Theme-mode triple (light / dark / follow the system).
+ *
+ * `IconSun` and `IconMoon` are the two explicit modes; `IconAuto` is macOS's own
+ * "auto" glyph (a circle filled on one half) rather than a gear or a display, so
+ * the third segment cannot be mistaken for settings or for a mini app.
+ */
+export function IconSun(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <circle cx="12" cy="12" r="4.2" />
+      <path d="M12 2.6v2.4M12 18.9v2.5M4.7 4.7l1.7 1.7M17.6 17.6l1.7 1.7M2.6 12h2.4M18.9 12h2.5M4.7 19.3l1.7-1.7M17.6 6.4l1.7-1.7" />
+    </svg>
+  );
+}
+
+export function IconMoon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+    </svg>
+  );
+}
+
+export function IconAuto(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <circle cx="12" cy="12" r="8.6" />
+      <path d="M12 3.4a8.6 8.6 0 0 0 0 17.2Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+/**
  * Comment on a passage: a speech bubble with two text lines. Deliberately not
  * `IconChat` (an empty round bubble) so "comment on what I selected" never reads
  * as "open a conversation".

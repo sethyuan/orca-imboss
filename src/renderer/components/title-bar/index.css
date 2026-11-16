@@ -23,6 +23,27 @@
 .imb-winbtns {
   display: flex;
   align-items: center;
+  /* Gap to the theme-mode switch, which is the band's other control cluster.
+     Declared here (not as a margin on the switch) so macOS — where these
+     buttons do not exist — keeps a single 8px inset from the header instead of
+     inheriting a gap that has nothing to separate. */
+  margin-left: var(--imb-space-2);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/*
+ * Theme-mode switch (light / dark / follow the system).
+ *
+ * `no-drag` is mandatory: the band itself drags the window, and a control inside
+ * a drag region swallows the click (the app already had this bug with the window
+ * buttons). Everything else — 22px track, 30px icon segments, sliding thumb —
+ * comes from `SegmentedControl`'s mini variant; this wrapper only places it.
+ */
+.imb-titlebar-theme {
+  display: flex;
+  align-items: center;
+  flex: none;
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }

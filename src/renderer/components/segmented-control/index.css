@@ -65,3 +65,36 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* ---------------------------------------------------------------------------
+ * Mini variant
+ *
+ * The chrome band is 30px tall, so a regular 30px track would touch its edges.
+ * Mini is 22px (`--imb-control-h-mini`) with fixed-width icon segments, which
+ * keeps 4px of breathing room above and below. Text-only callers never get the
+ * `imb-is-mini` class, so nothing above changes for them.
+ * ------------------------------------------------------------------------- */
+.imb-segmented-group.imb-is-mini {
+  flex: none;
+  height: var(--imb-control-h-mini);
+  background: var(--imb-bg-chrome);
+}
+
+.imb-is-mini .imb-segmented-btn {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  padding: 0;
+}
+
+.imb-segmented-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.imb-segmented-glyph svg {
+  width: var(--imb-icon-sm);
+  height: var(--imb-icon-sm);
+}
