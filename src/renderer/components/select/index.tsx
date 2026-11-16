@@ -16,6 +16,11 @@ import { usePopupLayer } from "../../hooks/use-popup-layer";
 import { IconChevronDown, IconSearch } from "../icons";
 import "./index.css";
 
+/** Resting time on the trigger before a hover-opened panel appears. */
+const DEFAULT_HOVER_OPEN_DELAY = 200;
+/** Grace after the pointer left trigger and panel; it bridges their gap. */
+const DEFAULT_HOVER_CLOSE_DELAY = 150;
+
 export interface SelectOption {
   value: string;
   label: string;
@@ -77,6 +82,31 @@ export interface SelectProps {
    *   is then the only accessible name, so a caller must pass one.
    */
   variant?: "field" | "ghost" | "icon";
+  /**
+   * Open the panel when the pointer **rests** on the trigger (off by default).
+   *
+   * Opt-in, because a hover-opened panel is a different animal from a clicked
+   * one:
+   *
+   * - It is opened by the pointer alone, so it takes **no focus** (a boss typing
+   *   in the composer must not lose the caret merely because the mouse crossed
+   *   the trigger) and its search box does not autofocus.
+   * - It is transient: leaving the trigger *and* the panel closes it after
+   *   `hoverCloseDelay`, so the pointer can cross the gap to the portaled panel —
+   *   but not while it is still in use (the filter has the caret, or holds text).
+   * - A panel opened by click or keyboard keeps today's behaviour exactly: it
+   *   stays until something closes it (a pick, Escape, a click outside).
+   *
+   * Click, keyboard (`Enter` / `Space` / `ArrowUp` / `ArrowDown`) and touch taps
+   * still open the panel, so the control never becomes pointer-only. Only
+   * `pointerType === "mouse"` counts as hover: a touch `pointerenter` must not
+   * pre-open the panel under the finger's own tap.
+   */
+  openOnHover?: boolean;
+  /** How long the pointer must rest on the trigger before the panel opens. */
+  hoverOpenDelay?: number;
+  /** How long the pointer may be outside trigger and panel before it closes. */
+  hoverCloseDelay?: number;
 }
 
 /** Default `searchable` match: the label or its gloss, case-insensitive. */
@@ -112,6 +142,9 @@ export function Select({
   emptyMessage,
   panelMinWidth = 0,
   variant = "field",
+  openOnHover = false,
+  hoverOpenDelay = DEFAULT_HOVER_OPEN_DELAY,
+  hoverCloseDelay = DEFAULT_HOVER_CLOSE_DELAY,
 }: SelectProps): React.JSX.Element {
   const uid = useId();
   const listboxId = `select-${uid}`;
@@ -131,6 +164,28 @@ export function Select({
    * would fight the pointer). Only the first sets this flag.
    */
   const scrollToActiveRef = useRef(false);
+  /**
+   * True while the panel is open *because the pointer rests on the trigger*
+   * (`openOnHover`): it takes no focus and closes when the pointer leaves.
+   */
+  const [hoverOpen, setHoverOpen] = useState(false);
+  /** Mirrors `hoverOpen` for the timers, which fire outside React's render. */
+  const hoverOpenRef = useRef(false);
+  /** Pending "open after the dwell" timer. */
+  const hoverOpenTimerRef = useRef<number | null>(null);
+  /** Pending "close after the grace" timer. */
+  const hoverCloseTimerRef = useRef<number | null>(null);
+  /**
+   * Where the pointer currently is. Both are needed because the trigger and the
+   * portaled panel are separate DOM trees: the close timer must not fire while
+   * the pointer sits in either one, whatever order the enter/leave events
+   * arrive in.
+   */
+  const triggerHoverRef = useRef(false);
+  const panelHoverRef = useRef(false);
+  /** Mirrors `query` for the close timer, which fires outside React's render. */
+  const queryRef = useRef("");
+  queryRef.current = query;
   const { panelStyle, positionPanel } = useDropdownPosition(
     rootRef,
     panelMinWidth,
@@ -175,33 +230,159 @@ export function Select({
         ? { value, label: value }
         : null;
 
-  const openPanel = useCallback((): void => {
-    if (disabled) return;
-    positionPanel();
-    setOpen(true);
-    setQuery("");
-    // Opening highlights an option (the value, or the first one): make sure it
-    // is on screen even when it sits deep in a long list.
-    scrollToActiveRef.current = true;
-    setActiveIndex(
-      // A searchable panel always starts at the top of an unfiltered list: the
-      // caller's value is not what the boss is hunting for there.
-      searchable
-        ? 0
-        : selectedIndex >= 0
-          ? selectedIndex
-          : fallbackIndex >= 0
-            ? fallbackIndex
-            : 0,
-    );
-  }, [disabled, fallbackIndex, positionPanel, searchable, selectedIndex]);
+  /** Drop both hover timers (open and close); safe to call at any time. */
+  const clearHoverTimers = useCallback((): void => {
+    if (hoverOpenTimerRef.current !== null) {
+      window.clearTimeout(hoverOpenTimerRef.current);
+      hoverOpenTimerRef.current = null;
+    }
+    if (hoverCloseTimerRef.current !== null) {
+      window.clearTimeout(hoverCloseTimerRef.current);
+      hoverCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const openPanel = useCallback(
+    (
+      /**
+       * Why it opens. `"hover"` = the pointer rested on the trigger: the panel
+       * then takes no focus and closes when the pointer leaves.
+       */
+      source: "hover" | "interaction" = "interaction",
+    ): void => {
+      if (disabled) return;
+      clearHoverTimers();
+      positionPanel();
+      setOpen(true);
+      setHoverOpen(source === "hover");
+      hoverOpenRef.current = source === "hover";
+      setQuery("");
+      // Opening highlights an option (the value, or the first one): make sure it
+      // is on screen even when it sits deep in a long list.
+      scrollToActiveRef.current = true;
+      setActiveIndex(
+        // A searchable panel always starts at the top of an unfiltered list: the
+        // caller's value is not what the boss is hunting for there.
+        searchable
+          ? 0
+          : selectedIndex >= 0
+            ? selectedIndex
+            : fallbackIndex >= 0
+              ? fallbackIndex
+              : 0,
+      );
+    },
+    [
+      clearHoverTimers,
+      disabled,
+      fallbackIndex,
+      positionPanel,
+      searchable,
+      selectedIndex,
+    ],
+  );
 
   const closePanel = useCallback((): void => {
+    clearHoverTimers();
     setOpen(false);
+    setHoverOpen(false);
+    hoverOpenRef.current = false;
+    // The panel is about to unmount: it will never send its own leave event, so
+    // the zone must be reset here or a stale "pointer is in the panel" would
+    // block the next close.
+    panelHoverRef.current = false;
     setActiveIndex(-1);
     setQuery("");
     scrollToActiveRef.current = false;
-  }, []);
+  }, [clearHoverTimers]);
+
+  /**
+   * The pointer entered the trigger or the portaled panel.
+   *
+   * Both zones cancel the pending close (crossing the gap between them must not
+   * dismiss the panel) and the trigger zone also schedules the open.
+   */
+  function enterHoverZone(
+    zone: "trigger" | "panel",
+    event?: React.PointerEvent,
+  ): void {
+    const onTrigger = zone === "trigger";
+    if (onTrigger) {
+      // A touch `pointerenter` fired by the very tap that is about to click must
+      // not pre-open the panel (and must not mark the zone as hovered); keyboard
+      // has no pointer events at all.
+      if (event !== undefined && event.pointerType !== "mouse") return;
+      triggerHoverRef.current = true;
+    } else {
+      panelHoverRef.current = true;
+    }
+    if (!openOnHover || disabled) return;
+    if (hoverCloseTimerRef.current !== null) {
+      window.clearTimeout(hoverCloseTimerRef.current);
+      hoverCloseTimerRef.current = null;
+    }
+    if (!onTrigger || open || hoverOpenTimerRef.current !== null) return;
+    hoverOpenTimerRef.current = window.setTimeout(() => {
+      hoverOpenTimerRef.current = null;
+      // The pointer may have moved on during the dwell.
+      if (!triggerHoverRef.current) return;
+      openPanel("hover");
+    }, hoverOpenDelay);
+  }
+
+  /**
+   * Whether the pointer-opened panel is still being used.
+   *
+   * A hover-opened panel is transient, but not while the boss is working inside
+   * it: the filter having the caret (he clicked into it and may be typing) or
+   * holding text (he is narrowing the list) both make "the pointer left" a bad
+   * reason to take it away. Focus leaving the panel with the pointer elsewhere
+   * releases it again, so it can never get stuck on screen.
+   */
+  function panelInUse(): boolean {
+    const panel = panelRef.current;
+    if (panel !== null && panel.contains(document.activeElement)) return true;
+    return queryRef.current.length > 0;
+  }
+
+  /** Close a pointer-opened panel unless it is still hovered or in use. */
+  function releaseHoverPanel(): void {
+    if (!open || !hoverOpenRef.current) return;
+    if (triggerHoverRef.current || panelHoverRef.current) return;
+    if (panelInUse()) return;
+    closePanel();
+  }
+
+  /** The pointer left the trigger or the panel. */
+  function leaveHoverZone(zone: "trigger" | "panel"): void {
+    if (zone === "trigger") triggerHoverRef.current = false;
+    else panelHoverRef.current = false;
+    if (!openOnHover) return;
+    // Leaving before the dwell elapsed cancels the open…
+    if (hoverOpenTimerRef.current !== null) {
+      window.clearTimeout(hoverOpenTimerRef.current);
+      hoverOpenTimerRef.current = null;
+    }
+    // …and only a pointer-opened panel is transient: a panel opened by click or
+    // keyboard stays until something closes it, exactly as before.
+    if (!hoverOpenRef.current || hoverCloseTimerRef.current !== null) return;
+    hoverCloseTimerRef.current = window.setTimeout(() => {
+      hoverCloseTimerRef.current = null;
+      releaseHoverPanel();
+    }, hoverCloseDelay);
+  }
+
+  // A control that turned disabled (a pick is in flight, the list reloaded) must
+  // drop any pending hover work rather than open a panel for it later.
+  useEffect(() => {
+    if (!disabled) return;
+    clearHoverTimers();
+    triggerHoverRef.current = false;
+    panelHoverRef.current = false;
+  }, [clearHoverTimers, disabled]);
+
+  // Never leave a timer behind on unmount.
+  useEffect(() => clearHoverTimers, [clearHoverTimers]);
 
   const commit = useCallback(
     (index: number): void => {
@@ -355,6 +536,12 @@ export function Select({
     <div
       className={cls("imb-select-wrap", invalid && "imb-has-error")}
       ref={rootRef}
+      // The hover zone is the trigger; the panel is portaled elsewhere and
+      // carries the other half of the zone (see `enterHoverZone`).
+      onPointerEnter={
+        openOnHover ? (event) => enterHoverZone("trigger", event) : undefined
+      }
+      onPointerLeave={openOnHover ? () => leaveHoverZone("trigger") : undefined}
     >
       <button
         type="button"
@@ -374,7 +561,24 @@ export function Select({
         aria-invalid={invalid || undefined}
         aria-label={label}
         disabled={disabled}
-        onClick={() => (open ? closePanel() : openPanel())}
+        // A hover-opened panel is not a click target yet: clicking the trigger
+        // then means "I want to use this now", so it turns into an ordinary
+        // (focused, staying) panel instead of closing under the pointer.
+        data-hover-open={hoverOpen || undefined}
+        onClick={() => {
+          if (!open) {
+            openPanel();
+            return;
+          }
+          if (hoverOpen) {
+            openPanel();
+            // The panel is already mounted, so `autoFocus` cannot help: focus
+            // its filter explicitly, as a click-opened panel always did.
+            searchRef.current?.focus();
+            return;
+          }
+          closePanel();
+        }}
         onKeyDown={onTriggerKeyDown}
       >
         {variant === "icon" ? null : (
@@ -420,6 +624,27 @@ export function Select({
             className="imb-select-panel imb-menu-surface"
             id={listboxId}
             role="listbox"
+            // The other half of the hover zone: entering the panel cancels the
+            // pending close, so the pointer can cross the gap above/below it.
+            onPointerEnter={
+              openOnHover ? () => enterHoverZone("panel") : undefined
+            }
+            onPointerLeave={
+              openOnHover ? () => leaveHoverZone("panel") : undefined
+            }
+            // Focus leaving the panel releases a pointer-opened panel (once the
+            // pointer is elsewhere too), so it can never be left unclosable.
+            onBlur={
+              openOnHover
+                ? (event) => {
+                    const next = event.relatedTarget as Node | null;
+                    if (next !== null && panelRef.current?.contains(next)) {
+                      return;
+                    }
+                    releaseHoverPanel();
+                  }
+                : undefined
+            }
             style={{
               position: "fixed",
               top: panelStyle.top,
@@ -443,7 +668,10 @@ export function Select({
                   value={query}
                   placeholder={searchPlaceholder}
                   aria-label={searchPlaceholder || label || undefined}
-                  autoFocus
+                  // A hover-opened panel must not take focus: the boss may be
+                  // typing in the composer underneath. Click and keyboard still
+                  // land in the filter, exactly as before.
+                  autoFocus={!hoverOpen}
                   onChange={(event) => {
                     setQuery(event.target.value);
                     setActiveIndex(0);

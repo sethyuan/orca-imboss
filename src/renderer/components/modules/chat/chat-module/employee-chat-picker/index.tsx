@@ -17,10 +17,16 @@ import "./index.css";
  * like "this is the conversation I am in".
  *
  * The trigger is icon-only (a 14px upward caret in a 30px hit area), so it has
- * no text to state an action or a reason: both come from the tooltip and the
- * accessible name — "chat with employee" normally, and the reason when the
- * picker is unavailable ("no employees to chat with"). It is never silently
+ * no text to state an action or a reason: the reason rides on the accessible
+ * name — "chat with employee" normally, and the actual reason when the picker is
+ * unavailable ("no employees to chat with", "Loading…"). It is never silently
  * disabled.
+ *
+ * It opens on **hover** as well as on click: pointing at the caret for a moment
+ * reveals the list, without a click and without stealing focus (the boss may be
+ * typing in the composer). A pointer-opened panel closes when the pointer leaves
+ * both the caret and the panel; click, keyboard and touch taps open it the
+ * ordinary way (focused, staying until a pick / Escape / a click outside).
  *
  * The list is a `Select` (the app's one combobox: portaled shared menu surface,
  * keyboard + Escape + popup layer) with its searchable panel: the filter matches
@@ -95,6 +101,8 @@ export function EmployeeChatPicker(): React.JSX.Element {
           disabled={loading || empty || busy}
           variant="icon"
           searchable
+          // Hover reveals the list; the panel opens upward over the chat list.
+          openOnHover
           searchPlaceholder={t("Search employees")}
           emptyMessage={
             empty ? t("No employees to chat with") : t("No employees found")

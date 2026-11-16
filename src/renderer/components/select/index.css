@@ -225,6 +225,13 @@
   box-shadow: var(--imb-focus-ring);
 }
 
+/* Hover-opened panel (`openOnHover`): the pointer opened it, so nothing was
+   focused — the expanded trigger must not paint the focus ring. It keeps the
+   hover fill, which is what the pointer has already earned. */
+.imb-select[data-hover-open="true"][aria-expanded="true"] {
+  box-shadow: none;
+}
+
 /* The caret is centred instead of absolutely parked at the right edge, and it
    is the only content: keep it at full text contrast, not the muted grey a
    trailing caret uses (that would read as "disabled"). */
