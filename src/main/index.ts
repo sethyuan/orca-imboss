@@ -21,6 +21,7 @@ import { installDesktopBroadcaster } from "./desktop/broadcast";
 import { installLocalSettingsStore } from "./desktop/local-settings";
 import { createIpcBinder } from "./desktop/ipc";
 import { installDesktopPlatform } from "./desktop/platform";
+import { isE2eHidden } from "./e2e-mode";
 import { applyStoredHttpProxy } from "./http-proxy";
 import {
   registerImbFileHandler,
@@ -81,6 +82,15 @@ try {
 
 const isRemote = remoteOptions !== null;
 setRemoteMode(isRemote);
+
+// E2E hidden mode (`tests/e2e`): drop the Dock icon as early as possible.
+//
+// Electron is a regular, Dock-owning application until this call, so its tile can
+// be on screen for the ~200 ms between process start and the JS main module
+// running — that residual flash is accepted. Once hidden, the app is an accessory
+// application: it never becomes active, so it takes neither focus nor the menu
+// bar, and the frontmost app stays frontmost for the whole test run.
+if (isE2eHidden() && process.platform === "darwin") app.dock?.hide();
 
 // Keep the Pi SDK's own agent-dir defaults (MCP OAuth credentials and MCP logs)
 // inside the app's isolated data dir instead of the host's `~/.pi/agent`. The

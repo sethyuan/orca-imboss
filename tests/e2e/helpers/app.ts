@@ -28,6 +28,12 @@ import {
  *   the app also *reads* the shared Agent Skills folder `~/.agents/skills`,
  *   which `IMBOSS_DATA_ROOT` does not cover. Without this a test would see
  *   whatever the developer happens to have there.
+ * - `IMBOSS_E2E_HIDDEN=1` keeps the run off the screen entirely: the app creates
+ *   its window but never shows it, shows no Dock icon, installs no tray item and
+ *   registers no global shortcut (see `src/main/e2e-mode.ts`). Playwright's
+ *   `mouse`/`keyboard` are synthetic CDP events and a never-shown window still
+ *   renders, so nothing is lost. `IMBOSS_E2E_SHOW=1` opts back into a visible
+ *   run for working on the UI.
  *
  * All paths are asserted to live under `os.tmpdir()` and to be what the app
  * actually resolved, so a future refactor that breaks the isolation fails loudly
@@ -100,6 +106,15 @@ export async function launchApp(
   // instead of the freshly built `out/renderer` — never what a test wants.
   delete env["ELECTRON_RENDERER_URL"];
   env["IMBOSS_DATA_ROOT"] = dataRoot;
+  // Off the screen by default: no window, no Dock icon, no tray, no global
+  // shortcut, so a run never takes focus from whoever is using the machine.
+  if (process.env["IMBOSS_E2E_SHOW"] === "1") {
+    // Explicit opt-in to the old, visible behaviour (watch a run while debugging
+    // the UI). Inherited from a shell that exported it, so clear it here too.
+    delete env["IMBOSS_E2E_HIDDEN"];
+  } else {
+    env["IMBOSS_E2E_HIDDEN"] = "1";
+  }
   // `~/.agents/skills` is outside the data root; move `home` too. Windows
   // derives the home directory from `USERPROFILE`, POSIX from `HOME`.
   env["HOME"] = homeDir;

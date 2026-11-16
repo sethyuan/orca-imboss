@@ -12,7 +12,8 @@ pnpm exec playwright test -g "search"                   # one test by title
 ```
 
 Requires a prior `pnpm install` (Playwright is a devDependency) and a built app;
-`test:e2e` builds it for you.
+`test:e2e` builds it for you. A run shows no window and takes no focus: you can
+start it while you keep working (see "It does not take the screen over").
 
 ## When to run them
 
@@ -37,6 +38,7 @@ Node-only logic (db, agent, integrations, rpc) is covered by
 | `HOME=<tmp>/home` (`USERPROFILE` on Windows) | the user's home, i.e. the shared, read-only Agent Skills folder `~/.agents/skills` that the app also reads                 |
 | `--user-data-dir=<tmp>/userdata`             | Electron's own state, **including the single-instance lock**                                                               |
 | `--lang=en-US`                               | the UI locale (the app otherwise derives it from the OS)                                                                   |
+| `IMBOSS_E2E_HIDDEN=1`                        | nothing on screen: no window, no Dock icon, no tray item, no global shortcut (see below)                                   |
 
 Both paths are asserted to live under `os.tmpdir()` _and_ to be what the app
 actually resolved, so the suite fails loudly if isolation ever breaks. That is why
@@ -47,6 +49,34 @@ The folders are deleted when the app closes. Keep them for debugging with:
 
 ```bash
 IMBOSS_E2E_KEEP=1 pnpm exec playwright test -g "search"
+```
+
+## It does not take the screen over
+
+Launching the app is the only part of a run that could disturb whoever is using
+the machine — Playwright's `mouse`/`keyboard` are synthetic CDP events, not the
+real input devices. So `launchApp()` also sets `IMBOSS_E2E_HIDDEN=1`
+(`src/main/e2e-mode.ts`), which keeps the app out of the way entirely:
+
+- the window is created but **never shown** (`ready-to-show` does not call
+  `show()`); a hidden window still renders, so clicking, typing, screenshots and
+  `reload()` all work unchanged;
+- `showMainWindow()` refuses, so no stray `activate` / `second-instance` / tray
+  click can bring it on screen mid-run;
+- macOS: **no Dock icon** (`app.dock.hide()`), which is also what stops the app
+  from becoming the active application — the frontmost app keeps focus and the
+  menu bar for the whole run. Electron being a regular app for the first ~200 ms
+  of process start means a brief Dock tile may still flash;
+- **no tray item** and **no global shortcut**: the shortcut is held system-wide,
+  so registering `Cmd+Ctrl+B` for the length of a run would swallow those
+  keystrokes from other apps.
+
+The switch is ignored in a packaged build (`!app.isPackaged`), so it can never
+hide the installed app. Screenshots (`screenshot: only-on-failure`) and traces
+are unaffected. To _watch_ a run while working on the UI:
+
+```bash
+IMBOSS_E2E_SHOW=1 pnpm test:e2e:only
 ```
 
 ## When a test fails: read the trace first
@@ -98,7 +128,10 @@ it.
   verified indirectly.
 - **No packaged build.** Tests run the `electron-vite build` output, not the asar
   bundle; packaging is still verified by `pnpm dist:local` + a manual pass.
-- **Not in CI.** The tests pop a real window for 1–2 s per case (macOS has no
-  headless Electron). They are a local, developer-driven check by decision.
+- **Not in CI (for now).** `IMBOSS_E2E_HIDDEN` removed the old blocker — a run
+  no longer needs a visible window, so "macOS has no headless Electron" is no
+  longer a reason. What is still unverified is a CI machine without a
+  WindowServer session (Linux would need Xvfb first). For now these stay a
+  local, developer-driven check.
 - **Single worker.** Each case boots a whole Electron app; `workers: 1` keeps it
   predictable. A full run is ~10 s, so there is nothing to gain from parallelism.

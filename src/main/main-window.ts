@@ -5,6 +5,7 @@ import trayColorIcon from "../../resources/tray/tray.png?asset";
 import trayTemplateIcon from "../../resources/tray/trayTemplate.png?asset";
 import { t } from "@shared/l10n";
 import { getRemoteIncompatibility, isRemoteMode } from "./app-mode";
+import { isE2eHidden } from "./e2e-mode";
 import { getResolvedLocale } from "./locale";
 import {
   DEFAULT_WINDOW_HEIGHT,
@@ -114,6 +115,12 @@ export function createMainWindow(): BrowserWindow {
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       spellcheck: false,
+      // E2E hidden mode: a window that is never shown is still painted (the
+      // suite screenshots it), but there is no reason to let a long run be
+      // throttled by the OS deciding the window is in the background. Measured
+      // unnecessary — rAF and timers already run at full rate in a hidden window
+      // — so this is only cheap insurance against that changing.
+      ...(isE2eHidden() ? { backgroundThrottling: false } : {}),
       // `--remote-mode` is what the preload turns into `imb.remote.enabled`: the
       // renderer decides between "a path the agent can read" and "upload the
       // bytes" from it.
@@ -133,6 +140,10 @@ export function createMainWindow(): BrowserWindow {
 
   win.on("ready-to-show", () => {
     if (win.isDestroyed()) return;
+    // E2E hidden mode: the window keeps existing (Playwright drives it and
+    // screenshots it regardless of native visibility) but must never appear —
+    // showing it would take focus from whatever the boss is doing.
+    if (isE2eHidden()) return;
     if (!win.isVisible()) win.show();
   });
 
@@ -249,6 +260,11 @@ function isWindowShown(win: BrowserWindow | null): boolean {
  * Each step covers a specific way "show" silently fails:
  */
 export function showMainWindow(): void {
+  // E2E hidden mode: every "bring the app back" entry point ends up here (global
+  // shortcut, tray click, second instance, macOS `activate`, OS notification), and
+  // none of them may put a window on screen during a test run.
+  if (isE2eHidden()) return;
+
   const win = getMainWindow() ?? createMainWindow();
   if (win.isDestroyed()) return;
 
@@ -378,6 +394,9 @@ export function quitApp(): void {
  * delivered), so there the menu is installed instead of handled.
  */
 export function initTray(): void {
+  // E2E hidden mode: a menu-bar item appearing and disappearing for every case
+  // would be one more thing the run does to the boss's screen.
+  if (isE2eHidden()) return;
   if (tray) return;
   try {
     const image =

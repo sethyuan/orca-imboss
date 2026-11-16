@@ -8,6 +8,7 @@ import {
 import type { WindowShortcutState, WindowShortcutUpdate } from "@shared/types";
 import { globalShortcut } from "electron";
 import { getShellSetting, setShellSetting } from "./settings-shell";
+import { isE2eHidden } from "./e2e-mode";
 import { toggleMainWindow } from "./main-window";
 
 /**
@@ -103,6 +104,14 @@ function currentAccelerator(): string | null {
 export function initWindowShortcut(): void {
   if (initialized) return;
   initialized = true;
+  // E2E hidden mode: a global shortcut is held *system-wide*. Registering the
+  // default (`Cmd+Ctrl+B`) for the length of a test run would swallow those
+  // keystrokes from every other app on the machine, so nothing is registered and
+  // the feature reports itself as off.
+  if (isE2eHidden()) {
+    configured = null;
+    return;
+  }
   configured = readConfigured();
   apply();
 }
