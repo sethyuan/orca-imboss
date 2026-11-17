@@ -61,6 +61,8 @@ import { createEmployee } from "../../src/main/db/employees";
 import { normalizeRefName, wrapRefName } from "../../src/shared/ref-names";
 import { createChat, listTaskGroupsOf } from "../../src/main/db/chats";
 import { appendMessage, listMessages } from "../../src/main/db/messages";
+import { readWorkRooms } from "../../src/main/work-status";
+import { MAX_WORK_ROOMS } from "../../src/shared/constants/work-status";
 import { sweepTransferTempRoot } from "../../src/main/file-browser";
 import { registerRemoteHandlers } from "../../src/main/ipc";
 import { initLocale } from "../../src/main/locale";
@@ -166,6 +168,11 @@ async function main(): Promise<void> {
     // that lists them; the rule is asserted here against the real query, and the
     // channel is then added to the transport comparison below.
     runTaskGroupChecks();
+
+    // The work-status board reads what an agent wrote (progress cards, notify
+    // lists) across chats — also unreachable from the E2E suite without a model,
+    // so its rules are asserted here against the real queries.
+    runWorkStatusChecks();
 
     // The two join notices (`imb_create_chat` / `imb_add_participant`): a task
     // group is only ever created by an agent, so these writes are unreachable
@@ -344,7 +351,9 @@ function runAttachmentBlurbChecks(): void {
   );
   check(
     "a hand-typed blurb in Chinese stays visible",
-    !isAttachmentOnlyBlurb("Attached: 我的截图.png", [{ name: "我的截图.png" }]),
+    !isAttachmentOnlyBlurb("Attached: 我的截图.png", [
+      { name: "我的截图.png" },
+    ]),
   );
   check(
     "a sentence that only starts like the blurb stays visible",
@@ -355,10 +364,10 @@ function runAttachmentBlurbChecks(): void {
   );
   check(
     "naming one of two attachments is the boss talking, not the generator",
-    !isAttachmentOnlyBlurb(
-      "Attached: pasted-20261113-101010.png",
-      [{ name: "pasted-20261113-101010.png" }, { name: "upload-9-report.pdf" }],
-    ),
+    !isAttachmentOnlyBlurb("Attached: pasted-20261113-101010.png", [
+      { name: "pasted-20261113-101010.png" },
+      { name: "upload-9-report.pdf" },
+    ]),
   );
   check(
     "a mix of minted and user files is never treated as generated",
@@ -374,10 +383,9 @@ function runAttachmentBlurbChecks(): void {
   );
   check(
     "a truncated name still matches its file",
-    isAttachmentOnlyBlurb(
-      `Attached: ${"pasted-" + "x".repeat(40)}…`,
-      [{ name: "pasted-" + "x".repeat(80) + ".png" }],
-    ),
+    isAttachmentOnlyBlurb(`Attached: ${"pasted-" + "x".repeat(40)}…`, [
+      { name: "pasted-" + "x".repeat(80) + ".png" },
+    ]),
   );
 }
 
@@ -840,6 +848,198 @@ function runTaskGroupChecks(): void {
 
   // The same read over the real transport, with a non-empty payload.
   READ_CASES.push({ channel: "chats:taskGroups", args: [root.id] });
+}
+
+/**
+ * The work-status board's rules: which task groups become rooms, what a room
+ * carries, and which message ends up as whose bubble.
+ *
+ * "In progress" is now *only* "someone is working in that group", and working is
+ * the live state of a Pi session — unreachable here (a run needs a model). So
+ * `readWorkRooms(running)` takes the live set as a parameter: this harness
+ * supplies it explicitly and gets the same code path the app runs with real
+ * sessions, without a provider or a single token spent.
+ */
+function runWorkStatusChecks(): void {
+  const anna = createEmployee({ name: "Harness Anna", role: "Architect" }).id;
+  const ben = createEmployee({ name: "Harness Ben", role: "Tester" }).id;
+  const root = createChat("Harness rooms", [0, anna, ben]);
+  const openGroup = createChat("Harness open group", [0, anna, ben], {
+    fromChatId: root.id,
+  });
+  const doneGroup = createChat("Harness done group", [0, anna, ben], {
+    fromChatId: root.id,
+  });
+
+  appendMessage(root.id, 0, "Harness open progress", {
+    kind: "progress",
+    groupChatId: openGroup.id,
+    steps: [
+      { name: "Harness Anna", task: "write", status: "done", employeeId: anna },
+      { name: "Harness Ben", task: "build", status: "busy", employeeId: ben },
+    ],
+  });
+  appendMessage(root.id, 0, "Harness done progress", {
+    kind: "progress",
+    groupChatId: doneGroup.id,
+    steps: [
+      { name: "Harness Anna", task: "ship", status: "done", employeeId: anna },
+    ],
+  });
+
+  const bubble = appendMessage(
+    openGroup.id,
+    ben,
+    "Handing the build over, @0 is on it.",
+    { notifiedEmployeeIds: [0] },
+  );
+  // A message that woke nobody is never a bubble.
+  appendMessage(openGroup.id, ben, "Just a status note.");
+
+  // ── nobody working: no rooms, whatever the cards say ──────────────────────
+  const idle = readWorkRooms([]);
+  check(
+    "a progress card alone makes no room",
+    idle.rooms.length === 0,
+    idle.rooms.map((room) => room.title).join(","),
+  );
+
+  // ── one employee working inside a group ──────────────────────────────────
+  const working = readWorkRooms([{ employeeId: ben, chatId: openGroup.id }]);
+  const byId = new Map(working.rooms.map((room) => [room.chatId, room]));
+  check(
+    "the group someone works in is a room",
+    byId.has(openGroup.id),
+    [...byId.keys()].join(","),
+  );
+  check(
+    "the other group is not a room while nobody works in it",
+    !byId.has(doneGroup.id),
+    [...byId.keys()].join(","),
+  );
+
+  const open = byId.get(openGroup.id);
+  check(
+    "the room's screen is the group's newest progress card",
+    open?.progress?.title === "Harness open progress" &&
+      open.progress.steps.length === 2,
+    open?.progress?.title ?? "none",
+  );
+  check(
+    "the room's roster holds its participants, with only the working one running",
+    open?.members.length === 3 &&
+      open.members
+        .filter((member) => member.running)
+        .map((m) => m.employeeId)
+        .join(",") === String(ben),
+    JSON.stringify(open?.members.map((m) => [m.employeeId, m.running]) ?? null),
+  );
+  check(
+    "only the notifying message becomes the sender's bubble",
+    open?.bubbles.length === 1 &&
+      open.bubbles[0]?.messageId === bubble.id &&
+      open.bubbles[0]?.employeeId === ben,
+    JSON.stringify(open?.bubbles ?? null),
+  );
+  check(
+    "the notify list is stored on the message and read back intact",
+    listMessages(openGroup.id)
+      .find((m) => m.id === bubble.id)
+      ?.notifiedEmployeeIds?.join(",") === "0",
+  );
+
+  // ── a finished card is a room while someone works in it ───────────────────
+  const doneWorking = readWorkRooms([
+    { employeeId: anna, chatId: doneGroup.id },
+  ]);
+  check(
+    "a group whose card is finished is still a room while someone works in it",
+    doneWorking.rooms.length === 1 &&
+      doneWorking.rooms[0]?.chatId === doneGroup.id,
+    doneWorking.rooms.map((room) => room.title).join(","),
+  );
+
+  // ── the assistant runs in the root chat, never inside the group ───────────
+  const assistantWorking = readWorkRooms([{ employeeId: 0, chatId: root.id }]);
+  const assistantTitles = assistantWorking.rooms
+    .map((room) => room.title)
+    .sort();
+  check(
+    "an assistant run in the root chat puts its groups on the board",
+    assistantTitles.join(",") === "Harness done group,Harness open group",
+    assistantTitles.join(","),
+  );
+  check(
+    "that run is the orchestrator's, not an employee's",
+    assistantWorking.rooms.every((room) => {
+      const orchestrator = room.members.find((member) => member.orchestrator);
+      const others = room.members.filter((member) => !member.orchestrator);
+      return (
+        orchestrator?.running === true &&
+        others.every((member) => !member.running)
+      );
+    }),
+  );
+
+  // ── many idle groups never crowd out the one that is working ──────────────
+  const crowdRoot = createChat("Harness crowd", [0]);
+  const crowded = createChat("Harness crowded worker", [0, ben], {
+    fromChatId: crowdRoot.id,
+  });
+  appendMessage(crowdRoot.id, 0, "Harness crowded progress", {
+    kind: "progress",
+    groupChatId: crowded.id,
+    steps: [
+      { name: "Harness Ben", task: "grind", status: "busy", employeeId: ben },
+    ],
+  });
+  for (let index = 0; index < 30; index += 1) {
+    const idleGroup = createChat(`Harness idle ${index}`, [0, anna], {
+      fromChatId: crowdRoot.id,
+    });
+    appendMessage(crowdRoot.id, 0, `Harness idle ${index} progress`, {
+      kind: "progress",
+      groupChatId: idleGroup.id,
+      steps: [
+        {
+          name: "Harness Anna",
+          task: "later",
+          status: "busy",
+          employeeId: anna,
+        },
+      ],
+    });
+  }
+  const crowdedResult = readWorkRooms([
+    { employeeId: ben, chatId: crowded.id },
+  ]);
+  check(
+    "thirty idle groups do not crowd out the one that is working",
+    crowdedResult.rooms.length === 1 &&
+      crowdedResult.rooms[0]?.chatId === crowded.id &&
+      !crowdedResult.truncated,
+    `${crowdedResult.rooms.map((room) => room.chatId).join(",")} truncated=${crowdedResult.truncated}`,
+  );
+
+  // ── more working groups than the board can show ───────────────────────────
+  const liveIds: number[] = [];
+  const liveRoot = createChat("Harness live", [0]);
+  for (let index = 0; index < MAX_WORK_ROOMS + 6; index += 1) {
+    const liveGroup = createChat(`Harness live ${index}`, [0, anna], {
+      fromChatId: liveRoot.id,
+    });
+    liveIds.push(liveGroup.id);
+  }
+  const overflow = readWorkRooms(
+    liveIds.map((chatId) => ({ employeeId: anna, chatId })),
+  );
+  check(
+    "the room cap only truncates when working groups exceed it",
+    overflow.rooms.length === MAX_WORK_ROOMS && overflow.truncated,
+    `${overflow.rooms.length} truncated=${overflow.truncated}`,
+  );
+
+  READ_CASES.push({ channel: "workStatus:rooms", args: [] });
 }
 
 /**

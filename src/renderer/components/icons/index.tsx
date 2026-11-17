@@ -345,6 +345,20 @@ export function IconStats(props: IconProps): React.JSX.Element {
   );
 }
 
+/**
+ * Work status: an isometric room — floor plate, back wall and a screen on it.
+ * Reads as "a place with a status board", which is what the module shows.
+ */
+export function IconRooms(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)} strokeWidth={1.6}>
+      <path d="M3 9.2 12 4.6l9 4.6-9 4.6-9-4.6Z" />
+      <path d="M3 9.2v7.4l9 4.4 9-4.4V9.2" />
+      <path d="M7.6 7.8v4.1l4.4 2.2 4.4-2.2V7.8" />
+    </svg>
+  );
+}
+
 /** Clock face — scheduled tasks / cron jobs. */
 export function IconClock(props: IconProps): React.JSX.Element {
   return (

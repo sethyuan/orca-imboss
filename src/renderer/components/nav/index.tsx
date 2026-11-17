@@ -40,6 +40,7 @@ import {
   IconClock,
   IconEmployees,
   IconGear,
+  IconRooms,
   IconStats,
 } from "../icons";
 import { Tooltip } from "../tooltip";
@@ -63,6 +64,12 @@ const NAV_ITEMS: NavItem[] = [
     module: "employees",
     labelKey: "Employees",
     icon: IconEmployees,
+    section: "main",
+  },
+  {
+    module: "work-status",
+    labelKey: "Work status",
+    icon: IconRooms,
     section: "main",
   },
   {

@@ -47,7 +47,8 @@ import {
 } from "../image-gen";
 import { readMcpServers } from "../mcp-store";
 import { alertOneLine } from "./alert-text";
-import { notifyAlert, sendToRenderer } from "../notifications";
+import { notifyEmployeesChanged } from "../employee-events";
+import { notifyAlert } from "../notifications";
 import { materializeSessionFile, sessionPathFor } from "./session-files";
 import {
   interruptTurnDiscardingQueue,
@@ -233,6 +234,9 @@ async function performSendMessage(
       groupChatId: input.groupChatId,
       attachments,
       attachmentTotal: input.attachmentTotal,
+      // Recorded so a later read still knows this message woke those people
+      // (the work-status view shows it as the sender's bubble).
+      notifiedEmployeeIds: input.notify ?? undefined,
     },
   );
 
@@ -645,7 +649,9 @@ function setEmployeesTool(): AnyPiTool {
       );
       // The renderer caches employees for chat avatars/names; let it refresh so
       // newly recruited staff show up without visiting the Employees module.
-      if (ids.length > 0) sendToRenderer("employees:changed", { ids });
+      // Goes through the shared helper so the work-status board (which seats the
+      // roster) refreshes with it, exactly like a UI-side edit.
+      notifyEmployeesChanged(ids);
       return toolResult({ ids });
     },
   };

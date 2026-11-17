@@ -49,6 +49,8 @@ import type {
   WindowShortcutState,
   WindowShortcutUpdate,
   WorkDirState,
+  WorkRoomsPayload,
+  WorkStatusChangedPayload,
 } from "@shared/types";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
@@ -813,6 +815,19 @@ const api = {
       ipcRenderer.invoke("backup:cancelRestore") as Promise<void>,
     /** Restart the app so a staged restore is applied. */
     restart: () => ipcRenderer.invoke("backup:restart") as Promise<void>,
+  },
+
+  workStatus: {
+    /**
+     * Snapshot of every in-progress task group as one room (roster, latest
+     * progress card, whose message woke whom, who is running right now).
+     * Read-only: the view observes, it never drives an agent.
+     */
+    rooms: () =>
+      ipcRenderer.invoke("workStatus:rooms") as Promise<WorkRoomsPayload>,
+    /** "The snapshot is stale" — re-read `rooms`. Coalesced main-side. */
+    onChanged: (cb: (payload: WorkStatusChangedPayload) => void) =>
+      on<WorkStatusChangedPayload>("workStatus:changed", cb),
   },
 };
 

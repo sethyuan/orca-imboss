@@ -17,15 +17,18 @@ import type {
 } from "@shared/types";
 import { validateCommentsPayload } from "../comment-prompt";
 import { sendToRenderer } from "../notifications";
+import { notifyWorkStatusChanged } from "../work-status-events";
 import { bumpUnread, createChatTitleResolver, getChat } from "./chats";
 import { getDB } from "./index";
 import {
   MAX_ATTACH_PATH_LENGTH,
+  MAX_NOTIFY_TARGETS,
   parseAttachmentTotal,
   parseAttachments,
   parseComments,
   parseGroupChatId,
   parseImageStatus,
+  parseNotifiedEmployeeIds,
   parseSteps,
   STEP_STATUSES,
 } from "./message-payload";
@@ -40,6 +43,7 @@ interface MessageRow {
   steps: string | null;
   attachments: string | null;
   comments: string | null;
+  notify: string | null;
   image_status: string | null;
   image_model: string | null;
   created_at: number;
@@ -210,6 +214,9 @@ export function appendMessage(
   // another conversation (or one that no longer exists) would be a dead
   // reference forever, so it is rejected rather than stored.
   const comments = validateComments(options.comments, chatId);
+  const notifiedEmployeeIds = validateNotifiedEmployeeIds(
+    options.notifiedEmployeeIds,
+  );
   // The two reasons a message may legitimately have no text: the app-generated
   // `ack` receipt (its label is localized at render time) and a send whose whole
   // content is the comments it carries.
@@ -293,6 +300,7 @@ export function appendMessage(
   const createdAt = Math.floor(Date.now() / 1000);
   const attachmentsJson = serializeAttachments(attachments, attachmentTotal);
   const commentsJson = serializeComments(comments);
+  const notifyJson = serializeNotifiedEmployeeIds(notifiedEmployeeIds);
   // The `steps` column also carries the task-group link; write the blob when
   // either is present (an `interrupted` notice has the link but no steps).
   const stepsJson =
@@ -301,8 +309,8 @@ export function appendMessage(
       : null;
   const result = db
     .prepare(
-      "INSERT INTO messages (chat_id, sender_employee_id, kind, content, steps, attachments, comments, image_status, image_model, created_at) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO messages (chat_id, sender_employee_id, kind, content, steps, attachments, comments, notify, image_status, image_model, created_at) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
       chatId,
@@ -312,6 +320,7 @@ export function appendMessage(
       stepsJson,
       attachmentsJson,
       commentsJson,
+      notifyJson,
       imageStatus,
       imageModel,
       createdAt,
@@ -348,6 +357,18 @@ export function appendMessage(
   };
   sendToRenderer("messages:changed", changed);
 
+  // The work-status view (task-group rooms) re-reads its snapshot when a message
+  // can change it: a progress card (it *is* a room's screen), a message that
+  // woke someone (it becomes that sender's bubble), or anything posted into a
+  // task group at all (a new group's join notice is how a room first appears).
+  if (
+    kind === "progress" ||
+    notifyJson !== null ||
+    chatRow.fromChatId !== null
+  ) {
+    notifyWorkStatusChanged("message");
+  }
+
   const message = toMessage({
     id: Number(result.lastInsertRowid),
     chat_id: chatId,
@@ -357,6 +378,7 @@ export function appendMessage(
     steps: stepsJson,
     attachments: attachmentsJson,
     comments: commentsJson,
+    notify: notifyJson,
     image_status: imageStatus,
     image_model: imageModel,
     created_at: createdAt,
@@ -541,6 +563,7 @@ function toMessage(row: MessageRow): Message {
     groupChatId: parseGroupChatId(row.steps),
     attachments,
     comments: parseComments(row.comments),
+    notifiedEmployeeIds: parseNotifiedEmployeeIds(row.notify),
     attachmentsTotal:
       attachments === null
         ? null
@@ -579,6 +602,41 @@ function serializeComments(
 ): string | null {
   if (comments === undefined || comments.length === 0) return null;
   return JSON.stringify({ comments });
+}
+
+/**
+ * Serialize the notified participant ids into the `notify` column (`null` when
+ * the message woke nobody, so "no targets" has exactly one stored form).
+ */
+function serializeNotifiedEmployeeIds(
+  ids: number[] | undefined,
+): string | null {
+  if (ids === undefined || ids.length === 0) return null;
+  return JSON.stringify(ids);
+}
+
+/**
+ * Validate a `notify` list supplied by an agent tool call: safe non-negative
+ * integers, deduplicated, capped. Unknown/disabled employees are *not* rejected
+ * here — the sender tool already skips them when it wakes anyone, and a stored
+ * id that no longer resolves simply has no bubble to sit in.
+ */
+function validateNotifiedEmployeeIds(ids: unknown): number[] | undefined {
+  if (ids === undefined || ids === null) return undefined;
+  if (!Array.isArray(ids)) {
+    throw new Error("Notified employees must be an array of ids.");
+  }
+  if (ids.length > MAX_NOTIFY_TARGETS) {
+    throw new Error(`At most ${MAX_NOTIFY_TARGETS} employees can be notified.`);
+  }
+  const result: number[] = [];
+  for (const id of ids) {
+    if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 0) {
+      throw new Error("Notified employee ids must be non-negative integers.");
+    }
+    if (!result.includes(id)) result.push(id);
+  }
+  return result.length > 0 ? result : undefined;
 }
 
 /**

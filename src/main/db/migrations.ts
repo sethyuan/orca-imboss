@@ -223,6 +223,26 @@ const MIGRATIONS: Array<(db: Database) => void> = [
       ALTER TABLE messages ADD COLUMN comments TEXT;
     `);
   },
+  // 9 — `notify` targets of a message: the participant ids the sender asked to
+  // wake (`imb_send_message`'s `notify`). Until now that list existed only for
+  // the instant of the send (it woke agents and was forgotten), so nothing could
+  // report "this message went to those people". The work-status view needs it
+  // after the fact, hence a stored JSON array; NULL for messages that woke
+  // nobody and for every row written before this migration.
+  //
+  // The two partial indexes are what keep the view's snapshot query bounded: it
+  // only ever scans progress cards and notifying messages, not the whole table.
+  (db) => {
+    db.exec(`
+      ALTER TABLE messages ADD COLUMN notify TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_messages_progress
+        ON messages(id) WHERE kind = 'progress';
+
+      CREATE INDEX IF NOT EXISTS idx_messages_notify
+        ON messages(chat_id, id) WHERE notify IS NOT NULL;
+    `);
+  },
 ];
 
 export function migrate(db: Database): void {

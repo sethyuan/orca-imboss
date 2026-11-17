@@ -13,6 +13,7 @@ import * as dbMessages from "../db/messages";
 import * as dbTags from "../db/tags";
 import { listByChat, unlinkSessionFile } from "../db/sessions";
 import { sendToRenderer } from "../notifications";
+import { notifyWorkStatusChanged } from "../work-status-events";
 import {
   agentPrompt,
   userMessageContent,
@@ -99,6 +100,7 @@ export function registerChatHandlers(bind: Binder): void {
       // Manual rename: keep every window's chat cache (list + header) in sync,
       // mirroring the auto title-generation notification in `title-gen`.
       sendToRenderer("chats:changed", { chatId: safeId });
+      notifyWorkStatusChanged("chat");
     }
     return updated;
   });
@@ -113,6 +115,8 @@ export function registerChatHandlers(bind: Binder): void {
         // list, Nav opened entries, link cards). Broadcast it like every other
         // chat mutation; the renderer re-reads one summary and fans it out.
         sendToRenderer("chats:changed", { chatId: safeId });
+        // A task group's roster is the room's seating: refetch the snapshot.
+        notifyWorkStatusChanged("chat");
       }
       return updated;
     },
@@ -198,6 +202,7 @@ export function registerChatHandlers(bind: Binder): void {
       );
       // Keep every window in sync: chat caches + opened group-chat entries.
       sendToRenderer("chats:deleted", { chatIds });
+      notifyWorkStatusChanged("chat");
     }
     return removed;
   });

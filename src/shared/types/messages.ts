@@ -233,6 +233,16 @@ export interface Message {
    */
   comments: MessageComment[] | null;
   /**
+   * Participants the sender asked to wake when it sent this message
+   * (`imb_send_message`'s `notify`), deduplicated; `null` when the message
+   * woke nobody.
+   *
+   * Purely a record of what happened at send time — nothing is woken again when
+   * it is read. The work-status view uses it to decide whose bubble a message
+   * appears in (see `WorkRoomBubble`).
+   */
+  notifiedEmployeeIds: number[] | null;
+  /**
    * True number of attachments the sender produced. May exceed
    * `attachments.length` when an agent only forwarded the first few; `null`
    * when the message has no attachments.
@@ -361,6 +371,11 @@ export interface AppendMessageOptions {
    * rejected rather than stored as a dead reference.
    */
   comments?: MessageComment[];
+  /**
+   * Participants this send wakes (see `Message.notifiedEmployeeIds`). Stored
+   * for the record; the waking itself is the caller's job.
+   */
+  notifiedEmployeeIds?: number[];
   attachments?: MessageAttachment[];
   /**
    * True attachment count when it exceeds `attachments.length` (agent tools

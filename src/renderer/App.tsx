@@ -11,6 +11,7 @@ import { MiniAppModule } from "./components/modules/miniapp/miniapp-module";
 import { PathBrowserModal } from "./components/path-browser";
 import { SettingsModule } from "./components/modules/settings/settings-module";
 import { SpendModule } from "./components/modules/spend/spend-module";
+import { WorkStatusHost } from "./components/modules/work-status/work-status-module/host";
 
 const MODULE_VIEWS: Partial<Record<AppModule, () => React.JSX.Element>> = {
   chat: ChatModule,
@@ -38,6 +39,9 @@ export default function App(): React.JSX.Element {
       <ActiveModule />
       {/* Always mounted so visited mini-app iframes survive module switches. */}
       <MiniAppModule />
+      {/* Always mounted: the 3D work-status board must keep its camera, focus
+          and zoom when the boss leaves it to open a chat and comes back. */}
+      <WorkStatusHost />
       {/* Remote-only: the backend's folder picker, driven by any flow that
           needs a path on the server (see `remote-files.ts`). */}
       <PathBrowserModal />
@@ -72,6 +76,10 @@ function ActiveModule(): React.JSX.Element {
   // Mini apps are rendered by the persistent `MiniAppModule` host (so their
   // pages are never unmounted); the shell still uses the `single` layout here.
   if (module === "miniapp") return <></>;
+
+  // The work-status board has its own persistent host (`WorkStatusHost`) for the
+  // same reason: it must not be unmounted on a module switch.
+  if (module === "work-status") return <></>;
 
   const View = MODULE_VIEWS[module];
   if (View) return <View />;

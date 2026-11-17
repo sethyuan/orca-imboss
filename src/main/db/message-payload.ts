@@ -15,7 +15,7 @@ import {
 } from "@shared/constants/comments";
 import { MAX_COMMENT_ATTACHMENT_NAME_LENGTH } from "@shared/constants/image-annotation";
 import { normalizeImageMark } from "@shared/image-annotation";
-import { parseJsonObject } from "./json";
+import { parseJsonObject, parseNumberArray } from "./json";
 
 /**
  * Read helpers for the `messages` table's JSON payload columns (`steps`,
@@ -52,6 +52,29 @@ export function parseGroupChatId(raw: string | null): number | null {
   return typeof id === "number" && Number.isSafeInteger(id) && id > 0
     ? id
     : null;
+}
+
+/** Write-side cap for the `notify` column (checked before storing). */
+export const MAX_NOTIFY_TARGETS = 64;
+
+/**
+ * Participants a message woke when it was sent (`imb_send_message`'s `notify`),
+ * stored as a plain JSON array of employee ids.
+ *
+ * Only safe positive integers survive, deduplicated and capped: this is a
+ * stored payload, and the work-status view seats one bubble per id, so a
+ * malformed row must never be able to blow up a room.
+ */
+export function parseNotifiedEmployeeIds(raw: string | null): number[] | null {
+  if (!raw) return null;
+  const ids: number[] = [];
+  for (const value of parseNumberArray(raw)) {
+    if (!Number.isSafeInteger(value) || value < 0) continue;
+    if (ids.includes(value)) continue;
+    ids.push(value);
+    if (ids.length >= MAX_NOTIFY_TARGETS) break;
+  }
+  return ids.length > 0 ? ids : null;
 }
 
 export function parseSteps(raw: string | null): MessageStep[] | null {

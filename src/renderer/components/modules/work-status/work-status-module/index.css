@@ -1,0 +1,550 @@
+/* Work status module: header chrome + the 3D stage + the 2D board.
+   Sizing/colour come from the design-system tokens; the only local values are
+   the scene's own needs (a canvas host that must fill the pane). */
+
+.imb-ws-module {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--imb-bg-content);
+}
+
+/* The module is kept mounted while another module is on screen (its state must
+   survive a click into a chat); it must not paint or hit-test then. */
+.imb-ws-module[data-active="false"] {
+  display: none;
+}
+
+.imb-ws-head {
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-3);
+  padding: var(--imb-space-3) var(--imb-space-4) var(--imb-space-2);
+}
+
+.imb-ws-title {
+  margin: 0;
+  font-size: var(--imb-fs-title-3);
+  font-weight: var(--imb-fw-semibold);
+  color: var(--imb-fg);
+}
+
+/* Focused room: the group's title occupies the header's title slot, so it gets
+   the same size/weight and the same single-line truncation. */
+.imb-ws-title-room {
+  max-width: 52ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imb-ws-count {
+  font-size: var(--imb-fs-small);
+  color: var(--imb-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.imb-ws-spacer {
+  flex: 1;
+}
+
+.imb-ws-error {
+  margin: 0 var(--imb-space-4) var(--imb-space-2);
+  padding: var(--imb-space-2) var(--imb-space-3);
+  border-radius: var(--imb-radius-control);
+  background: var(--imb-danger-soft);
+  color: var(--imb-fg);
+  font-size: var(--imb-fs-small);
+}
+
+.imb-ws-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* The scene: one canvas, with the CSS3D layer and the HTML HUD stacked on it. */
+.imb-ws-canvas-host {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* A calm studio backdrop: the rooms are the content, the backdrop is not. */
+  background:
+    radial-gradient(
+      120% 90% at 50% 0%,
+      color-mix(in srgb, var(--imb-fg) 6%, transparent),
+      transparent 70%
+    ),
+    var(--imb-bg-sunken, var(--imb-bg-content));
+}
+
+.imb-ws-canvas-host .imb-ws-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.imb-ws-css-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* ── the focused room's wall screen (real DOM, positioned by CSS3D) ───────── */
+.imb-ws-screen {
+  /* CSS3D positions this element; the body inside is what we style. */
+  font-size: var(--imb-fs-ui);
+  color: var(--imb-fg);
+}
+
+.imb-ws-screen-body {
+  cursor: pointer;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-2);
+  width: 100%;
+  height: 100%;
+  padding: var(--imb-space-4);
+  border-radius: var(--imb-radius-card);
+  border: 1px solid var(--imb-sep-strong);
+  background: var(--imb-material-popover, var(--imb-bg-elevated));
+  box-shadow: var(--imb-shadow-2);
+  overflow: hidden;
+}
+
+/* One screen, one action: the card is displayed, never operated here. */
+.imb-ws-screen-content {
+  pointer-events: none;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.imb-ws-screen-content .imb-progress-card {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.imb-ws-screen-body:active {
+  transform: scale(var(--imb-press-scale));
+}
+
+.imb-ws-screen-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--imb-space-2);
+  color: var(--imb-fg-muted);
+  font-size: var(--imb-fs-small);
+}
+
+.imb-ws-screen-empty-title {
+  color: var(--imb-fg);
+  font-size: var(--imb-fs-title-3);
+  font-weight: var(--imb-fw-semibold);
+}
+
+.imb-ws-screen-open {
+  align-self: flex-start;
+  margin-top: auto;
+  padding: 0 var(--imb-space-3);
+  height: var(--imb-control-h-mini);
+  border: none;
+  border-radius: var(--imb-radius-chip);
+  background: var(--imb-accent);
+  color: var(--imb-accent-on);
+  font-size: var(--imb-fs-caption);
+  font-weight: var(--imb-fw-medium);
+  cursor: pointer;
+}
+
+.imb-ws-screen-open:hover {
+  background: var(--imb-accent-hover);
+}
+
+/* ── HTML HUD: bubbles, room plates, hover card ──────────────────────────── */
+.imb-ws-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.imb-ws-hud > * {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+}
+
+/* Bubbles: uniform radius on all four corners + one tail pointing at the head.
+   The bubble is centred over the anchor (the top of the head), so the tail always
+   lands on the person whatever the camera does. */
+.imb-ws-bubble-anchor {
+  pointer-events: none;
+  /* Above the plates (1) and above the wall screen, which is a separate DOM layer
+     stacked below the HUD. */
+  z-index: 2;
+}
+
+/* One size scale for every bubble: the grid shows small bubbles (many rooms, read
+   at a glance), the focused room shows full ones. `data-dense` only narrows, so
+   there is never a second font-size rule fighting this one. */
+.imb-ws-bubble {
+  position: relative;
+  /* Inert by default: a bubble in the grid must not swallow the click that would
+     focus its room, so every click passes straight through to the canvas. Only
+     the focused room's bubbles take pointer events (see `[data-focus="1"]`). */
+  pointer-events: none;
+  max-width: 150px;
+  padding: 3px 7px;
+  border-radius: var(--imb-radius-bubble);
+  background: var(--imb-material-popover, var(--imb-bg-elevated));
+  border: 1px solid var(--imb-sep-strong);
+  box-shadow: var(--imb-shadow-1);
+  color: var(--imb-fg);
+  font-size: 10px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.imb-ws-bubble[data-dense="1"] {
+  max-width: 132px;
+}
+
+.imb-ws-bubble[data-focus="1"] {
+  max-width: 232px;
+  padding: 5px 10px;
+  font-size: var(--imb-fs-caption);
+  line-height: var(--imb-leading-text);
+}
+
+.imb-ws-bubble[data-kind="working"] {
+  color: var(--imb-fg-muted);
+  font-style: italic;
+  text-align: center;
+}
+
+.imb-ws-bubble[data-kind="message"] {
+  background: var(--imb-accent);
+  border-color: color-mix(in srgb, var(--imb-accent) 70%, transparent);
+  color: var(--imb-accent-on);
+}
+
+/* Only the focused room's message bubble is a control: it is the one that opens
+   the reading view, so it is the only one that takes pointer events. In the grid
+   every bubble is `none` and a click falls through to the room behind it. */
+.imb-ws-bubble[data-focus="1"][data-kind="message"] {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.imb-ws-bubble[data-kind="message"][data-focus="1"]:hover {
+  box-shadow: var(--imb-shadow-2);
+}
+
+/* A reading bubble: the preview is a window onto the message, the click opens the
+   whole thing. The clamp is a max-height rather than `line-clamp` because the
+   body is real Markdown: a table or a code block is block content, and
+   `-webkit-line-clamp` only counts lines of one text flow. The fade says "there
+   is more". */
+.imb-ws-bubble-body {
+  overflow: hidden;
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - 12px),
+    transparent 100%
+  );
+}
+
+.imb-ws-bubble-body {
+  max-height: 42px;
+}
+
+.imb-ws-bubble[data-focus="1"] .imb-ws-bubble-body {
+  max-height: 62px;
+}
+
+/* The thread's Markdown renderer, at bubble size: kill the block margins so a
+   one-line message stays one line. */
+.imb-ws-bubble-body .imb-markdown,
+.imb-ws-bubble-body .imb-markdown p {
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
+.imb-ws-bubble-body .imb-mention {
+  color: inherit;
+  font-weight: var(--imb-fw-semibold);
+}
+
+/* The tail: a rotated square under the bubble, in the bubble's own colour so it
+   reads as part of the same shape. */
+.imb-ws-bubble-tail {
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  transform: rotate(45deg);
+  border-radius: 2px;
+  background: inherit;
+  border-right: 1px solid var(--imb-sep-strong);
+  border-bottom: 1px solid var(--imb-sep-strong);
+}
+
+.imb-ws-bubble[data-focus="1"] .imb-ws-bubble-tail {
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+}
+
+.imb-ws-bubble[data-kind="message"] .imb-ws-bubble-tail {
+  border-color: color-mix(in srgb, var(--imb-accent) 70%, transparent);
+}
+
+/* The plate host is positioned by the scene; the plate inside is a Tooltip
+   trigger, so it has to take pointer events (its host does not). */
+.imb-ws-roomlabel-anchor {
+  pointer-events: none;
+  z-index: 1;
+}
+
+.imb-ws-roomlabel {
+  display: block;
+  pointer-events: auto;
+  cursor: default;
+  max-width: 210px;
+  padding: 3px 10px;
+  border-radius: var(--imb-radius-chip);
+  background: color-mix(in srgb, var(--imb-bg-elevated) 88%, transparent);
+  border: 1px solid var(--imb-sep);
+  color: var(--imb-fg);
+  font-size: var(--imb-fs-caption);
+  font-weight: var(--imb-fw-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Dense boards: the plate shrinks so a row of them still reads. */
+.imb-ws-roomlabel[data-dense="1"] {
+  max-width: 162px;
+  padding: 2px 7px;
+  font-size: 11px;
+}
+
+.imb-ws-hover {
+  /* The chip always wins: it is the pointer's own feedback, so a bubble must never
+     cover it. */
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-2);
+  padding: 3px 9px 3px 4px;
+  border-radius: var(--imb-radius-pill, var(--imb-radius-chip));
+  background: var(--imb-material-popover, var(--imb-bg-elevated));
+  border: 1px solid var(--imb-sep-strong);
+  box-shadow: var(--imb-shadow-2);
+  color: var(--imb-fg);
+  font-size: var(--imb-fs-caption);
+}
+
+.imb-ws-hover-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* Text mirror of the board for assistive technology (the scene is pixels). */
+.imb-ws-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── empty / loading ─────────────────────────────────────────────────────── */
+.imb-ws-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--imb-space-2);
+  height: 100%;
+  padding: var(--imb-space-6);
+  color: var(--imb-fg-muted);
+  font-size: var(--imb-fs-ui);
+  text-align: center;
+}
+
+/* ── 2D board (no WebGL) ─────────────────────────────────────────────────── */
+.imb-ws-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--imb-space-4);
+  padding: var(--imb-space-2) var(--imb-space-4) var(--imb-space-6);
+}
+
+.imb-ws-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--imb-space-2);
+  padding: var(--imb-space-3);
+  border-radius: var(--imb-radius-card);
+  border: 1px solid var(--imb-sep);
+  background: var(--imb-bg-elevated);
+  min-width: 0;
+}
+
+.imb-ws-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--imb-space-2);
+}
+
+.imb-ws-card-title {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--imb-fg);
+  font-size: var(--imb-fs-ui);
+  font-weight: var(--imb-fw-semibold);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.imb-ws-card-title:hover {
+  color: var(--imb-accent);
+}
+
+.imb-ws-card-state {
+  font-size: var(--imb-fs-caption);
+  color: var(--imb-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.imb-ws-card-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.imb-ws-card-person {
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-2);
+  font-size: var(--imb-fs-caption);
+  color: var(--imb-fg-muted);
+  min-width: 0;
+}
+
+.imb-ws-card-name {
+  color: var(--imb-fg);
+  flex: none;
+}
+
+.imb-ws-card-person.imb-is-working .imb-ws-card-name {
+  font-weight: var(--imb-fw-medium);
+}
+
+.imb-ws-card-task {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imb-ws-card-empty {
+  font-size: var(--imb-fs-small);
+  color: var(--imb-fg-muted);
+}
+
+/* The reading view: one message, nearly the whole window, scrolling inside. */
+.imb-ws-bubble-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--imb-space-6);
+  background: color-mix(in srgb, var(--imb-bg-content) 55%, transparent);
+}
+
+.imb-ws-bubble-panel {
+  display: flex;
+  flex-direction: column;
+  width: 92%;
+  max-width: 1400px;
+  height: 90%;
+  border-radius: var(--imb-radius-sheet, var(--imb-radius-window));
+  border: 1px solid var(--imb-sep-strong);
+  background: var(--imb-material-popover, var(--imb-bg-elevated));
+  box-shadow: var(--imb-shadow-3);
+  overflow: hidden;
+  outline: none;
+}
+
+.imb-ws-bubble-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--imb-space-3);
+  padding: var(--imb-space-3) var(--imb-space-4);
+  border-bottom: 1px solid var(--imb-sep);
+}
+
+.imb-ws-bubble-panel-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--imb-fs-title-3);
+  font-weight: var(--imb-fw-semibold);
+  color: var(--imb-fg);
+}
+
+/* The message scrolls inside the panel: a long message must never push the panel
+   past the window. */
+.imb-ws-bubble-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--imb-space-4);
+  font-size: var(--imb-fs-ui);
+  color: var(--imb-fg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .imb-ws-bubble-overlay {
+    animation: imb-ws-fade-in var(--imb-dur-2) var(--imb-ease-standard);
+  }
+}
+
+@keyframes imb-ws-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

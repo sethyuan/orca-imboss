@@ -13,6 +13,7 @@ import * as dbChats from "../db/chats";
 import * as dbEmployees from "../db/employees";
 import * as dbMessages from "../db/messages";
 import { notifyAlert } from "../notifications";
+import { notifyWorkStatusChanged } from "../work-status-events";
 import { alertOneLine } from "./alert-text";
 import { errorEvent, sendEventTo, toStreamEvent } from "./agent-events";
 import { getAgentEnvironment } from "./environment";
@@ -425,6 +426,27 @@ export function readRunState(
     // Copied into plain DTOs: the renderer must never hold a live record.
     steers: state.steers.map(steerStateOf),
   };
+}
+
+/**
+ * Every `(employee, chat)` session that is streaming a run right now.
+ *
+ * Side-effect free in the same way as `readRunState`: it only reads states that
+ * already exist, so calling it never creates a queue state or a Pi session.
+ * Backs the work-status view, which needs one cheap answer to "who is working"
+ * across every chat instead of a per-session probe.
+ */
+export function listRunningSessions(): Array<{
+  employeeId: number;
+  chatId: number;
+}> {
+  const running: Array<{ employeeId: number; chatId: number }> = [];
+  for (const state of states.values()) {
+    if (state.disposed) continue;
+    if (state.session?.isStreaming !== true) continue;
+    running.push({ employeeId: state.employeeId, chatId: state.chatId });
+  }
+  return running;
 }
 
 /**
@@ -1000,6 +1022,8 @@ async function drain(state: QueueState): Promise<void> {
         state.lastAssistantText = undefined;
         state.retryAttempts = 0;
         state.abortRequested = false;
+        // The run is starting: "who is working" changed (see work-status).
+        notifyWorkStatusChanged("activity");
         await state.session?.prompt(text);
         // A failed run does not reject: Pi retries the turn itself and then ends
         // the run with an `error`-stopped assistant message. Read that off the
@@ -1018,6 +1042,8 @@ async function drain(state: QueueState): Promise<void> {
       state.busy = true;
       void drain(state);
     } else {
+      // Fully settled (no queued follow-up): this session stopped working.
+      notifyWorkStatusChanged("activity");
       scheduleIdleDispose(state);
     }
   }
@@ -1134,6 +1160,9 @@ async function disposeState(
 async function disposeSessionOf(state: QueueState): Promise<void> {
   const session = state.session;
   state.session = undefined;
+  // A disposed wrapper is never streaming, so a room must stop calling it
+  // "working" right away (idle disposal, employee/chat deletion, app quit).
+  if (session !== undefined) notifyWorkStatusChanged("activity");
   // The steering queue dies with the Pi session: whatever was still pending can
   // never be delivered (and can never be withdrawn anymore).
   losePendingSteers(state.steers).forEach((record) =>

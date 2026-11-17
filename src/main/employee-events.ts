@@ -1,5 +1,6 @@
 import { reconcileCapabilityRefs } from "./capability-refs";
 import { sendToRenderer } from "./notifications";
+import { notifyWorkStatusChanged } from "./work-status-events";
 
 /**
  * Renderer notifications about the `employees` collection.
@@ -15,6 +16,11 @@ export function notifyEmployeesChanged(ids: readonly number[]): void {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return;
   sendToRenderer("employees:changed", { ids: unique });
+  // Rooms seat these employees and show their names/avatars, and a bubble can
+  // belong to one of them: a rename, an avatar change or a deletion has to reach
+  // the work-status board as well. Every employee write funnels through here, so
+  // this is the one place that keeps the board in step with the roster.
+  notifyWorkStatusChanged("chat");
 }
 
 /**

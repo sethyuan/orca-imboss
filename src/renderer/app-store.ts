@@ -42,6 +42,7 @@ export type AppModule =
   | "miniapp"
   | "group-chat"
   | "agent-session"
+  | "work-status"
   | "spend";
 
 /** A group chat opened from a `chat`-kind card and shown in the Nav. */
@@ -163,6 +164,7 @@ const VALID_MODULES: AppModule[] = [
   "spend",
   "settings",
   "miniapp",
+  "work-status",
 ];
 
 /**
@@ -1150,6 +1152,24 @@ export const appStore = proxy({
     appStore.module = "group-chat";
     // Self-heal against a stale caller snapshot (see the doc comment).
     void appStore.refreshChatSummary(chat.id);
+  },
+
+  /**
+   * Open a conversation by id (the work-status view drives rooms by chat id, the
+   * chat list drives them by summary). One read, then the normal open path.
+   */
+  async openChatById(id: number): Promise<void> {
+    if (!Number.isSafeInteger(id) || id <= 0) return;
+    try {
+      const summary = await imb.chats.summary(id);
+      if (summary === null) return;
+      appStore.openChat(summary);
+    } catch (err) {
+      console.error(
+        "[data:chats:open]",
+        err instanceof Error ? err.message : err,
+      );
+    }
   },
 
   /** Focus an already-opened group chat (Nav item click). */
