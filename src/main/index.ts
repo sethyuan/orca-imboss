@@ -5,6 +5,7 @@ import { materializeBuiltinSkills } from "./agent/builtin-skills";
 import { setRemoteMode } from "./app-mode";
 import { refreshModelStore } from "./agent/model-runtime";
 import { cancelRunRecovery, initRunRecovery } from "./agent/run-recovery";
+import { pruneEmptyChatSessionDirsOnStartup } from "./agent/session-files";
 import {
   disposeAll,
   readSessionActivity,
@@ -245,7 +246,12 @@ app.whenReady().then(() => {
   // Settings › General instead of being fatal.
   initWindowShortcut();
 
-  void purgeDisabledEmployeesOnStartup();
+  // Prune after the purge: the session files it unlinks leave empty folders
+  // behind that this same pass can then remove. Fire-and-forget (`void`) — a
+  // cleanup that never blocks the startup path.
+  void purgeDisabledEmployeesOnStartup().then(
+    pruneEmptyChatSessionDirsOnStartup,
+  );
 
   void refreshModelStore(new AbortController().signal);
 

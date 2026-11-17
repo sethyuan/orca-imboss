@@ -2,6 +2,7 @@ import { ASSISTANT_ID } from "@shared/constants/employees";
 import { MAX_TAGS_PER_CHAT, normalizeTag } from "@shared/constants/tags";
 import type { ChatParticipantUpdate } from "@shared/types";
 import { deliver, disposeForChat } from "../agent/session-queue";
+import { removeChatSessionDir } from "../agent/session-files";
 import { deletePastedFilesForChat } from "../attachments";
 import { integrationManager } from "../integrations";
 import { maybeGenerateChatTitle } from "../agent/title-gen";
@@ -184,6 +185,9 @@ export function registerChatHandlers(bind: Binder): void {
     const removed = dbChats.deleteChats(chatIds) > 0;
     if (removed) {
       await Promise.all(records.map((r) => unlinkSessionFile(r.session)));
+      // The session files are gone, so a now-empty per-chat folder must not be
+      // left behind (it would otherwise only disappear on the next launch).
+      await Promise.all(chatIds.map(removeChatSessionDir));
       // Drop platform media downloaded for these bridged chats and files
       // pasted into their composers.
       await Promise.all(

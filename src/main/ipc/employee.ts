@@ -4,6 +4,7 @@ import { t } from "@shared/l10n";
 import type { Employee, EmployeeInput } from "@shared/types";
 import { isAbsolute, join } from "path";
 import { disposeForEmployee } from "../agent/session-queue";
+import { removeChatSessionDir } from "../agent/session-files";
 import { deleteAvatarFiles, saveAvatar } from "../avatars";
 import * as cron from "../cron";
 import * as dbEmployees from "../db/employees";
@@ -70,6 +71,10 @@ export function registerEmployeeHandlers(bind: Binder): void {
       // in-process Cron handles must be stopped explicitly.
       cron.stopJobsForEmployee(safeId);
       await Promise.all(records.map((r) => unlinkSessionFile(r.session)));
+      // Their chat folders may be empty now — drop those too.
+      await Promise.all(
+        [...new Set(records.map((r) => r.chatId))].map(removeChatSessionDir),
+      );
       deleteAvatarFiles(safeId);
     }
     notifyEmployeesChanged([safeId]);

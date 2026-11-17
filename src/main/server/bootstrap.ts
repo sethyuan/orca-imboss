@@ -1,4 +1,5 @@
 import { materializeBuiltinSkills } from "../agent/builtin-skills";
+import { pruneEmptyChatSessionDirsOnStartup } from "../agent/session-files";
 import { disposeAll } from "../agent/session-queue";
 import { refreshModelStore } from "../agent/model-runtime";
 import { applyPendingRestore } from "../backup";
@@ -150,6 +151,9 @@ export async function runServer(argv: string[]): Promise<void> {
 
   // Long-running services, in the desktop's order.
   void syncMiniAppIndex();
+  // Same startup fallback as the desktop app: empty per-chat session folders
+  // left by previous runs. Off the startup path (never awaited).
+  void pruneEmptyChatSessionDirsOnStartup();
   cron.initCron();
   void refreshModelStore(new AbortController().signal);
 
