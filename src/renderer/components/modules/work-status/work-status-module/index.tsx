@@ -3,6 +3,7 @@ import type { WorkRoom } from "@shared/types";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { appStore, useApp } from "../../../../app-store";
+import { Button } from "../../../button";
 import { Markdown } from "../../../markdown";
 import { useMentionResolver } from "../../../markdown/use-mention";
 import { Tooltip } from "../../../tooltip";
@@ -271,17 +272,17 @@ export function WorkStatusModule(): React.JSX.Element {
         )}
         <span className="imb-ws-spacer" />
         {focusedChatId !== null && (
-          <button
-            type="button"
-            className="imb-btn-sm"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => stageRef.current?.exitFocus()}
           >
             {t("Back to all rooms")}
-          </button>
+          </Button>
         )}
-        <button type="button" className="imb-btn-sm" onClick={reload}>
+        <Button variant="secondary" size="sm" onClick={reload}>
           {t("Refresh")}
-        </button>
+        </Button>
       </header>
 
       {error !== null && (
