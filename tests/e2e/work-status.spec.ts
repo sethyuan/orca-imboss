@@ -189,6 +189,21 @@ async function roomIds(window: Page): Promise<number[]> {
   });
 }
 
+/**
+ * Wait until the board *shows* exactly `count` rooms.
+ *
+ * Not the same as `expectRoomCount`: the snapshot from main only lists groups
+ * where someone works right now, while the board also keeps a room for a while
+ * after its work ended (see `linger.ts`). The header count is derived from what is
+ * shown, so it is the mode-agnostic way to read it.
+ */
+async function expectShownRooms(window: Page, count: number): Promise<void> {
+  await expect(module(window).locator(".imb-ws-count")).toContainText(
+    count === 1 ? "1 task group" : `${count} task groups`,
+    { timeout: 5_000 },
+  );
+}
+
 /** Wait until the board shows exactly `count` rooms (a run start is async). */
 async function expectRoomCount(window: Page, count: number): Promise<void> {
   await expect
@@ -206,7 +221,7 @@ test("a progress card alone no longer makes a room", async () => {
   await expect(module(session.window).locator(".imb-ws-card")).toHaveCount(0);
 });
 
-test("a room appears while someone works in it, and goes when they stop", async () => {
+test("a room appears while someone works in it, and lingers after they stop", async () => {
   const session = app!;
   const rooms = await seedRooms(session.window, session.dataRoot);
   await openBoard(session.window);
@@ -233,10 +248,23 @@ test("a room appears while someone works in it, and goes when they stop", async 
     await expect(card).toContainText("Working…");
   }
 
-  // …and when she stops, the room is gone again (the card did not change).
+  // …and when she stops the room *stays*: removal is deferred by the linger window
+  // (the card did not change). Nobody works in it any more, so no "working" bubble.
   await settleRun(session.window, rooms.anna, rooms.doneRoom);
+  // The snapshot is honest — nobody works there any more…
   await expectRoomCount(session.window, 0);
-  await expect(emptyState(session.window)).toBeVisible();
+  // …but the room itself stays on the board for the linger window.
+  await expectShownRooms(session.window, 1);
+  await expect(emptyState(session.window)).toBeHidden();
+  if ((await mode(session.window)) === "3d") {
+    await expect(
+      module(session.window).locator('.imb-ws-bubble[data-kind="working"]'),
+    ).toHaveCount(0);
+  } else {
+    await expect(
+      module(session.window).locator(".imb-ws-card").first(),
+    ).not.toContainText("Working…");
+  }
 });
 
 test("the assistant working in the root chat keeps its groups on the board", async () => {
@@ -254,8 +282,10 @@ test("the assistant working in the root chat keeps its groups on the board", asy
       module(session.window).locator('.imb-ws-bubble[data-kind="working"]'),
     ).toHaveCount(2);
   }
+  // Settling defers the removal, so both rooms are still on the board.
   await settleRun(session.window, 0, rooms.rootChatId);
   await expectRoomCount(session.window, 0);
+  await expectShownRooms(session.window, 2);
 });
 
 test("several groups working at once are separate rooms", async () => {

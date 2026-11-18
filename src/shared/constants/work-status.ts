@@ -31,3 +31,13 @@ export const MAX_BUBBLE_LENGTH = 200;
 
 /** Bubbles (one per employee) kept per room. */
 export const MAX_ROOM_BUBBLES = 20;
+
+/**
+ * How long a room stays on the board after the task group's last run ended.
+ *
+ * "In progress" still means "someone is working in it" — this only defers the
+ * *removal* of the room, so a group that just finished does not vanish the instant
+ * its run settles. A run that starts inside the window keeps the room (and starts
+ * a fresh window when it ends again).
+ */
+export const ROOM_LINGER_MS = 30_000;

@@ -245,11 +245,11 @@ export function buildRoom(
   );
   deskNotepad.forEach((part, index) => {
     part.position.set(
-      // Pushed further toward the desk's corner: away from the laptop, still on the
-      // top, and clear of the sunflower at the opposite corner.
+      // Toward the desk's right corner *and* back toward the assistant's edge: the
+      // previous spot sat close enough to the outer edge to look about to fall off.
       index === 0 ? desk.width / 2 - 0.6 : desk.width / 2 - 0.95,
       deskTopY + 0.012 + (index === 0 ? 0 : 0.05),
-      desk.z + 0.55,
+      desk.z - 0.35,
     );
     // Turned 180° from the old placement (the spine now points the other way).
     part.rotation.y = Math.PI - 0.18;

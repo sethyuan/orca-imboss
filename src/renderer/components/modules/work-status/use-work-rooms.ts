@@ -1,5 +1,8 @@
-import type { WorkRoomsPayload } from "@shared/types";
+import { ROOM_LINGER_MS } from "@shared/constants/work-status";
+import type { WorkRoom, WorkRoomsPayload } from "@shared/types";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+import { type LingeringRoom, mergeRoomsWithLinger } from "./linger";
 
 /**
  * The module's data: one snapshot of every in-progress task group.
@@ -12,6 +15,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *   nothing is fetched (the host stays mounted, so it must stay cheap);
  * - the snapshot is re-read when the module comes back, and on every change
  *   notification while it is visible.
+ *
+ * The snapshot itself only lists groups where someone works *now*. What the board
+ * shows is that list plus the rooms still inside their `ROOM_LINGER_MS` window
+ * (see `linger.ts`), so a group that just finished keeps its room for a while.
  */
 
 export interface WorkRoomsState {
@@ -40,6 +47,48 @@ export function useWorkRooms(active: boolean): WorkRoomsResult {
   const activeRef = useRef(active);
   const dirtyRef = useRef(true);
   const loadingRef = useRef(false);
+  const snapshotRef = useRef<WorkRoom[]>([]);
+  const truncatedRef = useRef(false);
+  const lingeringRef = useRef<Map<number, LingeringRoom>>(new Map());
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const liveAtRef = useRef(0);
+
+  // Re-derives the visible rooms from the last snapshot at `now`, and schedules the
+  // single timer that removes the next room when its window closes. Running it on
+  // activation as well is what keeps the keep-alive case honest: time passed while
+  // the module was hidden, so an expired room is dropped before it is ever painted.
+  const apply = useCallback((now: number): void => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    const merged = mergeRoomsWithLinger(
+      lingeringRef.current,
+      snapshotRef.current,
+      now,
+      ROOM_LINGER_MS,
+      liveAtRef.current === 0 ? now : liveAtRef.current,
+    );
+    lingeringRef.current = merged.lingering;
+    setState((previous) => ({
+      ...previous,
+      rooms: merged.rooms,
+      truncated: truncatedRef.current,
+    }));
+    if (merged.nextExpiryInMs !== null) {
+      timerRef.current = setTimeout(
+        () => apply(Date.now()),
+        merged.nextExpiryInMs,
+      );
+    }
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    },
+    [],
+  );
 
   const reload = useCallback((): void => {
     if (loadingRef.current) {
@@ -56,13 +105,16 @@ export function useWorkRooms(active: boolean): WorkRoomsResult {
     void imb.workStatus
       .rooms()
       .then((payload) => {
-        setState({
-          rooms: payload.rooms,
-          truncated: payload.truncated,
+        snapshotRef.current = payload.rooms;
+        truncatedRef.current = payload.truncated;
+        liveAtRef.current = Date.now();
+        apply(liveAtRef.current);
+        setState((previous) => ({
+          ...previous,
           loading: false,
           error: null,
           loaded: true,
-        });
+        }));
       })
       .catch((error: unknown) => {
         setState((previous) => ({
@@ -75,7 +127,7 @@ export function useWorkRooms(active: boolean): WorkRoomsResult {
         loadingRef.current = false;
         if (dirtyRef.current && activeRef.current) reload();
       });
-  }, []);
+  }, [apply]);
 
   useEffect(() => {
     const off = imb.workStatus.onChanged(() => {
@@ -93,7 +145,8 @@ export function useWorkRooms(active: boolean): WorkRoomsResult {
     // Only the activation edge refreshes; `state.loaded` is read, never a
     // dependency (otherwise a finished read would re-trigger this effect).
     if (active && (dirtyRef.current || !state.loaded)) reload();
-  }, [active, reload]);
+    if (active) apply(Date.now());
+  }, [active, reload, apply]);
 
   return { ...state, reload };
 }

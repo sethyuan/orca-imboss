@@ -983,34 +983,21 @@ export function buildWaterDispenser(
   tapCold.scale.set(0.06, 0.12, 0.06);
   tapCold.position.set(0.1, 0.62, 0.3);
 
-  // The bottle sits **mouth-down** in the seat on top of the machine (a bottle
-  // standing upright cannot feed the taps): wide shoulder high, base up, thin neck
-  // going down into a collar, with a seal ring where they meet.
+  // The bottle sits **mouth-down directly on the machine**: no neck or collar —
+  // the body's own rim rests on the dark seat plate, the wide base faces up.
   const seat = new Mesh(geometry.cylinder, materials.dispenserDark);
-  seat.scale.set(0.34, 0.08, 0.34);
-  seat.position.y = 1.14;
+  seat.scale.set(0.36, 0.06, 0.36);
+  seat.position.y = 1.13;
 
-  const collar = new Mesh(geometry.cylinder, materials.dispenserBottle);
-  collar.scale.set(0.2, 0.16, 0.2);
-  collar.position.y = 1.25;
-
-  const seal = new Mesh(geometry.cylinder, materials.dispenserCup);
-  seal.scale.set(0.24, 0.03, 0.24);
-  seal.position.y = 1.33;
-
-  // Body: shoulder near the neck, base at the very top.
   const bottle = new Mesh(geometry.cylinder, materials.dispenserBottle);
-  bottle.scale.set(0.48, 0.62, 0.48);
-  bottle.position.y = 1.68;
+  bottle.scale.set(0.5, 0.66, 0.5);
+  bottle.position.y = 1.49;
 
-  const shoulder = new Mesh(geometry.cylinder, materials.dispenserBottle);
-  shoulder.scale.set(0.3, 0.14, 0.3);
-  shoulder.position.y = 1.37;
-
-  // The base, now facing up: a slightly wider disc with a raised rim.
+  // The base, now facing up: a slightly wider disc, so the bottle still reads as
+  // "upside down" rather than as a plain canister.
   const base = new Mesh(geometry.cylinder, materials.dispenserDark);
-  base.scale.set(0.5, 0.05, 0.5);
-  base.position.y = 2.0;
+  base.scale.set(0.52, 0.05, 0.52);
+  base.position.y = 1.84;
 
   // A small cup stack on the side: the detail that says "drinking water".
   for (let index = 0; index < 3; index += 1) {
@@ -1020,20 +1007,7 @@ export function buildWaterDispenser(
     group.add(cup);
   }
 
-  group.add(
-    body,
-    top,
-    recess,
-    tray,
-    tapHot,
-    tapCold,
-    seat,
-    collar,
-    seal,
-    shoulder,
-    bottle,
-    base,
-  );
+  group.add(body, top, recess, tray, tapHot, tapCold, seat, bottle, base);
   return group;
 }
 
