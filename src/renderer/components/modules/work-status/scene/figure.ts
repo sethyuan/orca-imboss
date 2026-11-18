@@ -1,9 +1,26 @@
-import { Group, Mesh, MeshStandardMaterial, Object3D, Vector3 } from "three";
+import {
+  type BufferGeometry,
+  Group,
+  type Material,
+  Mesh,
+  MeshStandardMaterial,
+  Object3D,
+  Vector3,
+} from "three";
 import type { RestKind } from "../state-machine";
-import type { PersonPalette, SharedGeometry } from "./art";
+import {
+  buildChair,
+  FIGURE,
+  sharedMesh,
+  sharedGeometrySet,
+  type PersonPalette,
+  type Placement,
+  type RoomMaterials,
+  type SharedGeometry,
+} from "./art";
 
 /**
- * Procedural low-poly people, and every pose they can hold.
+ * Procedural cartoon people, and every pose they can hold.
  *
  * A figure is a small rig of groups rather than a skinned mesh: procedural rigs
  * need no asset pipeline, cost nothing to build, and pose by rotating a handful
@@ -11,13 +28,13 @@ import type { PersonPalette, SharedGeometry } from "./art";
  *
  * Poses are **absolute**: every frame starts from the rest pose and applies the
  * current state, so switching between animations can never accumulate drift.
+ *
+ * The look follows the reference art: a big round head with two dots and brows, a
+ * tapered torso split into shirt and trousers, capsule arms with hands, and
+ * rounded legs. Everyone is the same height (see `FIGURE`); identity comes from
+ * hair style, clothing colours and skin tone, and every part is one merged mesh per
+ * material, so a room full of people stays inside its draw-call budget.
  */
-
-/**
- * Where a bubble is anchored: clearly above the head, not on it. An anchor at
- * head height let a two-line bubble cover the sender's head and shoulders.
- */
-const HEAD_Y = 2.34;
 
 export interface Figure {
   /** Root of the figure; the room places and orients it. */
@@ -37,6 +54,12 @@ export interface Figure {
 export interface FigurePose {
   /** Wall-clock ms, used for the subtle idle/typing motion. */
   now: number;
+  /**
+   * `false` on the static bird's-eye board: hold the base seated pose — no
+   * breathing, no rest animation. A frozen board should look like a photograph, not
+   * like a paused video with one arm in the air.
+   */
+  animate: boolean;
   working: boolean;
   /** Rest animation in flight and its 0→1 progress. */
   rest: RestKind | null;
@@ -54,22 +77,13 @@ interface Parts {
 export interface FigureOptions {
   palette: PersonPalette;
   geometry: SharedGeometry;
-  /**
-   * `coffee` needs a mug in hand: the assistant and every employee
-   * get one, so the animation never has to invent a prop mid-scene.
-   */
-  mugColor: number;
+  /** The room's finishes (chair fabric/frame, metal). */
+  materials: RoomMaterials;
   /**
    * Left-handed people lift the other mug (see the room's `mugSide`): a second,
    * cheap way to tell two seated employees apart.
    */
   leftHanded?: boolean;
-  /**
-   * The chair this person sits on. The fabric carries the room's accent tint (see
-   * `roomPaletteFor`), so a room's chairs are recognisably "that room's" while the
-   * person's own wardrobe stays the loudest thing on screen.
-   */
-  chair?: { frame: number; fabric: number; metal: number };
   /**
    * The mug this person drinks from. It exists **only** while the "coffee"
    * animation plays, and only ever in the hand — nothing is left standing on the
@@ -83,242 +97,327 @@ function easeInOut(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-function makeMesh(
-  geometry: SharedGeometry,
-  kind: keyof SharedGeometry,
-  color: number,
-  scale: [number, number, number],
-  position?: [number, number, number],
-): Mesh {
-  // Cloth and skin are matte, nothing reflects: the figures must read as people,
-  // not as painted blocks.
-  const mesh = new Mesh(
-    geometry[kind],
-    new MeshStandardMaterial({ color, roughness: 0.92, metalness: 0 }),
-  );
-  mesh.scale.set(...scale);
-  if (position) mesh.position.set(...position);
-  return mesh;
+/**
+ * One material per colour per figure (skin, hair, shirt, sleeves, trousers,
+ * shoes, face), shared by every mesh of that person: the whole room's wardrobe
+ * costs a handful of uniforms instead of one per body part.
+ */
+function personMaterials(palette: PersonPalette): Material[] {
+  const matte = (color: number): Material =>
+    new MeshStandardMaterial({ color, roughness: 0.92, metalness: 0 });
+  return [
+    matte(palette.skin),
+    matte(palette.hair),
+    matte(palette.shirt),
+    matte(palette.shirtDark),
+    matte(palette.pants),
+    matte(palette.shoes),
+    matte(0x241f1c),
+  ];
 }
 
+type PartList = Array<{ geometry: BufferGeometry; placement?: Placement }>;
+
 /**
- * A high-back ergonomic chair: five-star base with casters, gas lift, cushioned
- * seat, tall curved back with a lumbar pad, and two armrests.
- *
- * Returned as a list so the caller can parent all of it to the swivel node; the
- * first element is the seat cushion (the figure's own grounding reference).
+ * Hair: a spherical **cap** (never a full sphere — a ball of hair would swallow the
+ * face) plus one or two style blocks behind/on top of it. The head faces +z, so
+ * "back" is -z.
  */
-function buildChair(
+function hairParts(
   geometry: SharedGeometry,
-  colors: { frame: number; fabric: number; metal: number },
-): Mesh[] {
-  // Cushioned seat first: the caller uses it as the figure's grounding reference
-  // (raycast target and the "is this person" hit box).
-  const seat = makeMesh(
-    geometry,
-    "slab",
-    colors.fabric,
-    [0.88, 1, 0.84],
-    [0, 0.5, 0],
-  );
-  const parts: Mesh[] = [seat];
+  style: PersonPalette["hairStyle"],
+): PartList {
+  const r = FIGURE.headRadius;
+  const cap = (
+    scale: [number, number, number],
+    y: number,
+    z = 0,
+  ): {
+    geometry: BufferGeometry;
+    placement: Placement;
+  } => ({
+    geometry: geometry.hairCap,
+    placement: { position: [0, y, z], scale },
+  });
+  const blob = (
+    scale: [number, number, number],
+    y: number,
+    z = 0,
+  ): { geometry: BufferGeometry; placement: Placement } => ({
+    geometry: geometry.sphere,
+    placement: { position: [0, y, z], scale },
+  });
 
-  // Five-star base: five arms around a hub, each with a caster underneath.
-  parts.push(
-    makeMesh(geometry, "cylinder", colors.metal, [0.5, 0.1, 0.5], [0, 0.12, 0]),
-  );
-  for (let index = 0; index < 5; index += 1) {
-    const angle = (index / 5) * Math.PI * 2;
-    const arm = makeMesh(
-      geometry,
-      "slab",
-      colors.frame,
-      [0.16, 1, 0.72],
-      [Math.sin(angle) * 0.22, 0.1, Math.cos(angle) * 0.22],
-    );
-    arm.rotation.y = angle;
-    parts.push(
-      arm,
-      makeMesh(
-        geometry,
-        "sphere",
-        colors.metal,
-        [0.16, 0.16, 0.16],
-        [Math.sin(angle) * 0.44, 0.06, Math.cos(angle) * 0.44],
-      ),
-    );
+  switch (style) {
+    case "bob":
+      return [
+        cap([r * 2.32, r * 2.34, r * 2.32], 0),
+        // The back of the bob, down to the collar.
+        blob([r * 1.9, r * 1.9, r * 1.2], -r * 0.15, -r * 0.5),
+      ];
+    case "bun":
+      return [
+        cap([r * 2.26, r * 2.28, r * 2.26], 0),
+        blob([r * 0.95, r * 0.95, r * 0.95], r * 0.28, -r * 0.78),
+      ];
+    case "ponytail":
+      return [
+        cap([r * 2.26, r * 2.28, r * 2.26], 0),
+        {
+          geometry: geometry.capsule,
+          placement: {
+            position: [0, -r * 0.2, -r * 0.85],
+            scale: [r * 0.42, r * 0.42, r * 0.42],
+            rotation: [0.34, 0, 0],
+          },
+        },
+      ];
+    case "curly":
+      return [
+        cap([r * 2.3, r * 2.32, r * 2.3], 0),
+        blob([r * 0.86, r * 0.86, r * 0.86], r * 0.5, -r * 0.24),
+        blob([r * 0.76, r * 0.76, r * 0.76], r * 0.46, r * 0.3),
+        blob([r * 0.82, r * 0.82, r * 0.82], r * 0.2, -r * 0.62),
+      ];
+    case "buzz":
+      return [cap([r * 2.16, r * 2.2, r * 2.16], 0.01)];
+    case "short":
+    default:
+      return [
+        cap([r * 2.3, r * 2.3, r * 2.3], 0),
+        blob([r * 1.7, r * 1.1, r * 0.9], -r * 0.2, -r * 0.6),
+      ];
   }
-
-  // Gas lift.
-  parts.push(
-    makeMesh(
-      geometry,
-      "cylinder",
-      colors.metal,
-      [0.14, 0.5, 0.14],
-      [0, 0.36, 0],
-    ),
-  );
-
-  // Tall back panel + lumbar pad.
-  //
-  // The back is a **vertical** panel: thin in z, tall in y. `slab` is thin in y
-  // (that is a seat or a table top), so using it here made the backrest a plate
-  // lying flat behind the person — the bug the boss reported twice.
-  const back = makeMesh(
-    geometry,
-    "box",
-    colors.fabric,
-    [0.84, 1.08, 0.12],
-    [0, 1.02, -0.44],
-  );
-  back.rotation.x = -0.12;
-  // The lumbar pad sits on the *front* face of the back (the side the occupant is
-  // on), a little lower than the shoulder area.
-  const lumbar = makeMesh(
-    geometry,
-    "box",
-    colors.frame,
-    [0.6, 0.32, 0.1],
-    [0, 0.82, -0.31],
-  );
-  lumbar.rotation.x = -0.16;
-  parts.push(back, lumbar);
-
-  // Armrests: a post each side plus a pad on top.
-  for (const side of [-1, 1]) {
-    parts.push(
-      makeMesh(
-        geometry,
-        "cylinder",
-        colors.frame,
-        [0.08, 0.28, 0.08],
-        [side * 0.46, 0.64, -0.06],
-      ),
-      makeMesh(
-        geometry,
-        "slab",
-        colors.frame,
-        [0.16, 1, 0.52],
-        [side * 0.46, 0.79, -0.02],
-      ),
-    );
-  }
-
-  return parts;
 }
 
 export function createFigure(options: FigureOptions): Figure {
-  const { palette, geometry } = options;
+  const { palette, geometry, materials } = options;
   const root = new Group();
+  const own = personMaterials(palette);
+  const [skin, hairColor, shirt, sleeve, pants, shoes, face] = own as [
+    Material,
+    Material,
+    Material,
+    Material,
+    Material,
+    Material,
+    Material,
+  ];
 
   // Everything that swivels with the chair (chair + occupant) hangs off this.
   const swivel = new Group();
   root.add(swivel);
 
-  // A neutral dark chair reads as "office chair" in every palette, so it is not
-  // part of the per-person wardrobe. It is built here (rather than as a room prop)
-  // because the "swivel" animation turns chair *and* occupant together.
-  const chairParts = buildChair(
-    geometry,
-    options.chair ?? { frame: 0x4a545f, fabric: 0x39424c, metal: 0x8b939c },
-  );
+  // Chair: three merged meshes. Its materials belong to the room, so they are not
+  // disposed with the figure.
+  const chairParts = buildChair(geometry, materials);
   swivel.add(...chairParts);
   const seat = chairParts[0]!;
+  const pick: Object3D[] = [...chairParts];
 
+  // ── torso ────────────────────────────────────────────────────────────────
   const torso = new Group();
-  torso.position.y = 0.55;
+  torso.position.y = FIGURE.hipY;
   swivel.add(torso);
 
-  const body = makeMesh(
-    geometry,
-    "box",
-    palette.shirt,
-    [0.62, 0.86, 0.42],
-    [0, 0.62, 0],
-  );
-  // Shoulders: a slightly wider, darker block gives the figure a silhouette
-  // that reads at bird's-eye distance without any texture.
-  const shoulders = makeMesh(
-    geometry,
-    "box",
-    palette.shirtDark,
-    [0.74, 0.2, 0.46],
-    [0, 0.98, 0],
-  );
-  torso.add(body, shoulders);
+  const hip = sharedMesh(geometry, "figure:hip", pants, [
+    {
+      geometry: geometry.rounded.hip,
+      placement: { position: [0, 0.04, 0] },
+    },
+  ]);
+  if (hip !== null) {
+    torso.add(hip);
+    pick.push(hip);
+  }
 
+  const chest = sharedMesh(geometry, "figure:chest", shirt, [
+    {
+      geometry: geometry.rounded.chest,
+      placement: { position: [0, 0.42, 0] },
+    },
+    // A collar block in the shirt's own colour reads as clothing at this scale.
+    {
+      geometry: geometry.cylinder,
+      placement: { position: [0, 0.7, 0], scale: [0.34, 0.1, 0.34] },
+    },
+  ]);
+  if (chest !== null) {
+    torso.add(chest);
+    pick.push(chest);
+  }
+
+  // ── head ─────────────────────────────────────────────────────────────────
   const head = new Group();
-  head.position.y = 1.16;
-  const skull = makeMesh(geometry, "sphere", palette.skin, [0.46, 0.5, 0.46]);
-  const hair = makeMesh(
-    geometry,
-    "sphere",
-    palette.hair,
-    [0.49, 0.44, 0.49],
-    [0, 0.09, -0.02],
-  );
-  head.add(skull, hair);
+  head.position.y = FIGURE.headY - FIGURE.hipY;
   torso.add(head);
 
-  const armLeft = new Group();
-  armLeft.position.set(-0.32, 0.92, 0.02);
-  armLeft.rotation.x = -0.55;
-  armLeft.add(
-    makeMesh(
-      geometry,
-      "cylinder",
-      palette.shirtDark,
-      [0.17, 0.56, 0.17],
-      [0, -0.24, 0],
-    ),
-  );
+  const r = FIGURE.headRadius;
+  const skull = sharedMesh(geometry, "figure:skull", skin, [
+    {
+      geometry: geometry.sphere,
+      // A touch wider than tall and slightly narrower front-to-back: a cartoon
+      // head, not a ball.
+      placement: { position: [0, 0, 0], scale: [r * 2.02, r * 2.08, r * 1.96] },
+    },
+  ]);
+  if (skull !== null) {
+    head.add(skull);
+    pick.push(skull);
+  }
 
-  const armRight = new Group();
-  armRight.position.set(0.32, 0.92, 0.02);
-  armRight.rotation.x = -0.55;
-  armRight.add(
-    makeMesh(
-      geometry,
-      "cylinder",
-      palette.shirtDark,
-      [0.17, 0.56, 0.17],
-      [0, -0.24, 0],
-    ),
+  const hair = sharedMesh(
+    geometry,
+    `figure:hair:${palette.hairStyle}`,
+    hairColor,
+    hairParts(geometry, palette.hairStyle),
   );
+  if (hair !== null) {
+    head.add(hair);
+    pick.push(hair);
+  }
+
+  // Face: two dots and a brow each, all in one dark mesh.
+  const faceMesh = sharedMesh(geometry, "figure:face", face, [
+    {
+      geometry: geometry.sphereLow,
+      placement: {
+        position: [-r * 0.36, -r * 0.04, r * 0.88],
+        scale: [r * 0.3, r * 0.32, r * 0.16],
+      },
+    },
+    {
+      geometry: geometry.sphereLow,
+      placement: {
+        position: [r * 0.36, -r * 0.04, r * 0.88],
+        scale: [r * 0.3, r * 0.32, r * 0.16],
+      },
+    },
+    {
+      geometry: geometry.rounded.eyeBrow,
+      placement: {
+        position: [-r * 0.38, r * 0.32, r * 0.84],
+        rotation: [0, 0, -0.14],
+      },
+    },
+    {
+      geometry: geometry.rounded.eyeBrow,
+      placement: {
+        position: [r * 0.38, r * 0.32, r * 0.84],
+        rotation: [0, 0, 0.14],
+      },
+    },
+  ]);
+  if (faceMesh !== null) head.add(faceMesh);
+
+  // ── arms ─────────────────────────────────────────────────────────────────
+  // A capsule sleeve with a skin hand at its end. The capsule's own length is 2
+  // world units at scale 1 (length + both caps), so a 0.62 arm is scale 0.31.
+  const arm = (side: -1 | 1): Group => {
+    const group = new Group();
+    group.position.set(side * 0.34, FIGURE.shoulderY - FIGURE.hipY, 0.02);
+    group.rotation.x = -0.55;
+    const limb = sharedMesh(geometry, "figure:arm", sleeve, [
+      {
+        geometry: geometry.capsule,
+        placement: { position: [0, -0.31, 0], scale: [0.19, 0.31, 0.19] },
+      },
+    ]);
+    if (limb !== null) group.add(limb);
+    const hand = sharedMesh(geometry, "figure:hand", skin, [
+      {
+        geometry: geometry.sphereLow,
+        placement: { position: [0, -0.64, 0.04], scale: [0.17, 0.18, 0.17] },
+      },
+    ]);
+    if (hand !== null) group.add(hand);
+    return group;
+  };
+
+  const armLeft = arm(-1);
+  const armRight = arm(1);
+  torso.add(armLeft, armRight);
+
+  // ── legs ─────────────────────────────────────────────────────────────────
+  // Thighs forward over the seat, shins down, shoes on the floor: the reference
+  // figures are clearly sitting, and their feet anchor them to the room.
+  // The leg is one continuous chain: hip → thigh (forward, slightly down) → knee →
+  // shin (straight down) → ankle → shoe. Every joint *overlaps* its neighbour, so no
+  // pose or camera angle can show a gap between the pieces (that was the "broken leg"
+  // the boss spotted).
+  const kneeY = FIGURE.seatTopY + 0.02;
+  const kneeZ = 0.5;
+  // Below the shoe's top surface: the shin ends *inside* the shoe, so the joint can
+  // never show a gap.
+  const ankleY = 0.13;
+  const legs = sharedMesh(geometry, "figure:legs", pants, [
+    ...[-0.21, 0.21].flatMap((x) => [
+      // Thigh: a capsule lying along z, its back end buried in the hip block and its
+      // front end at the knee.
+      {
+        geometry: geometry.capsule,
+        placement: {
+          position: [x, kneeY + 0.05, (kneeZ - 0.02) / 2],
+          rotation: [Math.PI / 2, 0, 0],
+          scale: [0.19, (kneeZ + 0.04) / 2, 0.19],
+        },
+      },
+      // Shin: vertical, from just above the knee down to inside the shoe.
+      {
+        geometry: geometry.capsule,
+        placement: {
+          position: [x, (kneeY + 0.06 + ankleY) / 2, kneeZ],
+          scale: [0.15, (kneeY + 0.06 - ankleY) / 2, 0.15],
+        },
+      },
+    ]),
+  ]);
+  if (legs !== null) swivel.add(legs);
+
+  const shoesMesh = sharedMesh(geometry, "figure:shoes", shoes, [
+    {
+      geometry: geometry.rounded.shoe,
+      placement: { position: [-0.21, 0.13, kneeZ + 0.05] },
+    },
+    {
+      geometry: geometry.rounded.shoe,
+      placement: { position: [0.21, 0.13, kneeZ + 0.05] },
+    },
+  ]);
+  if (shoesMesh !== null) swivel.add(shoesMesh);
 
   const leftHanded = options.leftHanded === true;
-  torso.add(armLeft, armRight);
 
   // The desk mug is the object the "coffee" animation lifts (no second mug hidden
   // in the hand): it keeps its own parent and rest transform, and the pose moves
   // it toward the hand while the arm is up. `heldMug` is optional so a figure can
   // exist without one.
   let heldMug = options.heldMug ?? null;
-  const hand = leftHanded ? armLeft : armRight;
+  const drinkingArm = leftHanded ? armLeft : armRight;
   const handGrip = new Object3D();
-  handGrip.position.set(0, -0.58, 0.1);
-  hand.add(handGrip);
+  handGrip.position.set(0, FIGURE.handGripY, FIGURE.handGripZ);
+  drinkingArm.add(handGrip);
   const handWorld = new Vector3();
   const mugLocal = new Vector3();
 
   const headAnchor = new Object3D();
-  headAnchor.position.set(0, HEAD_Y, 0);
+  headAnchor.position.set(0, FIGURE.headAnchorY, 0);
   root.add(headAnchor);
   // The top of the head (not the bubble anchor, which sits above it): the hover
   // card aligns its *top edge* here, per the boss's annotation.
   const hoverAnchor = new Object3D();
-  hoverAnchor.position.set(0, 2.02, 0);
+  hoverAnchor.position.set(0, FIGURE.hoverAnchorY, 0);
   root.add(hoverAnchor);
 
   const parts: Parts = { swivel, torso, head, armLeft, armRight };
+  const torsoBaseY = FIGURE.hipY;
 
   return {
     root,
     headAnchor,
     hoverAnchor,
     // Everything on the chair plus the body reads as "this person" when picked.
-    pickTargets: [seat, ...chairParts, body, shoulders, skull, hair],
+    pickTargets: pick.length > 0 ? pick : [seat],
     setHeldMug(mesh: Mesh): void {
       heldMug = mesh;
     },
@@ -326,7 +425,8 @@ export function createFigure(options: FigureOptions): Figure {
       const t = input.now / 1000;
       // Base pose: seated, leaning slightly toward the desk, hands on the keys.
       parts.swivel.rotation.y = 0;
-      parts.torso.position.y = 0.55 + Math.sin(t * 1.4) * 0.012;
+      parts.torso.position.y =
+        torsoBaseY + (input.animate ? Math.sin(t * 1.4) * 0.012 : 0);
       parts.torso.rotation.x = input.working ? 0.06 : 0.1;
       parts.head.rotation.set(0.04, 0, 0);
       parts.armLeft.rotation.set(-0.55, 0, 0.16);
@@ -355,9 +455,9 @@ export function createFigure(options: FigureOptions): Figure {
       }
 
       if (rest === "coffee") {
-        const arm = leftHanded ? parts.armLeft : parts.armRight;
-        arm.rotation.x = -0.55 - 1.15 * envelope;
-        arm.rotation.z =
+        const liftingArm = leftHanded ? parts.armLeft : parts.armRight;
+        liftingArm.rotation.x = -0.55 - 1.15 * envelope;
+        liftingArm.rotation.z =
           (leftHanded ? 0.16 : -0.16) + (leftHanded ? 0.22 : -0.22) * envelope;
         parts.head.rotation.x = 0.04 - 0.18 * envelope;
 
@@ -408,12 +508,15 @@ export function createFigure(options: FigureOptions): Figure {
       }
     },
     dispose(): void {
+      for (const material of own) material.dispose();
+      // The merged part geometries belong to this figure; the shared set belongs to
+      // the stage and must survive. The chair's seat is a shared rounded part, so
+      // this is not a theoretical distinction — a blind traverse would dispose it
+      // once per rebuilt figure.
+      const shared = sharedGeometrySet(geometry);
       root.traverse((child) => {
-        if (
-          child instanceof Mesh &&
-          child.material instanceof MeshStandardMaterial
-        ) {
-          child.material.dispose();
+        if (child instanceof Mesh && !shared.has(child.geometry)) {
+          child.geometry.dispose();
         }
       });
     },

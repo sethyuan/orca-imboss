@@ -7,8 +7,14 @@
  * chatty employee cannot push a book-sized bubble onto the scene.
  */
 
-/** Rooms returned in one snapshot (most recently active first). */
-export const MAX_WORK_ROOMS = 24;
+/**
+ * Rooms returned in one snapshot (most recently active first).
+ *
+ * Twelve, not twenty-four: the board is read at a glance, and half the rooms is
+ * half the geometry the GPU has to hold (the bird's-eye view is static on top of
+ * that, see `stage.ts`).
+ */
+export const MAX_WORK_ROOMS = 12;
 
 /** Employees drawn in one room (the meeting table seats this many). */
 export const MAX_ROOM_MEMBERS = 20;
@@ -25,7 +31,7 @@ export const MAX_ROOM_STEPS = 64;
  * showing (see `bubbleLabel`: cuts happen on a paragraph/line/sentence/word
  * boundary). 200 characters keeps a heading plus a table header (or a couple of
  * prose lines) while keeping the whole snapshot's payload bounded: the worst case
- * (24 rooms × 20 bubbles) goes from ~293 KB to ~120 KB.
+ * (12 rooms × 20 bubbles) stays around 60 KB.
  */
 export const MAX_BUBBLE_LENGTH = 200;
 

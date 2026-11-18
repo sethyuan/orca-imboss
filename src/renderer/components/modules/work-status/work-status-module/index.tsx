@@ -7,7 +7,6 @@ import { Button } from "../../../button";
 import { Markdown } from "../../../markdown";
 import { useMentionResolver } from "../../../markdown/use-mention";
 import { Tooltip } from "../../../tooltip";
-import { FocusScreen } from "../focus-screen";
 import { RoomBoard } from "../room-board";
 import {
   createWorkStatusStage,
@@ -92,7 +91,6 @@ export function WorkStatusModule(): React.JSX.Element {
 
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const stageRef = useRef<WorkStatusStage | null>(null);
-  const [screenTarget, setScreenTarget] = useState<HTMLElement | null>(null);
   const [plateTargets, setPlateTargets] = useState<
     ReadonlyMap<number, HTMLElement>
   >(new Map());
@@ -130,7 +128,6 @@ export function WorkStatusModule(): React.JSX.Element {
     if (mode !== "3d" || host === null) return;
     const stage = createWorkStatusStage(host, {
       onFocusChange: setFocusedChatId,
-      onScreenTarget: setScreenTarget,
       onPlateTarget: (chatId, element) => {
         // Only fires when a plate host is created or removed, not per frame.
         setPlateTargets((previous) => {
@@ -178,7 +175,6 @@ export function WorkStatusModule(): React.JSX.Element {
     return () => {
       stageRef.current = null;
       stage.dispose();
-      setScreenTarget(null);
       setPlateTargets(new Map());
       setBubbles(new Map());
       setFocusedChatId(null);
@@ -379,12 +375,8 @@ export function WorkStatusModule(): React.JSX.Element {
         ) : null}
       </div>
 
-      {/* The focused room's wall screen is positioned by the 3D stage (CSS3D), so
-          the card is portalled into the element it keeps in the scene. */}
-      {screenTarget !== null && focusedRoom !== null
-        ? createPortal(<FocusScreen room={focusedRoom} />, screenTarget)
-        : null}
-
+      {/* The focused room's wall screen is painted into the scene (a texture on the
+          screen mesh), so it is occluded by whatever stands in front of it. */}
       {expanded !== null ? (
         <ExpandedBubble
           chatId={expanded.chatId}

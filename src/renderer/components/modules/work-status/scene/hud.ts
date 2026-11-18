@@ -1,4 +1,4 @@
-import { Vector3, type PerspectiveCamera } from "three";
+import { type Camera, Vector3 } from "three";
 
 /**
  * The HTML layer that floats over the WebGL scene: employee bubbles, room name
@@ -208,7 +208,7 @@ export class HudLayer {
   }
 
   /** Re-place everything for the current camera. Called once per rendered frame. */
-  update(camera: PerspectiveCamera): void {
+  update(camera: Camera): void {
     const width = this.container.clientWidth;
     const height = this.container.clientHeight;
     if (width <= 0 || height <= 0) return;
@@ -273,7 +273,7 @@ export class HudLayer {
   }
 
   private project(
-    camera: PerspectiveCamera,
+    camera: Camera,
     world: Vector3,
     width: number,
     height: number,

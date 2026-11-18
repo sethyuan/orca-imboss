@@ -1,13 +1,15 @@
+import { t } from "@shared/l10n";
 import type { WorkRoom, WorkRoomsPayload } from "@shared/types";
 import { employeeAvatarSrc } from "../../../employee-avatar/avatar-src";
 import {
-  ACESFilmicToneMapping,
   AmbientLight,
   Box3,
   Color,
   DirectionalLight,
   Group,
   HemisphereLight,
+  NeutralToneMapping,
+  PCFSoftShadowMap,
   Object3D,
   Raycaster,
   Scene,
@@ -16,15 +18,16 @@ import {
   WebGLRenderer,
 } from "three";
 import {
-  CSS3DObject,
-  CSS3DRenderer,
-} from "three/examples/jsm/renderers/CSS3DRenderer.js";
-import {
-  LAYOUT,
+  CAMERA,
+  GRID,
+  LIGHT_POSITIONS,
   LIGHTING,
   ROOM,
+  ROOM_FOOTPRINT,
+  SHADOW,
   createSharedGeometry,
   setWoodAnisotropy,
+  sharedGeometrySet,
 } from "./art";
 import { CameraRig } from "./camera";
 import { HudLayer, type HudBubble, type HudRoomLabel } from "./hud";
@@ -42,28 +45,28 @@ import {
 } from "../state-machine";
 
 /**
- * The 3D stage: one WebGL canvas, one CSS3D layer, one HTML HUD, and the rooms
+ * The 3D stage: one WebGL canvas, one HTML HUD, and the rooms
  * of every in-progress task group.
  *
- * Deliberately imperative. React owns the module's chrome (header, fallback
- * grid, the progress card shown on a focused room's screen) and hands data in
- * through a small API; the scene itself is a render loop, because a 60 Hz
- * re-render of a React tree would dwarf the cost of drawing the rooms.
+ * Deliberately imperative. React owns the module's chrome (header, name plates,
+ * bubbles, fallback grid) and hands data in through a small API; the scene itself is a
+ * render loop, because a 60 Hz re-render of a React tree would dwarf the cost of drawing
+ * the rooms.
  *
  * What the boss asked for that shapes the code here:
- * - 45° bird's-eye over a grid of rooms, left click flies into a room, right
- *   click flies back (the wheel has no role: the boss disabled it entirely);
- * - bubbles over heads (working / last message) plus rest animations, which must
- *   not be cut short (that rule lives in `state-machine.ts`);
- * - the focused room's progress screen is a real DOM card (crisp text, clickable);
- * - nothing renders while the module is not on screen.
+ * - an isometric bird's-eye over a grid of rooms, left click flies into a room, Escape
+ *   (or a click outside it) flies back; the wheel has no role, the boss disabled it;
+ * - bubbles over heads (working / last message) plus rest animations, which must not be
+ *   cut short (that rule lives in `state-machine.ts`);
+ * - the progress card is painted **onto the wall screen** in both views, so the furniture
+ *   in front of it occludes it;
+ * - the board is static unless something changes: nothing is drawn while the module is
+ *   not on screen, and a still bird's-eye view draws no frames at all.
  */
 
 export interface StageCallbacks {
   /** The focused room changed; `null` = back to the bird's-eye grid. */
   onFocusChange(chatId: number | null): void;
-  /** The DOM element the focused room's progress card must be portalled into. */
-  onScreenTarget(element: HTMLElement | null): void;
   /**
    * A room's name plate host was created (`element`) or removed (`null`): React
    * renders the plate itself, so it can be a `Tooltip` trigger with the full
@@ -95,17 +98,26 @@ export interface WorkStatusStage {
   dispose(): void;
 }
 
-/** Screen (CSS3D) element size in CSS pixels; scaled down to the wall size. */
-const SCREEN_CSS_WIDTH = 560;
-const SCREEN_CSS_HEIGHT = 315;
+/**
+ * How long a bird's-eye frame may sleep for when the only thing that can change is a
+ * bubble or a rest animation running out: the exact next expiry, so nothing has to
+ * poll. Data changes wake it immediately (a snapshot, a message, a hover).
+ */
+const IDLE_EVENT_SLACK_MS = 30;
 
 /**
- * Room-to-room spacing (world units). Depth needs more than width: at a 45°
- * camera the near room's back wall reaches up the screen, and a tight row would
- * hide the row behind it.
+ * How far above a room's own silhouette its name plate floats, along the camera's up
+ * axis: about half a plate height plus a little air.
  */
-const ROOM_GAP_X = 5;
-const ROOM_GAP_Z = 10;
+const PLATE_LIFT = 1.35;
+
+/**
+ * Room-to-room pitch (world units, derived in `GRID`): each room is yawed into its
+ * isometric pose, so the pitch has to clear the room's yawed footprint — 20.5 in
+ * plan — and the rows need more depth because the camera looks down.
+ */
+const ROOM_PITCH_X = GRID.pitchX;
+const ROOM_PITCH_Z = GRID.pitchZ;
 
 /**
  * Hover feedback: the whole room lifts a little and grows a touch.
@@ -161,20 +173,32 @@ export function createWorkStatusStage(
     powerPreference: "low-power",
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  // Filmic response: the standard-material shell needs a little range so lit
-  // surfaces and the self-lit screen read as different kinds of light.
-  renderer.toneMapping = ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
-  // Wood grain seen at a grazing angle (a table top from the 45° camera) needs
-  // anisotropic filtering, or the streaks alias into noise.
+  // Neutral tone mapping, not ACES: the cartoon look wants the artist's colours
+  // back, and a filmic curve greys them out.
+  renderer.toneMapping = NeutralToneMapping;
+  renderer.toneMappingExposure = LIGHTING.light.exposure;
+  // Wood grain seen at a grazing angle (a table top from the isometric camera)
+  // needs anisotropic filtering, or the streaks alias into noise.
   setWoodAnisotropy(renderer.capabilities.getMaxAnisotropy());
   renderer.setClearColor(new Color(0x000000), 0);
+  // Shadows: one directional light with a single map over the whole board. The map is
+  // frozen while the bird's-eye view is static and refreshed in a focused room, so the
+  // depth pass costs almost nothing (see the frame loop).
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = false;
   renderer.domElement.className = "imb-ws-canvas";
   container.appendChild(renderer.domElement);
 
-  const cssRenderer = new CSS3DRenderer();
-  cssRenderer.domElement.className = "imb-ws-css-layer";
-  container.appendChild(cssRenderer.domElement);
+  // The focused room's screen is a **texture on the screen mesh**, so the things in
+  // front of the wall occlude it. Only an invisible rectangle is left in the DOM: it
+  // gives the screen a focusable, named target for assistive tech (and a stable
+  // geometric handle for the tests).
+  const screenProxy = document.createElement("div");
+  // `.imb-ws-screen` is the name the app (and its tests) already use for "the
+  // focused room's screen"; the extra class says it is only a proxy for it now.
+  screenProxy.className = "imb-ws-screen imb-ws-screen-proxy";
+  screenProxy.style.display = "none";
 
   const hud = new HudLayer(container);
   const geometry = createSharedGeometry();
@@ -182,33 +206,89 @@ export function createWorkStatusStage(
     Math.max(1, container.clientWidth) / Math.max(1, container.clientHeight),
   );
 
-  // Two lights and no shadow maps: a room is read from a distance, and a depth
-  // pass per room would cost more than the look is worth here.
-  // One soft sky/ground pair plus a warm key light: enough shading to read the
-  // volumes, no colour cast on the shell (the room's accent carries identity).
+  // A studio rig: one warm key from the window wall (it casts the shadow), a cool
+  // fill from the other side, a rim to lift the wall tops, and the hemisphere pair.
   let darkTheme = false;
   const hemi = new HemisphereLight(
     LIGHTING.light.sky,
     LIGHTING.light.ground,
     LIGHTING.light.hemi,
   );
-  const sun = new DirectionalLight(0xfffaf2, LIGHTING.light.sun);
-  sun.position.set(14, 22, 16);
+  const key = new DirectionalLight(0xfff3e2, LIGHTING.light.keyIntensity);
+  key.position.copy(LIGHT_POSITIONS.key).multiplyScalar(40);
+  key.castShadow = true;
+  key.shadow.mapSize.set(SHADOW.mapSize, SHADOW.mapSize);
+  key.shadow.bias = SHADOW.bias;
+  key.shadow.normalBias = SHADOW.normalBias;
+  const fill = new DirectionalLight(0xdce8f5, LIGHTING.light.fillIntensity);
+  fill.position.copy(LIGHT_POSITIONS.fill).multiplyScalar(40);
+  const rim = new DirectionalLight(0xffffff, LIGHTING.light.rimIntensity);
+  rim.position.copy(LIGHT_POSITIONS.rim).multiplyScalar(40);
   const ambient = new AmbientLight(0xffffff, LIGHTING.light.ambient);
-  // A cool fill from the camera side keeps the shadowed faces readable; without
-  // it the standard materials go muddy on the far side of every object.
-  const fill = new DirectionalLight(0xdce6f2, 0.22);
-  fill.position.set(-18, 10, 22);
-  scene.add(hemi, sun, ambient, fill);
+  scene.add(hemi, key, fill, rim, ambient);
+
+  /**
+   * Radius of the shadow camera that covers one room, from any turn of it: the room's
+   * circumscribed circle in plan (`width` / `depth` diagonal) plus padding. It is a
+   * constant, never measured from the room's box — a turned room has a wider
+   * axis-aligned box, and re-measuring it would rescale the map under the floor while the
+   * room turns (the shadow creeps and its softness changes mid-drag).
+   */
+  const FOCUS_SHADOW_RADIUS =
+    Math.hypot(ROOM.width, ROOM.depth) / 2 + SHADOW.padding;
+
+  /**
+   * Point the key light's shadow camera at a **sphere** (`centre`, `radius`).
+   *
+   * A directional light's shadow camera is a 10 × 10 box at the world origin by default,
+   * so on a board ~160 units across only the room that happened to sit near the origin got
+   * a shadow map at all — that is why most objects had no shadow, and why the delivered
+   * screenshots (rooms away from the origin) showed none. The camera is therefore fitted
+   * to the whole board for the bird's-eye view and to one room while focused.
+   */
+  function fitShadow(centre: Vector3, radius: number): void {
+    key.target.position.copy(centre);
+    key.target.updateMatrixWorld();
+    key.position
+      .copy(centre)
+      .addScaledVector(LIGHT_POSITIONS.key, radius * 2.5);
+    const camera = key.shadow.camera;
+    camera.left = -radius;
+    camera.right = radius;
+    camera.top = radius;
+    camera.bottom = -radius;
+    camera.near = radius * 0.5;
+    camera.far = radius * 6;
+    camera.updateProjectionMatrix();
+  }
+
+  const shadowCentre = new Vector3();
+  const shadowSize = new Vector3();
+
+  /** Fit the map to the whole board (bird's-eye) or to the focused room. */
+  function fitShadowTo(box: Box3, focused: boolean): void {
+    box.getCenter(shadowCentre);
+    if (focused) {
+      fitShadow(shadowCentre, FOCUS_SHADOW_RADIUS);
+      return;
+    }
+    box.getSize(shadowSize);
+    fitShadow(shadowCentre, shadowSize.length() / 2 + SHADOW.padding);
+  }
 
   function applyLighting(): void {
     const rig = darkTheme ? LIGHTING.dark : LIGHTING.light;
     hemi.color.setHex(rig.sky);
     hemi.groundColor.setHex(rig.ground);
     hemi.intensity = rig.hemi;
-    sun.intensity = rig.sun;
+    key.color.setHex(rig.key);
+    key.intensity = rig.keyIntensity;
+    fill.color.setHex(rig.fill);
+    fill.intensity = rig.fillIntensity;
+    rim.color.setHex(rig.rim);
+    rim.intensity = rig.rimIntensity;
     ambient.intensity = rig.ambient;
-    fill.intensity = darkTheme ? 0.34 : 0.24;
+    renderer.toneMappingExposure = rig.exposure;
   }
 
   const roomsRoot = new Group();
@@ -245,13 +325,16 @@ export function createWorkStatusStage(
   let hoverRoomId: number | null = null;
   /** The hovered room's progress screen (a different click action). */
   let hoverScreenId: number | null = null;
+  /**
+   * How far the focused room has been turned on its own axis by dragging (radians).
+   * The camera stays put; the room turns.
+   */
+  let focusYaw = 0;
   let hoverPerson: { chatId: number; employeeId: number } | null = null;
-  let currentScreen: {
-    chatId: number;
-    object: CSS3DObject;
-    element: HTMLDivElement;
-  } | null = null;
+  let currentScreen: { chatId: number; label: string } | null = null;
   let rafId = 0;
+  /** Pending wake-up for a static board (see `frame`). */
+  let wakeTimer = 0;
   let disposed = false;
   let needsRender = true;
   const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -287,20 +370,25 @@ export function createWorkStatusStage(
       width > 1 && height > 1
         ? Math.min(3, Math.max(0.6, width / height))
         : 1.6;
-    // `room depth` projects shorter than `room width` at 45°, so a room is
-    // "wider" than it is tall on screen — hence the width/depth ratio below.
-    const perRow = Math.round(
-      Math.sqrt(count * aspect * (ROOM.width / ROOM.depth)),
-    );
-    return Math.max(1, Math.min(6, perRow));
+    // On screen a room is a diamond, `(width + depth) · cos45` wide and
+    // `(width + depth) · sin45 · sin(pitch) + wallHeight · cos(pitch)` tall — so it
+    // reads almost square rather than "wider than tall". `GRID.roomAspect` is that
+    // shape's width/height, which is what the pane has to fit. A wide window fits
+    // more rooms side by side.
+    const perRow = Math.round(Math.sqrt((count * aspect) / GRID.roomAspect));
+    // At least two across once there are two rooms: the board is framed for a
+    // 2×1 reference, so adding the second room must not re-scale the first one
+    // (the "size is fixed, not fitted to the count" rule).
+    const minColumns = count > 1 ? 2 : 1;
+    return Math.max(minColumns, Math.min(6, perRow));
   }
 
   function layoutGrid(): Box3 {
     const count = rooms.length;
     const columns = columnCount();
     const rows = Math.max(1, Math.ceil(count / columns));
-    const pitchX = ROOM.width + ROOM_GAP_X;
-    const pitchZ = ROOM.depth + ROOM_GAP_Z;
+    const pitchX = ROOM_PITCH_X;
+    const pitchZ = ROOM_PITCH_Z;
     const totalDepth = rows * pitchZ;
     const bounds = new Box3();
 
@@ -318,23 +406,21 @@ export function createWorkStatusStage(
       // left-to-right, front-to-back — like reading a page.
       const z = totalDepth / 2 - pitchZ * (row + 0.5);
       entry.handle.place(x, z);
-      // Fit the *contents*, not the wall tops: including the full wall height
-      // would pull the camera back until the rooms shrink into the middle of
-      // the pane. The wall top may sit just outside the frame.
-      bounds.expandByPoint(
-        new Vector3(x - ROOM.width / 2, 0, z - ROOM.depth / 2),
-      );
-      bounds.expandByPoint(
-        new Vector3(x + ROOM.width / 2, 2.4, z + ROOM.depth / 2),
-      );
+      // The frame covers the *whole* diorama (walls included) in its **yawed**
+      // footprint: the room is turned 45°, so what on screen is a 20.5 × 20.5
+      // diamond, not a 16 × 13 rectangle.
+      const half = ROOM_FOOTPRINT.plan / 2;
+      bounds.expandByPoint(new Vector3(x - half, 0, z - half));
+      bounds.expandByPoint(new Vector3(x + half, ROOM.wallHeight, z + half));
     });
 
     // Frame at least two rooms wide: with one (or a couple of) task groups the
     // camera must not fly in to fill the pane — a single room would grow until its
     // name plate left the view, and the board would change scale as groups come
-    // and go. The reference is the "two rooms" layout.
-    const frameHalfWidth = Math.max(columns, 2) * pitchX * 0.5;
-    const frameHalfDepth = Math.max(rows, 1) * pitchZ * 0.5;
+    // and go. The reference is "two rooms and the gap between them" — framing two
+    // full pitches would grow with the grid spacing and shrink a single room.
+    const frameHalfWidth = (Math.max(columns, 2) * pitchX - GRID.gapX) * 0.5;
+    const frameHalfDepth = (Math.max(rows, 1) * pitchZ - GRID.gapZ) * 0.5;
     bounds.expandByPoint(new Vector3(-frameHalfWidth, 0, -frameHalfDepth));
     bounds.expandByPoint(new Vector3(frameHalfWidth, 0, frameHalfDepth));
     return bounds;
@@ -408,11 +494,7 @@ export function createWorkStatusStage(
 
     // Every room's screen shows its progress card, drawn into a cached texture
     // (repainted only when that room's card or the theme changed).
-    for (const room of rooms) {
-      const entry = entries.get(room.chatId);
-      if (!entry) continue;
-      entry.handle.setScreenTexture(screens.get(room, darkTheme));
-    }
+    paintScreens();
 
     if (focusedChatId !== null && !entries.has(focusedChatId)) {
       // The room left the board (finished or deleted): do not stay focused on
@@ -421,10 +503,23 @@ export function createWorkStatusStage(
     }
     const bounds = layoutGrid();
     rig.setBirdBox(bounds);
+    // The grid is re-laid out on every snapshot, which moves rooms around the board.
+    // While a room is focused its frame must only depend on *that* room, so re-anchor the
+    // camera to its new position instantly (a new room on the board used to shift the
+    // focused view sideways).
+    if (focusedChatId !== null) {
+      const focused = entries.get(focusedChatId);
+      if (focused) {
+        rig.refocus(focused.handle.worldBox());
+        fitShadowTo(focused.handle.worldBox(), true);
+      }
+    } else {
+      fitShadowTo(bounds, false);
+    }
     syncViews();
     buildScreen();
     hudDirty = true;
-    needsRender = true;
+    invalidate();
   }
 
   function syncViews(): void {
@@ -498,6 +593,48 @@ export function createWorkStatusStage(
     }
   }
 
+  /** A room's own bounds in its local frame (the yaw and the lift come from the group). */
+  const plateLocalBox = new Box3(
+    new Vector3(-ROOM.width / 2, -ROOM.shellThickness, -ROOM.depth / 2),
+    new Vector3(ROOM.width / 2, ROOM.wallHeight, ROOM.depth / 2),
+  );
+  const plateBox = new Box3();
+  const plateRight = new Vector3();
+  const plateUp = new Vector3();
+  const plateForward = new Vector3();
+  const plateCorner = new Vector3();
+  const plateCentre = new Vector3();
+
+  /**
+   * Where a room's name plate hangs.
+   *
+   * The boss wants it **centred over the room as the room appears on screen**, not over
+   * the back wall (which sits off to one side of a yawed room, so the plate landed
+   * sideways of the room). The anchor is the room's world centre moved *only* along the
+   * camera's own up axis: an orthographic projection keeps the screen x unchanged while
+   * the screen y rises — so the plate is horizontally centred by construction and sits
+   * clear above the room's silhouette.
+   */
+  function plateAnchorFor(entry: RoomEntry): Vector3 {
+    // The room's box is recomputed from its *current* transform, so the plate rides the
+    // hover lift with the room (a cached box would leave the plate behind).
+    const box = plateBox
+      .copy(plateLocalBox)
+      .applyMatrix4(entry.handle.group.matrixWorld);
+    box.getCenter(plateCentre);
+    rig.camera.matrixWorld.extractBasis(plateRight, plateUp, plateForward);
+    let top = Number.NEGATIVE_INFINITY;
+    for (let corner = 0; corner < 8; corner += 1) {
+      plateCorner.set(
+        corner & 1 ? box.max.x : box.min.x,
+        corner & 2 ? box.max.y : box.min.y,
+        corner & 4 ? box.max.z : box.min.z,
+      );
+      top = Math.max(top, plateCorner.clone().sub(plateCentre).dot(plateUp));
+    }
+    return plateCentre.clone().addScaledVector(plateUp, top + PLATE_LIFT);
+  }
+
   // ── HUD content ─────────────────────────────────────────────────────────
 
   function syncHudContent(): void {
@@ -514,11 +651,7 @@ export function createWorkStatusStage(
       if (singleRoom === null) {
         plates.push({
           chatId: room.chatId,
-          // Above the back wall, so the plate never covers the screen, and high
-          // enough that it clears the room behind it on a dense board.
-          anchor: entry.handle.group.localToWorld(
-            new Vector3(0, ROOM.wallHeight + 3.1, -ROOM.depth / 2 + 0.2),
-          ),
+          anchor: plateAnchorFor(entry),
         });
       }
       if (!visible) continue;
@@ -544,14 +677,30 @@ export function createWorkStatusStage(
     hud.setRoomLabels(plates, callbacks.onPlateTarget);
   }
 
-  // ── CSS3D screen of the focused room ─────────────────────────────────────
+  // ── the focused room's screen ───────────────────────────────────────────
+
+  /** Re-paint every screen (the focused one at the higher resolution). */
+  function paintScreens(): void {
+    for (const room of rooms) {
+      const entry = entries.get(room.chatId);
+      if (!entry) continue;
+      entry.handle.setScreenTexture(
+        screens.get(
+          room,
+          darkTheme,
+          room.chatId === focusedChatId ? "focus" : "grid",
+        ),
+      );
+    }
+  }
 
   function disposeScreen(): void {
     if (currentScreen === null) return;
-    currentScreen.object.removeFromParent();
-    currentScreen.element.remove();
+    screenProxy.removeAttribute("role");
+    screenProxy.removeAttribute("tabindex");
+    screenProxy.removeAttribute("aria-label");
+    screenProxy.remove();
     currentScreen = null;
-    callbacks.onScreenTarget(null);
   }
 
   function buildScreen(): void {
@@ -561,29 +710,52 @@ export function createWorkStatusStage(
       callbacks.onFocusChange(null);
       return;
     }
-    if (
-      currentScreen?.chatId === entry.room.chatId &&
-      currentScreen.object.parent !== null
-    ) {
-      callbacks.onFocusChange(entry.room.chatId);
-      return;
-    }
-    disposeScreen();
-    const element = document.createElement("div");
-    element.className = "imb-ws-screen";
-    element.style.width = `${SCREEN_CSS_WIDTH}px`;
-    element.style.height = `${SCREEN_CSS_HEIGHT}px`;
-    const object = new CSS3DObject(element);
-    object.position.copy(entry.handle.screenLocal);
-    object.scale.set(
-      LAYOUT.screen.width / SCREEN_CSS_WIDTH,
-      LAYOUT.screen.height / SCREEN_CSS_HEIGHT,
-      1,
+    currentScreen = { chatId: entry.room.chatId, label: entry.room.title };
+    // The proxy sits where the screen projects and offers the one action the screen
+    // has, to assistive tech and to the keyboard (the pointer goes through the canvas
+    // raycast, so this element must not intercept it).
+    screenProxy.setAttribute("role", "button");
+    screenProxy.setAttribute("tabindex", "0");
+    screenProxy.setAttribute(
+      "aria-label",
+      `${t("Open task group")}: ${entry.room.title}`,
     );
-    entry.handle.group.add(object);
-    currentScreen = { chatId: entry.room.chatId, object, element };
-    callbacks.onScreenTarget(element);
+    screenProxy.style.display = "block";
+    container.appendChild(screenProxy);
     callbacks.onFocusChange(entry.room.chatId);
+  }
+
+  function onScreenProxyKey(event: KeyboardEvent): void {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    if (currentScreen === null) return;
+    event.preventDefault();
+    callbacks.openRoom(currentScreen.chatId);
+  }
+
+  /** Place the invisible proxy over the screen's projection (once per drawn frame). */
+  function updateScreenProxy(): void {
+    if (currentScreen === null) return;
+    const entry = entries.get(currentScreen.chatId);
+    if (!entry) return;
+    const rect = entry.handle.screenRect();
+    const camera = rig.camera;
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const corner of rect) {
+      worldAnchor.copy(corner).project(camera);
+      const x = (worldAnchor.x * 0.5 + 0.5) * container.clientWidth;
+      const y = (-worldAnchor.y * 0.5 + 0.5) * container.clientHeight;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+    screenProxy.style.left = `${minX}px`;
+    screenProxy.style.top = `${minY}px`;
+    screenProxy.style.width = `${Math.max(1, maxX - minX)}px`;
+    screenProxy.style.height = `${Math.max(1, maxY - minY)}px`;
   }
 
   // ── interaction ─────────────────────────────────────────────────────────
@@ -594,6 +766,9 @@ export function createWorkStatusStage(
       hoverRoomId = null;
       hoverScreenId = null;
       hud.setHover(null);
+      // The pointer left the board: a lifted room has to come back down, and on a
+      // static board nothing else would ask for that frame.
+      invalidate();
       return;
     }
     raycaster.setFromCamera(pointer, rig.camera);
@@ -662,7 +837,7 @@ export function createWorkStatusStage(
     }
     if (hoveredRoom !== hoverRoomId) {
       hoverRoomId = hoveredRoom;
-      needsRender = true;
+      invalidate();
     }
     // Pointer only where a click does something: the grid (focus), a person, or
     // the wall screen (open the group). Inside a focused room the floor and the
@@ -673,7 +848,7 @@ export function createWorkStatusStage(
       (focusedChatId === null &&
         (hoverRoomId !== null || hoverScreenId !== null));
     renderer.domElement.style.cursor = actionable ? "pointer" : "default";
-    needsRender = true;
+    invalidate();
   }
 
   /**
@@ -697,7 +872,7 @@ export function createWorkStatusStage(
       // Reduced motion keeps the lift (a static offset, no animation) and drops
       // the scale, which would otherwise be a second visual change.
       group.scale.setScalar(1 + (reduceMotion ? 0 : entry.hover * HOVER_SCALE));
-      if (entry.hover > 0) moving = true;
+      if (next !== entry.hover) hudDirty = true;
     }
     // The plates and bubbles are anchored to world positions, so a lifted room
     // has to move them too — otherwise the room floats out from under its name.
@@ -711,25 +886,36 @@ export function createWorkStatusStage(
     drag = null;
     focusedChatId = chatId;
     hoverRoomId = null;
-    roomBox.setFromCenterAndSize(
-      entry.handle.group.position.clone().add(entry.handle.center),
-      entry.handle.size,
-    );
+    focusYaw = 0;
+    // The room is yawed, so its box is the yawed footprint, not the local rectangle.
+    roomBox.copy(entry.handle.worldBox());
     rig.focusRoom(roomBox, performance.now());
+    fitShadowTo(roomBox, true);
     buildScreen();
+    paintScreens();
+    // A focused room animates again, and its shadow map is re-rendered per frame
+    // (one room, so the depth pass is cheap).
     hudDirty = true;
-    needsRender = true;
+    invalidate();
+    startLoop();
   }
 
   function exitFocus(): void {
     if (focusedChatId === null) return;
     drag = null;
+    const entry = entries.get(focusedChatId);
+    if (entry !== undefined) {
+      // Back to the board's own pose for this room.
+      entry.handle.group.rotation.y = (CAMERA.roomYawDeg * Math.PI) / 180;
+    }
+    focusYaw = 0;
     focusedChatId = null;
     rig.exitFocus(performance.now());
     disposeScreen();
+    paintScreens();
     hudDirty = true;
     callbacks.onFocusChange(null);
-    needsRender = true;
+    invalidate();
   }
 
   /**
@@ -757,9 +943,9 @@ export function createWorkStatusStage(
   }
 
   /**
-   * A left-button press is either a click or the start of a camera drag; which one
-   * is decided by movement (`DRAG_THRESHOLD_PX`). Deciding on release is what lets
-   * "drag to look around" and "click to open" share the same button.
+   * A left-button press is either a click or the start of a room turn; which one is
+   * decided by movement (`DRAG_THRESHOLD_PX`). Deciding on release is what lets "drag to
+   * turn the focused room" and "click to open something" share the same button.
    */
   function onPointerDown(event: PointerEvent): void {
     // Left button only: the context menu owns the right button.
@@ -810,11 +996,23 @@ export function createWorkStatusStage(
       if (drag.moved) {
         drag.x = event.clientX;
         drag.y = event.clientY;
-        // Dragging right turns the room to the right; dragging down looks from
-        // lower. Sensitivity in radians per pixel, clamped by the rig.
-        rig.orbit(-dx * DRAG_ORBIT_SPEED, dy * DRAG_ORBIT_SPEED);
+        // Dragging turns the **room**, not the camera: a camera that swung sideways
+        // dragged the neighbouring rooms into the frame. Only the horizontal drag is
+        // used — the camera's pitch is fixed while focused.
+        const entry = entries.get(focusedChatId);
+        if (entry !== null && entry !== undefined) {
+          // Drag direction == turn direction: dragging right turns the room to the
+          // right (a positive yaw about +Y reads as "to the right" from the camera).
+          focusYaw = Math.max(
+            -CAMERA.roomOrbitLimit,
+            Math.min(CAMERA.roomOrbitLimit, focusYaw + dx * DRAG_ORBIT_SPEED),
+          );
+          entry.handle.group.rotation.y =
+            (CAMERA.roomYawDeg * Math.PI) / 180 + focusYaw;
+          hudDirty = true;
+        }
         renderer.domElement.style.cursor = "grabbing";
-        needsRender = true;
+        invalidate();
         return;
       }
     }
@@ -843,67 +1041,141 @@ export function createWorkStatusStage(
   renderer.domElement.addEventListener("pointermove", onPointerMove);
   renderer.domElement.addEventListener("pointerleave", onPointerLeave);
   renderer.domElement.addEventListener("contextmenu", onContextMenu);
+  screenProxy.addEventListener("keydown", onScreenProxyKey);
 
   // ── frame loop ──────────────────────────────────────────────────────────
+  //
+  // Two modes, one loop:
+  // - **focused**: the loop runs continuously (breathing, rest animations, the clocks
+  //   ticking, hover easing, camera flights);
+  // - **bird's-eye**: nothing animates. The loop draws a frame when something
+  //   *changes* — a snapshot, a bubble, a hover, a camera flight — and then sleeps
+  //   until the next scheduled event (a bubble's 8 s window ending, a rest animation
+  //   finishing). Data never waits for a polling tick: every change calls
+  //   `invalidate()` directly.
+  function focusedNow(): boolean {
+    return focusedChatId !== null;
+  }
+
+  /** Something changed: draw a frame, and wake the loop if it is asleep. */
+  function invalidate(): void {
+    needsRender = true;
+    if (wakeTimer !== 0) {
+      window.clearTimeout(wakeTimer);
+      wakeTimer = 0;
+    }
+    startLoop();
+  }
+
+  /** The next moment a view can change on its own (bubble expiry / rest end). */
+  function nextViewEvent(now: number): number {
+    let next = Number.POSITIVE_INFINITY;
+    for (const view of views.values()) {
+      if (view.phase === "message")
+        next = Math.min(next, view.messageExpiresAt);
+      else if (view.phase === "resting") next = Math.min(next, view.restEndsAt);
+    }
+    return next > now ? next : now;
+  }
 
   function resize(): void {
     const width = container.clientWidth;
     const height = container.clientHeight;
     if (width < 2 || height < 2) return;
     renderer.setSize(width, height, false);
-    cssRenderer.setSize(width, height);
     rig.setAspect(width / height);
     needsRender = true;
+    startLoop();
   }
 
   const observer = new ResizeObserver(resize);
   observer.observe(container);
 
-  function frame(): void {
-    rafId = 0;
-    if (disposed) return;
-    // Not on screen: stop scheduling entirely. The module stays mounted (that is
-    // what keeps the camera and focus), but nothing runs while it is hidden.
-    if (!active) return;
-    rafId = requestAnimationFrame(frame);
-    const now = performance.now();
-
+  function drawFrame(now: number, animate: boolean): boolean {
     let animating = false;
     if (rig.update(now)) animating = true;
     if (updateHoverAnimation()) animating = true;
 
     for (const [key, view] of views) {
-      // Reduced motion: no rest animations at all (they are decoration), and the
-      // views never need to animate.
-      const next = reduceMotion ? view : tick(view, now);
+      // Reduced motion: no rest animations at all (they are decoration).
+      // Bird's-eye: only the phases that must be *finished* are ticked — an idle
+      // employee does not start a rest animation while the board is frozen, because
+      // nothing would animate it.
+      if (reduceMotion) continue;
+      if (!animate && view.phase === "idle") continue;
+      const next = tick(view, now);
       if (next !== view) {
         views.set(key, next);
         hudDirty = true;
       }
-      if (!reduceMotion && (next.phase === "resting" || next.running)) {
-        animating = true;
-      }
+      // "Running" is a *state*, not an animation: on a static board it must not keep
+      // the loop awake (the whole point of freezing the bird's-eye view).
     }
 
-    if (animating || needsRender) {
-      poseFigures(reduceMotion ? 0 : now);
-      if (hudDirty) {
-        syncHudContent();
-        hudDirty = false;
+    if (!animate && !animating && !needsRender) return false;
+
+    const liveliness = animate && !reduceMotion;
+    poseFigures(liveliness ? now : 0, liveliness);
+    // The clocks are set on **every** drawn frame, in both modes: a room's first frame
+    // has to show the real time (a frozen bird's-eye frame that showed 0:00 was a bug),
+    // and because a still board only draws when something changes, "set on every frame"
+    // means "frozen at the moment of that frame" — exactly the boss's rule.
+    updateClocks();
+    if (hudDirty) {
+      syncHudContent();
+      hudDirty = false;
+    }
+    hud.update(rig.camera);
+    updateScreenProxy();
+    // The shadow map is re-rendered here, on demand: every frame in a focused room,
+    // and once per change while the board is static.
+    renderer.shadowMap.needsUpdate = true;
+    renderer.render(scene, rig.camera);
+    needsRender = false;
+    // Only real motion keeps the loop awake: a focused room (always animating), a
+    // camera flight, or a hover lift still easing.
+    return animate || animating;
+  }
+
+  function frame(): void {
+    rafId = 0;
+    if (disposed) return;
+    if (!active) return;
+    const now = performance.now();
+    const keepGoing = drawFrame(now, focusedNow());
+    if (keepGoing && active) {
+      rafId = requestAnimationFrame(frame);
+      return;
+    }
+    // Static board: sleep until the next thing that can change by itself.
+    if (!focusedNow()) {
+      const next = nextViewEvent(now);
+      if (Number.isFinite(next)) {
+        wakeTimer = window.setTimeout(
+          () => {
+            wakeTimer = 0;
+            invalidate();
+          },
+          Math.max(0, next - now) + IDLE_EVENT_SLACK_MS,
+        );
       }
-      hud.update(rig.camera);
-      renderer.render(scene, rig.camera);
-      cssRenderer.render(scene, rig.camera);
-      needsRender = false;
     }
   }
 
   function startLoop(): void {
-    if (disposed || rafId !== 0) return;
+    if (disposed || rafId !== 0 || !active) return;
+    if (!focusedNow() && wakeTimer !== 0) {
+      // A wake-up is already scheduled; that is enough for a static board.
+      return;
+    }
     rafId = requestAnimationFrame(frame);
   }
 
   function stopLoop(): void {
+    if (wakeTimer !== 0) {
+      window.clearTimeout(wakeTimer);
+      wakeTimer = 0;
+    }
     if (rafId === 0) return;
     cancelAnimationFrame(rafId);
     rafId = 0;
@@ -912,7 +1184,7 @@ export function createWorkStatusStage(
   function onMotionPreference(): void {
     reduceMotion = motionQuery.matches;
     rig.setReducedMotion(reduceMotion);
-    needsRender = true;
+    invalidate();
   }
 
   function onContextLost(event: Event): void {
@@ -927,17 +1199,43 @@ export function createWorkStatusStage(
   motionQuery.addEventListener("change", onMotionPreference);
   renderer.domElement.addEventListener("webglcontextlost", onContextLost);
 
-  function poseFigures(now: number): void {
+  /**
+   * Pose every figure. In a focused room they breathe and play their rest
+   * animations; on a static board they hold the base pose (`animate: false`).
+   */
+  function poseFigures(now: number, animate: boolean): void {
     for (const entry of entries.values()) {
       for (const seat of entry.handle.seats) {
         const view = views.get(viewKey(entry.room.chatId, seat.employeeId));
         seat.figure.pose({
           now,
+          animate,
           working: view?.running === true && view.phase !== "resting",
-          rest: view?.phase === "resting" ? (view.rest ?? null) : null,
-          restProgress: view === undefined ? 0 : restProgress(view, now),
+          rest:
+            animate && view?.phase === "resting" ? (view.rest ?? null) : null,
+          restProgress:
+            animate && view !== undefined ? restProgress(view, now) : 0,
         });
       }
+    }
+  }
+
+  /**
+   * The wall clocks show the machine's local time.
+   *
+   * They are driven only while the loop is animating: on a static board the hands
+   * stay where the last animated frame left them (the boss's "freeze in the
+   * bird's-eye"), and a focused room sets them again on its first frame.
+   */
+  function updateClocks(): void {
+    // The **wall clock**, not `performance.now()`: the frame timestamp is the page's
+    // uptime, so `new Date(performance.now())` reads as "1970-01-01 00:<uptime>" and the
+    // hands showed the uptime (a 38-minute-old session showed 8:38) instead of the time.
+    const date = new Date();
+    const hours = date.getHours();
+    const minutes = date.getMinutes() + date.getSeconds() / 60;
+    for (const entry of entries.values()) {
+      entry.handle.setClockTime(hours, minutes);
     }
   }
 
@@ -960,12 +1258,10 @@ export function createWorkStatusStage(
       if (active === next) return;
       active = next;
       renderer.domElement.style.pointerEvents = next ? "" : "none";
-      cssRenderer.domElement.style.pointerEvents = next ? "" : "none";
       if (next) {
         resize();
         hudDirty = true;
-        needsRender = true;
-        startLoop();
+        invalidate();
       } else {
         stopLoop();
       }
@@ -993,10 +1289,11 @@ export function createWorkStatusStage(
       hud.dispose();
       renderer.dispose();
       renderer.domElement.remove();
-      cssRenderer.domElement.remove();
+      screenProxy.removeEventListener("keydown", onScreenProxyKey);
+      screenProxy.remove();
       screens.dispose();
       scene.clear();
-      for (const value of Object.values(geometry)) value.dispose();
+      for (const value of sharedGeometrySet(geometry)) value.dispose();
     },
   };
 }

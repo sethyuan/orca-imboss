@@ -11,6 +11,7 @@ import {
 } from "./helpers/mock-provider";
 import {
   appendNotifyMessage,
+  updateProgressCard,
   seedTaskGroup,
 } from "./helpers/work-status-fixtures";
 
@@ -81,6 +82,8 @@ async function mode(window: Page): Promise<"3d" | "2d"> {
 interface SeededRooms {
   rootChatId: number;
   openRoom: number;
+  /** The open room's newest progress card (a test rewrites it to prove the repaint). */
+  openRoomProgressMessageId: number;
   doneRoom: number;
   anna: number;
   ben: number;
@@ -95,7 +98,7 @@ async function seedRooms(window: Page, dataRoot: string): Promise<SeededRooms> {
   const anna = await createEmployee(window, "Anna", "Architect");
   const ben = await createEmployee(window, "Ben", "Tester");
   const rootChatId = await createChat(window, "Boss chat");
-  const openRoom = seedTaskGroup({
+  const openRoomSeed = seedTaskGroup({
     dataRoot,
     rootChatId,
     title: "Search revamp",
@@ -122,7 +125,8 @@ async function seedRooms(window: Page, dataRoot: string): Promise<SeededRooms> {
         notify: [anna],
       },
     ],
-  }).chatId;
+  });
+  const openRoom = openRoomSeed.chatId;
   const doneRoom = seedTaskGroup({
     dataRoot,
     rootChatId,
@@ -133,7 +137,47 @@ async function seedRooms(window: Page, dataRoot: string): Promise<SeededRooms> {
       { name: "Anna", task: "ship it", status: "done", employeeId: anna },
     ],
   }).chatId;
-  return { rootChatId, openRoom, doneRoom, anna, ben };
+  return {
+    rootChatId,
+    openRoom,
+    openRoomProgressMessageId: openRoomSeed.progressMessageId,
+    doneRoom,
+    anna,
+    ben,
+  };
+}
+
+/**
+ * Click the focused room's wall screen.
+ *
+ * The screen is painted into the scene, so a click has to go through the canvas
+ * raycast: walk the screen's projected rectangle until the scene says "the screen is
+ * under the pointer" (and no person is), then click there. That is exactly what a
+ * user does, and it does not depend on where the card happens to be uncovered.
+ */
+async function clickScreen(window: Page): Promise<void> {
+  const screen = window.locator(".imb-ws-screen");
+  const box = await screen.boundingBox();
+  expect(box).not.toBeNull();
+  const chip = window.locator(".imb-ws-hover");
+  for (const fy of [0.25, 0.35, 0.45, 0.55, 0.65, 0.3, 0.4, 0.5, 0.6, 0.7]) {
+    for (const fx of [0.3, 0.45, 0.6, 0.75, 0.2, 0.85]) {
+      const x = box!.x + box!.width * fx;
+      const y = box!.y + box!.height * fy;
+      await window.mouse.move(x, y);
+      await window.waitForTimeout(40);
+      if (await chip.isVisible()) continue;
+      const cursor = await window.evaluate(
+        () =>
+          (document.querySelector("canvas.imb-ws-canvas") as HTMLElement | null)
+            ?.style.cursor ?? "",
+      );
+      if (cursor !== "pointer") continue;
+      await window.mouse.click(x, y);
+      return;
+    }
+  }
+  throw new Error("no point of the wall screen answered the pointer");
 }
 
 /**
@@ -503,7 +547,12 @@ test("a roster change does not take the focused room's screen away", async () =>
   await focusOnlyRoom(session.window);
   const screen = session.window.locator(".imb-ws-screen");
   await expect(screen).toBeVisible();
-  await expect(screen).toContainText("Search revamp progress");
+  // The screen's card is painted into the scene (a texture on the screen mesh), so
+  // the DOM only carries the screen's identity and its one action.
+  await expect(screen).toHaveAttribute(
+    "aria-label",
+    /Open task group: Search revamp/,
+  );
 
   // Adding a member rebuilds the room's scene graph. The wall screen is a DOM
   // element parented to that graph, so it used to be detached and the card
@@ -530,7 +579,10 @@ test("a roster change does not take the focused room's screen away", async () =>
 
   await expect(screen).toHaveCount(1);
   await expect(screen).toBeVisible();
-  await expect(screen).toContainText("Search revamp progress");
+  await expect(screen).toHaveAttribute(
+    "aria-label",
+    /Open task group: Search revamp/,
+  );
 });
 
 test("an employee change refreshes the board (roster and bubbles)", async () => {
@@ -873,16 +925,21 @@ test("a second room does not change the scale of the first one", async () => {
   );
 
   // …and the scale must not depend on how many rooms are on the board: adding a
-  // second working group may re-frame the grid, but the first room's projection
-  // stays where it was (this is the "size is fixed, not fitted to the count"
-  // rule the boss asked for).
+  // second working group may re-lay-out the grid, but the *size* the plate renders
+  // at is fixed by the camera fit, not by the room count (the "size is fixed, not
+  // fitted to the count" rule the boss asked for).
+  //
+  // The plate's screen *position* is deliberately not asserted any more: the camera
+  // is isometric (45° azimuth), so two rooms of one row sit diagonally on screen and
+  // the row is re-centred around the newcomer — the first room's projection moves by
+  // design, while its scale stays put.
   await startEmployeeRun(session.window, rooms.doneRoom, rooms.ben);
   await expectRoomCount(session.window, 2);
   await expect(plates).toHaveCount(2);
   const first = await plates.first().boundingBox();
   expect(first).not.toBeNull();
-  expect(Math.abs(first!.y - single!.y)).toBeLessThanOrEqual(1);
   expect(Math.abs(first!.width - single!.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(first!.height - single!.height)).toBeLessThanOrEqual(1);
 
   // Both plates inside the canvas, and the room pitch (world units between two
   // rooms of one row) implies a px-per-unit the plate size is consistent with —
@@ -895,6 +952,24 @@ test("a second room does not change the scale of the first one", async () => {
       canvas!.x + canvas!.width + 1,
     );
   }
+
+  // The layout invariant that holds now: the camera looks straight on and each room
+  // is yawed into its isometric pose, so two rooms of one row are offset **exactly
+  // horizontally** — a large x step with essentially no y step. That is what catches
+  // a broken room yaw, grid pitch or plate anchor (it also fails if the camera is
+  // turned again, which is the regression this case exists for).
+  const dx = Math.abs(
+    second!.x + second!.width / 2 - (first!.x + first!.width / 2),
+  );
+  const dy = Math.abs(
+    second!.y + second!.height / 2 - (first!.y + first!.height / 2),
+  );
+  expect(dx).toBeGreaterThan(20);
+  // Room-mates of one row: level with each other, to within a plate's height.
+  expect(dy).toBeLessThan(2);
+  // A row's pitch is one room wide plus a gap, so two rooms cannot overlap: their
+  // plates are further apart than one plate is wide.
+  expect(dx).toBeGreaterThan(first!.width);
 });
 
 test("Escape leaves the focused room, and only closes the reading view first", async () => {
@@ -1118,7 +1193,7 @@ test("bubbles are a glance in the grid and reading them needs focus", async () =
   await expect(session.window.locator(".imb-ws-bubble-panel")).toBeVisible();
 });
 
-test("the grid draws the progress card on the wall, the focus view uses the DOM card", async () => {
+test("the progress card is painted on the wall screen in both views", async () => {
   const session = app!;
   const rooms = await seedRooms(session.window, session.dataRoot);
   await openBoard(session.window);
@@ -1130,9 +1205,9 @@ test("the grid draws the progress card on the wall, the focus view uses the DOM 
   await startEmployeeRun(session.window, rooms.openRoom, rooms.anna);
   await expectRoomCount(session.window, 1);
 
-  // Bird's-eye: no CSS3D card — the progress screen is a painted texture (a CSS3D
-  // element is always painted above the whole canvas, so it is reserved for the
-  // one focused room). The plate still names the group.
+  // Bird's-eye: the card is a texture on the room's screen (there is no DOM card
+  // anywhere — that is what lets the wall be occluded by what stands in front of
+  // it). The plate still names the group.
   await expect(session.window.locator(".imb-ws-screen")).toHaveCount(0);
   await expect(
     module(session.window).locator(".imb-ws-roomlabel").first(),
@@ -1141,7 +1216,196 @@ test("the grid draws the progress card on the wall, the focus view uses the DOM 
   await focusOnlyRoom(session.window);
   const screen = session.window.locator(".imb-ws-screen");
   await expect(screen).toHaveCount(1);
-  await expect(screen).toContainText("Search revamp progress");
+  await expect(screen).toHaveAttribute(
+    "aria-label",
+    /Open task group: Search revamp/,
+  );
+
+  // …and the painting is real: change the card's steps and the screen repaints.
+  // (A painted texture is the one thing a DOM assertion cannot see, so this reads
+  // the pixels of the card's text block.)
+  //
+  // Two things make the diff meaningful: reduced motion freezes the figures and the
+  // clocks (otherwise the *person* in front of the screen changes pixels on its own),
+  // and the clip is the card's title + first rows — no 3D object overlaps it, so a
+  // changed pixel can only come from a repaint.
+  // Park the pointer off the board, so no hover state is in flight, then freeze every
+  // animation the scene has.
+  await session.window.mouse.move(20, 20);
+  await session.window.emulateMedia({ reducedMotion: "reduce" });
+  // Let the change take effect (it re-poses the figures once).
+  await session.window.waitForTimeout(500);
+  const box = await screen.boundingBox();
+  expect(box).not.toBeNull();
+  // The screen's projected quad is a parallelogram, so its bounding box corners are
+  // empty wall: aim at the card's text block, which sits around the quad's centre-left
+  // and above the orchestrator (he stands in front of the card's lower half).
+  const centreX = box!.x + box!.width / 2;
+  const centreY = box!.y + box!.height / 2;
+  const clip = {
+    x: Math.round(centreX - box!.width * 0.34),
+    y: Math.round(centreY - box!.height * 0.34),
+    width: Math.round(box!.width * 0.4),
+    height: Math.round(box!.height * 0.26),
+  };
+  // A stable baseline first. With reduced motion the figures and the clocks are
+  // frozen, so two shots of an unchanged card have to be identical — if nothing is
+  // ever identical the scene is still moving and the comparison below would pass for
+  // the wrong reason (that is exactly the hole QA found in the first version).
+  let before: Buffer | null = null;
+  let previous = await session.window.screenshot({ clip });
+  for (let attempt = 0; attempt < 4 && before === null; attempt += 1) {
+    await session.window.waitForTimeout(250);
+    const next = await session.window.screenshot({ clip });
+    if (Buffer.compare(previous, next) === 0) before = next;
+    previous = next;
+  }
+  expect(before).not.toBeNull();
+  updateProgressCard(session.dataRoot, {
+    progressMessageId: rooms.openRoomProgressMessageId,
+    progressTitle: "Search revamp progress",
+    steps: [
+      { name: "Anna", task: "grind", status: "busy", employeeId: rooms.anna },
+      { name: "Ben", task: "polish", status: "done", employeeId: rooms.ben },
+    ],
+  });
+  // Wake the board the way the app does: a message arriving through its own
+  // channel triggers the snapshot that re-reads the (now changed) progress card.
+  appendNotifyMessage(session.dataRoot, {
+    chatId: rooms.openRoom,
+    employeeId: rooms.ben,
+    content: "the card changed",
+    notify: [rooms.anna],
+  });
+  // Writing the database is not enough: the app has no DB watcher, it only re-reads
+  // the snapshot when something tells it to. Every test that writes rows itself has
+  // to push this (see `freshMessage`); relying on some other session activity to
+  // happen by was luck, not a test.
+  await session.app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.webContents.send("workStatus:changed", {
+      reason: "message",
+    });
+  });
+  await expect
+    .poll(
+      async () => {
+        const after = await session.window.screenshot({ clip });
+        return Buffer.compare(before!, after) !== 0;
+      },
+      { timeout: 8_000 },
+    )
+    .toBe(true);
+});
+
+/**
+ * The bird's-eye board is **frozen**: no per-frame drawing, no animation, no ticking
+ * clocks. Only two things wake it — a change in the data (a snapshot, a bubble, a
+ * room appearing) and a piece of motion the user started (a hover lift, a camera
+ * flight).
+ *
+ * This is the regression gate for that: with the pointer parked on a room the lift has
+ * settled, so a second of wall-clock time must produce **zero** draw calls.
+ */
+/**
+ * A focused room's frame must be a property of **that room alone**.
+ *
+ * The board re-lays out its grid on every snapshot, so a new room moves every other
+ * room in the world — which used to drag the focused view sideways with it. The camera
+ * has to follow the room instead, keeping the picture pixel-identical.
+ */
+test("a new room does not move the focused room on screen", async () => {
+  const session = app!;
+  const rooms = await seedRooms(session.window, session.dataRoot);
+  await openBoard(session.window);
+  test.skip(
+    (await mode(session.window)) === "2d",
+    "no usable WebGL in this environment",
+  );
+
+  await startEmployeeRun(session.window, rooms.openRoom, rooms.anna);
+  await expectRoomCount(session.window, 1);
+  await focusOnlyRoom(session.window);
+  const screen = session.window.locator(".imb-ws-screen");
+  const before = await screen.boundingBox();
+  expect(before).not.toBeNull();
+
+  // A second task group starts working: the room appears on the board, the grid is
+  // re-laid out, and every room in the world shifts.
+  await startEmployeeRun(session.window, rooms.doneRoom, rooms.ben);
+  // The header shows the focused room's title, not the board count, so wait on the
+  // snapshot (what the board reads) instead of the header.
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline && (await roomIds(session.window)).length < 2) {
+    await session.window.waitForTimeout(200);
+  }
+  expect((await roomIds(session.window)).length).toBeGreaterThanOrEqual(2);
+  await session.window.waitForTimeout(600);
+
+  const after = await screen.boundingBox();
+  expect(after).not.toBeNull();
+  expect(Math.abs(after!.x - before!.x)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(after!.width - before!.width)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(after!.height - before!.height)).toBeLessThanOrEqual(0.5);
+  // Still the same room, still focused.
+  await expect(module(session.window).locator(".imb-ws-title-room")).toHaveText(
+    "Search revamp",
+  );
+});
+
+test("a still board draws nothing, and user motion still animates", async () => {
+  const session = app!;
+  const rooms = await seedRooms(session.window, session.dataRoot);
+  await openBoard(session.window);
+  test.skip(
+    (await mode(session.window)) === "2d",
+    "no usable WebGL in this environment",
+  );
+
+  await startEmployeeRun(session.window, rooms.openRoom, rooms.anna);
+  await expectRoomCount(session.window, 1);
+  await instrumentDraws(session.window);
+
+  // Park the pointer on the room (walk down from its plate until the scene answers).
+  const plate = module(session.window).locator(".imb-ws-roomlabel").first();
+  const anchor = await plate.boundingBox();
+  expect(anchor).not.toBeNull();
+  let parked = false;
+  for (const dy of [40, 70, 100, 55, 85, 120]) {
+    await session.window.mouse.move(
+      anchor!.x + anchor!.width / 2,
+      anchor!.y + anchor!.height + dy,
+    );
+    await session.window.waitForTimeout(120);
+    const cursor = await session.window.evaluate(
+      () =>
+        (document.querySelector("canvas.imb-ws-canvas") as HTMLElement | null)
+          ?.style.cursor ?? "",
+    );
+    if (cursor === "pointer") {
+      parked = true;
+      break;
+    }
+  }
+  expect(parked).toBe(true);
+
+  // The lift settles: after that, a still board must not draw at all.
+  await session.window.waitForTimeout(1_500);
+  await resetDraws(session.window);
+  await session.window.waitForTimeout(1_200);
+  expect(await readDraws(session.window)).toBe(0);
+
+  // Leaving the room lifts off again — that *is* motion, so it draws while it eases.
+  await resetDraws(session.window);
+  await session.window.mouse.move(20, 20);
+  await session.window.waitForTimeout(300);
+  expect(await readDraws(session.window)).toBeGreaterThan(0);
+
+  // …and the board goes back to sleep once it has settled.
+  await session.window.waitForTimeout(1_200);
+  await resetDraws(session.window);
+  await session.window.waitForTimeout(1_200);
+  expect(await readDraws(session.window)).toBe(0);
 });
 
 test("hovering a room lifts it without rocking it", async () => {
@@ -1156,19 +1420,34 @@ test("hovering a room lifts it without rocking it", async () => {
   await startEmployeeRun(session.window, rooms.openRoom, rooms.anna);
   await expectRoomCount(session.window, 1);
 
-  const canvas = await session.window
-    .locator("canvas.imb-ws-canvas")
-    .boundingBox();
   const plate = module(session.window).locator(".imb-ws-roomlabel").first();
   await session.window.mouse.move(20, 20);
   await session.window.waitForTimeout(700);
   const rest = await plate.boundingBox();
 
-  // Hover the room and let the lift settle.
-  await session.window.mouse.move(
-    canvas!.x + canvas!.width * 0.5,
-    canvas!.y + canvas!.height * 0.6,
-  );
+  // Hover the room and let the lift settle. The plate hangs above its room, so walk
+  // down from it until the canvas says the pointer is over the room (the board's
+  // layout is a camera detail — the test must not guess a fraction of the pane).
+  const anchor = await plate.boundingBox();
+  expect(anchor).not.toBeNull();
+  let hovered = false;
+  for (const dy of [30, 60, 90, 120, 45, 75, 105, 150]) {
+    await session.window.mouse.move(
+      anchor!.x + anchor!.width / 2,
+      anchor!.y + anchor!.height + dy,
+    );
+    await session.window.waitForTimeout(120);
+    const cursor = await session.window.evaluate(
+      () =>
+        (document.querySelector("canvas.imb-ws-canvas") as HTMLElement | null)
+          ?.style.cursor ?? "",
+    );
+    if (cursor === "pointer") {
+      hovered = true;
+      break;
+    }
+  }
+  expect(hovered).toBe(true);
   await session.window.waitForTimeout(800);
   const lifted = await plate.boundingBox();
   expect(rest).not.toBeNull();
@@ -1319,19 +1598,30 @@ test("dragging inside a focused room orbits the camera and is not a click", asyn
   await session.window.mouse.up();
   await session.window.waitForTimeout(300);
 
-  // The camera moved (the wall screen's projection changed)…
+  // The camera **looked around**, not just re-fitted: an orbit changes the wall
+  // screen's projected *shape* (its width/height ratio), while a pure zoom scales
+  // both axes equally — which is exactly the regression this case guards against
+  // (the rig used to compute the orbit direction and then ignore it when placing
+  // the camera, so dragging only zoomed).
   const after = await screen.boundingBox();
   expect(after).not.toBeNull();
-  expect(
-    Math.abs(after!.x - before!.x) + Math.abs(after!.y - before!.y),
-  ).toBeGreaterThan(5);
+  const aspectBefore = before!.width / before!.height;
+  const aspectAfter = after!.width / after!.height;
+  expect(Math.abs(aspectAfter - aspectBefore) / aspectBefore).toBeGreaterThan(
+    0.02,
+  );
+  // …the room is still framed (the fit follows the new direction)…
+  expect(after!.width).toBeLessThan(canvas!.width);
+  expect(after!.height).toBeLessThan(canvas!.height);
   // …the room is still focused, and the drag did not open anything.
   await expect(screen).toHaveCount(1);
   await expect(module(session.window)).toHaveAttribute("data-active", "true");
   await expect(session.window.locator(".imb-ws-bubble-panel")).toHaveCount(0);
 
-  // A real click (no movement) still opens the group.
-  await session.window.locator(".imb-ws-screen-body").click();
+  // A real click (no movement) on the screen still opens the group — through the
+  // scene's own picking, which is the path a pointer takes now that the card is
+  // painted into the 3D scene instead of being DOM on top of it.
+  await clickScreen(session.window);
   await expect(module(session.window)).toHaveAttribute("data-active", "false", {
     timeout: 5_000,
   });

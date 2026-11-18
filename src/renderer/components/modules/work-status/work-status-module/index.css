@@ -65,7 +65,7 @@
   overflow: auto;
 }
 
-/* The scene: one canvas, with the CSS3D layer and the HTML HUD stacked on it. */
+/* The scene: one canvas, with the HTML HUD stacked on it. */
 .imb-ws-canvas-host {
   position: absolute;
   inset: 0;
@@ -86,84 +86,24 @@
   height: 100%;
 }
 
-.imb-ws-css-layer {
+/* ── the focused room's wall screen ────────────────────────────────────────
+   The card itself is painted into the 3D scene (a texture on the screen mesh), so
+   that whatever stands in front of the wall occludes it. Only an invisible,
+   focusable rectangle is left here: it names the screen's one action for assistive
+   tech and gives the keyboard a target. */
+.imb-ws-screen-proxy {
   position: absolute;
-  inset: 0;
+  display: none;
   pointer-events: none;
-}
-
-/* ── the focused room's wall screen (real DOM, positioned by CSS3D) ───────── */
-.imb-ws-screen {
-  /* CSS3D positions this element; the body inside is what we style. */
-  font-size: var(--imb-fs-ui);
-  color: var(--imb-fg);
-}
-
-.imb-ws-screen-body {
-  cursor: pointer;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: var(--imb-space-2);
-  width: 100%;
-  height: 100%;
-  padding: var(--imb-space-4);
-  border-radius: var(--imb-radius-card);
-  border: 1px solid var(--imb-sep-strong);
-  background: var(--imb-material-popover, var(--imb-bg-elevated));
-  box-shadow: var(--imb-shadow-2);
-  overflow: hidden;
-}
-
-/* One screen, one action: the card is displayed, never operated here. */
-.imb-ws-screen-content {
-  pointer-events: none;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.imb-ws-screen-content .imb-progress-card {
-  max-width: 100%;
-  overflow: hidden;
-}
-
-.imb-ws-screen-body:active {
-  transform: scale(var(--imb-press-scale));
-}
-
-.imb-ws-screen-empty {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--imb-space-2);
-  color: var(--imb-fg-muted);
-  font-size: var(--imb-fs-small);
-}
-
-.imb-ws-screen-empty-title {
-  color: var(--imb-fg);
-  font-size: var(--imb-fs-title-3);
-  font-weight: var(--imb-fw-semibold);
-}
-
-.imb-ws-screen-open {
-  align-self: flex-start;
-  margin-top: auto;
-  padding: 0 var(--imb-space-3);
-  height: var(--imb-control-h-mini);
+  background: transparent;
   border: none;
-  border-radius: var(--imb-radius-chip);
-  background: var(--imb-accent);
-  color: var(--imb-accent-on);
-  font-size: var(--imb-fs-caption);
-  font-weight: var(--imb-fw-medium);
-  cursor: pointer;
+  padding: 0;
 }
 
-.imb-ws-screen-open:hover {
-  background: var(--imb-accent-hover);
+.imb-ws-screen-proxy:focus-visible {
+  outline: none;
+  box-shadow: var(--imb-focus-ring);
+  border-radius: var(--imb-radius-chip);
 }
 
 /* ── HTML HUD: bubbles, room plates, hover card ──────────────────────────── */
@@ -186,8 +126,7 @@
    lands on the person whatever the camera does. */
 .imb-ws-bubble-anchor {
   pointer-events: none;
-  /* Above the plates (1) and above the wall screen, which is a separate DOM layer
-     stacked below the HUD. */
+  /* Above the room plates (z-index 1). */
   z-index: 2;
 }
 

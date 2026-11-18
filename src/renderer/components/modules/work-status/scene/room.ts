@@ -1,40 +1,55 @@
+import type { WorkRoom, WorkRoomMember } from "@shared/types";
 import {
   Box3,
   Group,
   Mesh,
   MeshBasicMaterial,
-  type Object3D,
   PlaneGeometry,
-  type Texture,
   Vector3,
+  type Object3D,
+  type Texture,
 } from "three";
-import type { WorkRoom, WorkRoomMember } from "@shared/types";
 import {
+  CAMERA,
+  FIGURE,
   LAYOUT,
   ROOM,
+  SHADOW_OFFSET,
+  DECAL_Y,
   buildContactShadow,
   buildLaptop,
   buildMug,
   buildNotepad,
+  buildPalm,
+  buildRug,
+  buildSideboard,
   buildSunflower,
+  buildWallClock,
   buildWaterDispenser,
-  buildAlocasia,
+  buildWindows,
   createRoomMaterials,
   personPalettesFor,
   roomPaletteFor,
+  sharedGeometrySet,
+  sharedMesh,
   tableWidthFor,
   type SharedGeometry,
 } from "./art";
 import { createFigure, type Figure } from "./figure";
 
 /**
- * One task group as a room: shell, progress screen, the orchestrator's desk and
- * the meeting table with its seats.
+ * One task group as a room: the diorama shell (floor, two walls), the
+ * progress screen, the orchestrator's desk and the meeting table with its seats.
  *
- * The room is rebuilt from scratch when its roster changes (people are seated in
- * a fixed order, so a joiner would otherwise have to shuffle everyone). Rebuilds
- * are rare and cheap; everything that changes every second — poses, bubbles,
- * which room is focused — is updated without touching the scene graph.
+ * The room is rebuilt from scratch when its roster changes (people are seated in a
+ * fixed order, so a joiner would otherwise have to shuffle everyone). Rebuilds are
+ * rare and cheap; everything that changes every second — poses, bubbles, which room
+ * is focused — is updated without touching the scene graph.
+ *
+ * The look is composed from `art.ts` only: the parts here are *placed*, and every
+ * dimension/colour/material comes from the art layer. Static furniture is merged
+ * per material, so a room with a dozen people is a few dozen draw calls rather
+ * than a few hundred.
  */
 
 export interface Seat {
@@ -52,11 +67,8 @@ export interface Seat {
 export interface RoomHandle {
   chatId: number;
   group: Group;
-  /** Centre and size of the room's bounding box (camera fitting). */
-  center: Vector3;
-  size: Vector3;
-  /** World-space centre of the progress screen (CSS3D anchoring). */
-  screenLocal: Vector3;
+  /** The screen face's four world-space corners (the DOM proxy projects them). */
+  screenRect(): Vector3[];
   seats: Seat[];
   /** Meshes that mean "this room" when picked (floor, desk, table). */
   pickTargets: Object3D[];
@@ -70,9 +82,13 @@ export interface RoomHandle {
   place(x: number, z: number): void;
   /**
    * Draw the room's progress card on its screen. The grid renders it into a
-   * texture (see `screen-texture.ts`); the focused room's CSS3D card covers it.
+   * texture (see `screen-texture.ts`) at a higher resolution while the room is focused.
    */
   setScreenTexture(texture: Texture | null): void;
+  /** Put the wall clocks at `hours:minutes` (the stage drives them). */
+  setClockTime(hours: number, minutes: number): void;
+  /** The room's world-space bounding box, for the camera and the name plate. */
+  worldBox(): Box3;
   dispose(): void;
 }
 
@@ -134,45 +150,168 @@ export function buildRoom(
   const figures: Figure[] = [];
 
   // ── shell ────────────────────────────────────────────────────────────────
-  const floor = new Mesh(geometry.floor, materials.floor);
-  floor.position.y = -ROOM.floorThickness / 2;
+  // A cut-open box: two walls (back and left — the camera looks in from the
+  // front-right corner), no ceiling, no third wall, and **no base**. The walls'
+  // thickness sits *inside* the room's footprint, so their outer faces are flush with the
+  // floor slab's outer edges and the whole thing is one rectangular solid with two faces
+  // removed — which is what every wall-mounted part is placed against (the screen, the
+  // windows, the clock, the sideboard).
+  const halfWidth = ROOM.width / 2;
+  const halfDepth = ROOM.depth / 2;
+  const thickness = ROOM.shellThickness;
+  /** The walls' inner faces: the paint the room is measured from. */
+  const innerX = -halfWidth + thickness;
+  const innerZ = -halfDepth + thickness;
+  /**
+   * A hair of inset on the wall ends that face the room's open sides. There a wall's end
+   * face lies in the same plane as the floor slab's side face, and two coplanar faces that
+   * overlap z-fight into a bright sliver — exactly the "gap" that showed on both sides of
+   * the floor.
+   */
+  const endInset = 0.02;
+  /** Height of the wall's cut face: the darker cap along the top edge. */
+  const capHeight = 0.16;
+  const bodyHeight = ROOM.wallHeight - capHeight;
+
+  const floor = new Mesh(geometry.rounded.floor, materials.floor);
+  floor.position.y = -ROOM.shellThickness / 2;
   group.add(floor);
   pickTargets.push(floor);
 
-  const wall = new Mesh(geometry.wall, materials.wall);
-  wall.position.set(0, ROOM.wallHeight / 2, -ROOM.depth / 2);
-  group.add(wall);
+  // The room's own ambient occlusion: a soft darkening toward the floor's edges,
+  // which is what makes the floor read as enclosed rather than as a floating slab.
+  const floorShade = new Mesh(geometry.panel, materials.floorShade);
+  floorShade.rotation.x = -Math.PI / 2;
+  floorShade.scale.set(ROOM.width, ROOM.depth, 1);
+  floorShade.position.y = 0.008;
+  floorShade.renderOrder = -2;
+  group.add(floorShade);
 
-  const trim = new Mesh(geometry.wall, materials.wallTrim);
-  trim.scale.set(1, 0.12, 0.7);
-  trim.position.set(0, ROOM.wallHeight, -ROOM.depth / 2);
-  group.add(trim);
+  // The two walls are boxes **tiled without overlap**: the side wall owns the corner
+  // column and the back wall starts at the side wall's inner face, so no two walls share a
+  // face and nothing is left uncovered. (The corner notch between the two caps was a
+  // 0.2 × 0.2 column that neither wall owned.)
+  const sideWallPlan = {
+    centreX: -halfWidth + thickness / 2,
+    centreZ: -endInset / 2,
+    spanX: thickness,
+    spanZ: ROOM.depth - endInset,
+  };
+  const backWallPlan = {
+    centreX: (innerX + halfWidth - endInset) / 2,
+    centreZ: -halfDepth + thickness / 2,
+    spanX: halfWidth - endInset - innerX,
+    spanZ: thickness,
+  };
+  const wallBoxes = sharedMesh(geometry, "shell:walls", materials.wall, [
+    {
+      geometry: geometry.box,
+      placement: {
+        position: [
+          sideWallPlan.centreX,
+          bodyHeight / 2,
+          sideWallPlan.centreZ,
+        ] as const,
+        scale: [sideWallPlan.spanX, bodyHeight, sideWallPlan.spanZ] as const,
+      },
+    },
+    {
+      geometry: geometry.box,
+      placement: {
+        position: [
+          backWallPlan.centreX,
+          bodyHeight / 2,
+          backWallPlan.centreZ,
+        ] as const,
+        scale: [backWallPlan.spanX, bodyHeight, backWallPlan.spanZ] as const,
+      },
+    },
+  ]);
+  if (wallBoxes !== null) {
+    group.add(wallBoxes);
+    // The walls are the room's surfaces: in an isometric view they are most of what a
+    // room shows, so leaving them inert made a click on the room do nothing whenever the
+    // pointer happened to be over a wall.
+    pickTargets.push(wallBoxes);
+  }
 
-  // Baseboard: the line that makes a flat wall read as a wall.
-  const baseboard = new Mesh(geometry.box, materials.wallTrim);
-  baseboard.scale.set(ROOM.width, 0.3, 0.1);
-  baseboard.position.set(
-    0,
-    0.15,
-    -ROOM.depth / 2 + ROOM.wallThickness / 2 + 0.04,
+  // The walls' **cut faces**: the top 0.16 of each wall in its own darker material, so the
+  // room's upper edge reads against the module's light backdrop (and stays legible in the
+  // dark theme) without a black outline.
+  const wallCap = sharedMesh(geometry, "shell:wallCaps", materials.wallCap, [
+    {
+      geometry: geometry.box,
+      placement: {
+        position: [
+          sideWallPlan.centreX,
+          bodyHeight + capHeight / 2,
+          sideWallPlan.centreZ,
+        ] as const,
+        scale: [sideWallPlan.spanX, capHeight, sideWallPlan.spanZ] as const,
+      },
+    },
+    {
+      geometry: geometry.box,
+      placement: {
+        position: [
+          backWallPlan.centreX,
+          bodyHeight + capHeight / 2,
+          backWallPlan.centreZ,
+        ] as const,
+        scale: [backWallPlan.spanX, capHeight, backWallPlan.spanZ] as const,
+      },
+    },
+  ]);
+  if (wallCap !== null) group.add(wallCap);
+
+  // The baseboard: a paler step at the wall's foot, its bottom sunk into the floor slab
+  // (two coplanar faces there would read as a gap) and its two runs butted rather than
+  // overlapped at the corner.
+  const skirting = 0.07;
+  const baseboardParts = [
+    {
+      geometry: geometry.box,
+      placement: {
+        position: [backWallPlan.centreX, 0.11, innerZ + skirting / 2] as const,
+        scale: [backWallPlan.spanX, 0.26, skirting] as const,
+      },
+    },
+    {
+      geometry: geometry.box,
+      placement: {
+        position: [
+          innerX + skirting / 2,
+          0.11,
+          (innerZ + skirting + halfDepth - endInset) / 2,
+        ] as const,
+        scale: [
+          skirting,
+          0.26,
+          halfDepth - endInset - innerZ - skirting,
+        ] as const,
+      },
+    },
+  ];
+  const baseboard = sharedMesh(
+    geometry,
+    "shell:baseboard",
+    materials.wallTrim,
+    baseboardParts,
   );
-  group.add(baseboard);
+  if (baseboard !== null) group.add(baseboard);
 
   // ── progress screen ──────────────────────────────────────────────────────
-  const bezel = new Mesh(geometry.box, materials.screenBezel);
-  bezel.scale.set(
-    LAYOUT.screen.width + 0.36,
-    LAYOUT.screen.height + 0.36,
-    0.16,
-  );
+  // Embedded in the wall: a thin frame sitting almost flush with the paint, high
+  // enough that it never reaches the floor. Its picture is a **texture of the
+  // progress card** (`MeshBasicMaterial`, so the display emits its own light and reads
+  // unharmed by the room's lighting), painted at a higher resolution while the room is
+  // focused. A texture, not DOM, is what lets whatever stands in front of the screen
+  // occlude the card.
+  const bezel = new Mesh(geometry.rounded.screenBezel, materials.screenBezel);
   bezel.position.set(0, LAYOUT.screen.y, LAYOUT.screen.z);
   group.add(bezel);
   screenTargets.push(bezel);
 
-  // The screen's picture is a texture of the progress card, not a lit surface:
-  // `MeshBasicMaterial` keeps it readable and unaffected by the room's lighting
-  // (a display emits its own light). It starts as the plain screen colour and the
-  // stage swaps in a painted texture for every room.
   const screenMaterial = new MeshBasicMaterial({ color: 0xffffff });
   const screenFace = new Mesh(
     new PlaneGeometry(LAYOUT.screen.width, LAYOUT.screen.height),
@@ -181,10 +320,6 @@ export function buildRoom(
   screenFace.position.set(0, LAYOUT.screen.y, LAYOUT.screen.z + 0.09);
   group.add(screenFace);
   screenTargets.push(screenFace);
-
-  // A thin accent strip under the screen: the room's identity colour, and the
-  // one place it is allowed to be saturated.
-  const screenLocal = new Vector3(0, LAYOUT.screen.y, LAYOUT.screen.z + 0.1);
 
   function setScreenTexture(texture: Texture | null): void {
     if (texture === null) {
@@ -199,33 +334,36 @@ export function buildRoom(
 
   // ── the orchestrator's desk ──────────────────────────────────────────────
   const desk = LAYOUT.assistantDesk;
-  const desktop = new Mesh(geometry.box, materials.deskTop);
-  desktop.scale.set(desk.width, 0.16, desk.depth);
+  const desktop = new Mesh(geometry.rounded.deskTop, materials.deskTop);
   desktop.position.set(0, desk.height, desk.z);
   group.add(desktop);
   pickTargets.push(desktop);
 
-  // Four square legs, inset from the corners and flush with the top's underside,
-  // plus a stretcher along the back: a desk needs to look like it stands, not like
-  // it is balanced on two blades.
-  const deskLegInsetX = 0.42;
-  const deskLegInsetZ = desk.depth / 2 - 0.22;
-  for (const sideX of [-1, 1]) {
-    for (const sideZ of [-1, 1]) {
-      const leg = new Mesh(geometry.box, materials.desk);
-      leg.scale.set(0.18, desk.height - 0.02, 0.18);
-      leg.position.set(
-        sideX * (desk.width / 2 - deskLegInsetX),
-        (desk.height - 0.02) / 2,
-        desk.z + sideZ * deskLegInsetZ,
-      );
-      group.add(leg);
-    }
-  }
-  const deskStretcher = new Mesh(geometry.box, materials.desk);
-  deskStretcher.scale.set(desk.width - deskLegInsetX * 2, 0.12, 0.14);
-  deskStretcher.position.set(0, desk.height * 0.35, desk.z - deskLegInsetZ);
-  group.add(deskStretcher);
+  // A panel-end desk: two side panels and a modesty board, all in the dark walnut
+  // of the top, so it reads as one piece of furniture from every angle.
+  const deskBody = sharedMesh(geometry, "desk:body", materials.desk, [
+    ...[-1, 1].map((side) => ({
+      geometry: geometry.rounded.deskPanel,
+      placement: {
+        position: [
+          side * (desk.width / 2 - 0.18),
+          (desk.height - 0.08) / 2,
+          desk.z,
+        ] as const,
+      },
+    })),
+    {
+      geometry: geometry.rounded.deskModesty,
+      placement: {
+        position: [
+          0,
+          desk.height - 0.42,
+          desk.z - desk.depth / 2 + 0.22,
+        ] as const,
+      },
+    },
+  ]);
+  if (deskBody !== null) group.add(deskBody);
 
   const deskTopY = desk.height + 0.08;
   const deskLaptop = buildLaptop(geometry, materials);
@@ -245,13 +383,13 @@ export function buildRoom(
   );
   deskNotepad.forEach((part, index) => {
     part.position.set(
-      // Toward the desk's right corner *and* back toward the assistant's edge: the
-      // previous spot sat close enough to the outer edge to look about to fall off.
+      // Toward the desk's right corner *and* back toward the assistant's edge.
       index === 0 ? desk.width / 2 - 0.6 : desk.width / 2 - 0.95,
       deskTopY + 0.012 + (index === 0 ? 0 : 0.05),
       desk.z - 0.35,
     );
-    // Turned 180° from the old placement (the spine now points the other way).
+    // Turned round to face the assistant behind the desk, with a slight skew so it does
+    // not look machine-aligned.
     part.rotation.y = Math.PI - 0.18;
   });
   group.add(...deskNotepad);
@@ -271,50 +409,91 @@ export function buildRoom(
   }
   group.add(...deskFlower);
 
+  const deskShadow = buildContactShadow(
+    geometry,
+    materials.ambientShadow,
+    3.6,
+    0.7,
+  );
+  deskShadow.position.x += SHADOW_OFFSET.x;
+  deskShadow.position.z += desk.z + SHADOW_OFFSET.z;
+  group.add(deskShadow);
+
   // ── meeting table ────────────────────────────────────────────────────────
   const seatCount = room.members.filter(
     (member) => !member.orchestrator,
   ).length;
   const tableWidth = tableWidthFor(seatCount);
-  const table = new Mesh(geometry.box, materials.table);
-  table.scale.set(tableWidth, 0.24, LAYOUT.table.depth);
+  const table = new Mesh(geometry.rounded.tableTop, materials.table);
+  // The one rounded part with a variable size: a narrower group sits at a narrower
+  // table, and the corner radius distortion at these widths is imperceptible.
+  table.scale.set(tableWidth / LAYOUT.table.maxWidth, 1, 1);
   table.position.set(0, LAYOUT.table.height, LAYOUT.table.z);
   group.add(table);
   pickTargets.push(table);
 
-  // Two trestle legs (slabs across the depth, inset from each end) joined by a
-  // long stretcher: the shape a long meeting table actually has, and it reads as
-  // stable from every angle.
+  // Two trestle legs joined by a stretcher, each on a foot pad: the shape a long
+  // meeting table actually has, and it reads as stable from every angle.
   const tableLegHeight = LAYOUT.table.height - 0.26;
   const tableLegInsetX = Math.min(1.6, tableWidth * 0.22);
+  const legParts: Array<{
+    geometry: typeof geometry.box;
+    placement: {
+      position: readonly [number, number, number];
+      scale?: readonly [number, number, number];
+    };
+  }> = [];
   for (const side of [-1, 1]) {
-    const leg = new Mesh(geometry.box, materials.metal);
-    leg.scale.set(0.22, tableLegHeight, LAYOUT.table.depth * 0.82);
-    leg.position.set(
-      side * (tableWidth / 2 - tableLegInsetX),
-      tableLegHeight / 2,
-      LAYOUT.table.z,
-    );
-    group.add(leg);
-
-    // A foot pad under each trestle: the contact point, so nothing looks floating.
-    const foot = new Mesh(geometry.box, materials.metal);
-    foot.scale.set(0.34, 0.06, LAYOUT.table.depth * 0.9);
-    foot.position.set(
-      side * (tableWidth / 2 - tableLegInsetX),
-      0.03,
-      LAYOUT.table.z,
-    );
-    group.add(foot);
+    legParts.push({
+      geometry: geometry.rounded.tableLeg,
+      placement: {
+        position: [
+          side * (tableWidth / 2 - tableLegInsetX),
+          tableLegHeight / 2,
+          LAYOUT.table.z,
+        ],
+        scale: [1, tableLegHeight / 0.92, 1],
+      },
+    });
+    legParts.push({
+      geometry: geometry.rounded.tableFoot,
+      placement: {
+        position: [
+          side * (tableWidth / 2 - tableLegInsetX),
+          0.04,
+          LAYOUT.table.z,
+        ],
+      },
+    });
   }
-  const tableStretcher = new Mesh(geometry.box, materials.metal);
-  tableStretcher.scale.set(
-    Math.max(0.5, tableWidth - tableLegInsetX * 2 - 0.2),
-    0.1,
-    0.16,
+  legParts.push({
+    geometry: geometry.box,
+    placement: {
+      position: [0, tableLegHeight * 0.3, LAYOUT.table.z],
+      scale: [Math.max(0.5, tableWidth - tableLegInsetX * 2 - 0.2), 0.1, 0.16],
+    },
+  });
+  // The key carries the width: the legs and the stretcher are placed from
+  // `tableWidth`, so sharing one geometry across every room would make a two-person
+  // table wear the legs of the first (wide) table that was built. Widths are a
+  // handful of discrete values, so the cache stays small.
+  const tableLegs = sharedMesh(
+    geometry,
+    `table:legs:${tableWidth.toFixed(2)}`,
+    materials.metal,
+    legParts,
   );
-  tableStretcher.position.set(0, tableLegHeight * 0.3, LAYOUT.table.z);
-  group.add(tableStretcher);
+  if (tableLegs !== null) group.add(tableLegs);
+
+  const tableShadow = buildContactShadow(
+    geometry,
+    materials.ambientShadow,
+    Math.max(3.6, tableWidth * 0.52),
+    0.62,
+  );
+  tableShadow.position.x += SHADOW_OFFSET.x * 0.5;
+  tableShadow.position.z += LAYOUT.table.z + SHADOW_OFFSET.z;
+  group.add(tableShadow);
 
   // ── seats ────────────────────────────────────────────────────────────────
   const slots = seatSlots(tableWidth, seatCount);
@@ -339,7 +518,7 @@ export function buildRoom(
     seatIndex: number,
   ): Seat {
     // The wardrobe is walked by seat, not hashed per employee, so the people in
-    // one room never share a look (see `personPaletteFor`).
+    // one room never share a look (see `personPalettesFor`).
     const paletteOf = wardrobe[seatIndex % wardrobe.length]!;
     // Left-handed every other seat: the mug on the table moves to that side and
     // the "coffee" animation lifts the other hand, which is one more way to tell
@@ -348,21 +527,20 @@ export function buildRoom(
     const figure = createFigure({
       palette: paletteOf,
       geometry,
-      mugColor: palette.mug,
+      materials,
       leftHanded,
-      chair: {
-        fabric: palette.chair,
-        frame: palette.wallTrim,
-        metal: palette.metal,
-      },
     });
-    figure.root.position.set(x, 0.06, z);
+    figure.root.position.set(x, FIGURE.rootY, z);
     figure.root.rotation.y = rotationY;
     group.add(figure.root);
     figures.push(figure);
 
-    const shadow = buildContactShadow(geometry, materials.shadow, 1.35);
-    shadow.position.set(x, ROOM.floorThickness / 2 + 0.01, z);
+    const shadow = buildContactShadow(geometry, materials.shadow, 1.3, 1.15);
+    shadow.position.set(
+      x + SHADOW_OFFSET.x * 0.4,
+      DECAL_Y,
+      z + SHADOW_OFFSET.z * 0.4,
+    );
     group.add(shadow);
 
     return {
@@ -425,13 +603,10 @@ export function buildRoom(
       Math.cos(item.rotationY),
     );
     const side = new Vector3(forward.z, 0, -forward.x);
-    const surfaceY = LAYOUT.table.height + 0.12;
+    const surfaceY = LAYOUT.table.height + 0.1;
     const laptopPos = item.position.clone().addScaledVector(forward, 1.65);
 
     const laptop = buildLaptop(geometry, materials);
-    // Positioned on the table between the occupant and the table centre, turned so
-    // the screen faces the occupant (see `buildLaptop`: at rotation 0 the display
-    // faces -z, so the laptop takes the seat's own facing rotation).
     laptop.position.set(laptopPos.x, surfaceY, laptopPos.z);
     // `+π`: the laptop's own default faces +z, while `forward` points away from the
     // occupant — so the screen ends up facing the person who sits there.
@@ -453,47 +628,160 @@ export function buildRoom(
   }
 
   // ── decor ────────────────────────────────────────────────────────────────
-  // The corner plant: an Alocasia, at the room's right-front corner.
-  const corner = buildAlocasia(geometry, materials);
-  corner.position.set(ROOM.width / 2 - 1.5, 0, ROOM.depth / 2 - 1.6);
-  corner.rotation.y = -0.4;
+  // The big-leaf plant now stands on the right-hand floor, by the screen wall (the boss
+  // moved it there and put the sideboard in the corner it used to occupy).
+  const corner = buildPalm(geometry, materials);
+  const palmX = ROOM.width / 2 - 1;
+  const palmZ = -ROOM.depth / 2 + 2.5;
+  corner.position.set(palmX, 0, palmZ);
+  corner.rotation.y = -0.5;
   group.add(corner);
+  pickTargets.push(corner);
+  const plantShadow = buildContactShadow(
+    geometry,
+    materials.ambientShadow,
+    1.35,
+    1.1,
+  );
+  plantShadow.position.set(
+    palmX + SHADOW_OFFSET.x * 0.5,
+    DECAL_Y,
+    palmZ + SHADOW_OFFSET.z * 0.5,
+  );
+  group.add(plantShadow);
+
+  // The sideboard along the window wall: long, low, under the windows (the boss's
+  // reference), clear of the water dispenser and of the meeting table.
+  const sideboard = buildSideboard(geometry, materials);
+  sideboard.position.set(
+    -ROOM.width / 2 + ROOM.shellThickness + LAYOUT.sideboard.depth / 2 + 0.05,
+    0,
+    LAYOUT.sideboard.z,
+  );
+  group.add(sideboard);
+  pickTargets.push(sideboard);
+
+  // The window wall (the one without the screen): two glowing windows fill it, with the
+  // wall clock between them.
+  const windows = buildWindows(geometry, materials);
+  group.add(windows);
+  pickTargets.push(windows);
+  const clock = buildWallClock(geometry, materials, LAYOUT.clock.radius);
+  // Hung on the wall's inner face, half of its rim sunk into the paint, and turned so
+  // the dial faces +x — into the room.
+  clock.group.position.set(innerX + 0.05, LAYOUT.clock.y, LAYOUT.clock.along);
+  clock.group.rotation.y = Math.PI / 2;
+  group.add(clock.group);
+  pickTargets.push(clock.group);
+
+  // The rug under the assistant's desk.
+  const rug = buildRug(geometry, materials);
+  group.add(rug);
+  pickTargets.push(rug);
 
   // Water dispenser in the left-front corner, its front turned toward the plant in
   // the opposite corner (per the boss's annotation).
   const dispenser = buildWaterDispenser(geometry, materials);
-  dispenser.position.set(-ROOM.width / 2 + 1.5, 0, ROOM.depth / 2 - 1.6);
+  dispenser.position.set(-ROOM.width / 2 + 1.6, 0, ROOM.depth / 2 - 1.7);
   // The model faces +z at rotation 0; the plant sits toward +x, so a quarter turn
   // aims the front at it.
   dispenser.rotation.y = Math.PI / 2;
   group.add(dispenser);
-
-  const bounds = new Box3(
-    new Vector3(-ROOM.width / 2, 0, -ROOM.depth / 2),
-    new Vector3(ROOM.width / 2, ROOM.wallHeight, ROOM.depth / 2),
+  const dispenserShadow = buildContactShadow(
+    geometry,
+    materials.ambientShadow,
+    1.15,
+    1.1,
   );
-  const center = bounds.getCenter(new Vector3());
-  const size = bounds.getSize(new Vector3());
+  dispenserShadow.position.set(
+    -ROOM.width / 2 + 1.6 + SHADOW_OFFSET.x * 0.4,
+    DECAL_Y,
+    ROOM.depth / 2 - 1.7 + SHADOW_OFFSET.z * 0.4,
+  );
+  group.add(dispenserShadow);
+
+  // Every room is yawed into its isometric pose: the camera looks straight on, the
+  // room is turned -45°, so the room reads exactly as before while the *grid* stays
+  // upright on screen (see `CAMERA.roomYawDeg`).
+  group.rotation.y = (CAMERA.roomYawDeg * Math.PI) / 180;
+
+  // Shadows. Everything loose — furniture, people, plants, props — casts; the room's own
+  // **container** does not. A wall, its cut face, the baseboard, the floor, the screen and
+  // the windows are the box the room sits in: their shadows can only land on another part
+  // of that box, which is how the cap overhanging the paint drew a slanted band down the
+  // wall. The container only receives, and its volumes come from the baked AO instead
+  // (`wallWashTexture` on the paint, `floorVignetteTexture` on the floor).
+  const container: Object3D[] = [
+    floor,
+    floorShade,
+    windows,
+    bezel,
+    screenFace,
+    rug,
+    clock.group,
+  ];
+  for (const optional of [wallBoxes, wallCap, baseboard]) {
+    if (optional !== null) container.push(optional);
+  }
+  for (const part of container) part.userData.noShadow = true;
+  group.traverse((child) => {
+    if (!(child instanceof Mesh)) return;
+    child.castShadow = child.userData.noShadow !== true;
+    child.receiveShadow = true;
+  });
+  for (const part of container) {
+    part.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      child.castShadow = false;
+    });
+  }
+
+  const worldBoxValue = new Box3();
 
   return {
     chatId: room.chatId,
     group,
-    center,
-    size,
-    screenLocal,
     seats,
     pickTargets,
     screenTargets,
     place(x: number, z: number): void {
       group.position.set(x, 0, z);
+      group.updateMatrixWorld(true);
+      worldBoxValue.setFromObject(group);
+    },
+    worldBox(): Box3 {
+      return worldBoxValue;
+    },
+    screenRect(): Vector3[] {
+      const halfWidth = LAYOUT.screen.width / 2;
+      const halfHeight = LAYOUT.screen.height / 2;
+      const z = LAYOUT.screen.z + 0.09;
+      // Around the screen's own centre (`LAYOUT.screen.y`), not the room's floor: a
+      // quad built around y = 0 put the DOM proxy down on the desk.
+      return [
+        [-halfWidth, LAYOUT.screen.y - halfHeight],
+        [halfWidth, LAYOUT.screen.y - halfHeight],
+        [halfWidth, LAYOUT.screen.y + halfHeight],
+        [-halfWidth, LAYOUT.screen.y + halfHeight],
+      ].map(([x, y]) => group.localToWorld(new Vector3(x!, y!, z)));
+    },
+    setClockTime(hours: number, minutes: number): void {
+      clock.setTime(hours, minutes);
     },
     setScreenTexture,
     dispose(): void {
-      for (const figure of figures) figure.dispose();
+      // Figures own their material/geometry cleanup (so a figure is usable outside a
+      // room), which means they must leave the graph first: the traversal below
+      // would otherwise dispose the same objects a second time and make `seen` look
+      // like it was guarding something.
+      for (const figure of figures) {
+        figure.dispose();
+        figure.root.removeFromParent();
+      }
       figures.length = 0;
-      // Per-room materials and the few inline planes die with the room; the
+      // Per-room materials and the merged geometries die with the room; the
       // shared geometry set is owned by the stage and survives every rebuild.
-      const sharedGeometry = new Set<unknown>(Object.values(geometry));
+      const shared = sharedGeometrySet(geometry);
       const seen = new Set<Mesh["material"]>();
       group.traverse((child) => {
         if (!(child instanceof Mesh)) return;
@@ -505,7 +793,7 @@ export function buildRoom(
           seen.add(material);
           material.dispose();
         }
-        if (!sharedGeometry.has(child.geometry)) child.geometry.dispose();
+        if (!shared.has(child.geometry)) child.geometry.dispose();
       });
       group.clear();
     },

@@ -1,30 +1,49 @@
 import { CanvasTexture, SRGBColorSpace, type Texture } from "three";
 import { t } from "@shared/l10n";
 import type { WorkRoom, WorkRoomStep } from "@shared/types";
+import { LAYOUT } from "./art";
 
 /**
- * The progress screens of the *grid*: one small canvas per room, painted like the
- * card the boss sees in the thread (title, one row per step with name, task and
- * status), then used as the screen's texture.
+ * The wall screen is a **texture on the screen mesh**, not DOM.
  *
- * Why a texture here and real DOM only for the focused room: a CSS3D element is
- * painted above the whole WebGL canvas, so putting one on every room means a far
- * room's card would cover the furniture of the near room in front of it. The boss
- * explicitly allowed the grid's progress display to not be real DOM, as long as it
- * *looks* like the card — so the grid gets a texture and the focused room keeps
- * the crisp, clickable DOM card.
+ * Why: anything painted in the DOM sits above the whole WebGL canvas, so a card would
+ * cover whatever stands in front of the screen (the orchestrator's head, when the camera
+ * turned). A screen is embedded in the wall — the things in front of it must occlude it —
+ * so the card has to be part of the 3D scene. One painter serves two resolutions: the
+ * grid's small screens and the focused room's big one.
+ */
+export type ScreenResolution = "grid" | "focus";
+
+/**
+ * The progress screens: one canvas per room, painted like the card the boss sees in the
+ * thread (title, one row per step with name, task and status), then used as the screen's
+ * texture. The focused room gets a bigger canvas of the same painter — every room on the
+ * board, focused or not, is painted this way.
  *
- * Cost control: one 512×288 canvas per room (≈0.6 MB of texture memory each, so
- * ~14 MB for a full 24-room board), redrawn **only when that room's card or the
- * theme changes** (see the signature).
+ * Cost control: one canvas per room (≈0.3 MB of texture memory at the grid resolution, so
+ * ~4 MB for a full 12-room board and one more for the focused room), redrawn **only when
+ * that room's card or the theme changes** (see the signature).
  */
 
-/** Texture resolution. A grid room's screen is ~80–300 px wide on screen. */
-const TEXTURE_WIDTH = 512;
-const TEXTURE_HEIGHT = 288;
+/**
+ * Texture resolutions. The canvas matches the wall screen's own aspect
+ * (`LAYOUT.screen`), so the card is not stretched when it is painted onto it.
+ *
+ * - `grid`: a room on the board is ~80–300 px wide on screen; 640 px is plenty.
+ * - `focus`: the same wall fills ~500 CSS px (~1000 device px at 2×), so 1280 px keeps
+ *   the focused card's text crisp.
+ */
+const RESOLUTIONS: Record<ScreenResolution, number> = {
+  grid: 640,
+  focus: 1280,
+};
 
-/** Steps drawn on a grid screen; the rest collapse into a "+N" row. */
-const MAX_PAINTED_STEPS = 6;
+/**
+ * Rows the screen shows at most. The boss asked for "title + the last eight rows";
+ * eight rows fit at this type size, and anything beyond is truncated — no scrollbar,
+ * and never a half-drawn row (the "+N" line gets its own slot).
+ */
+const MAX_PAINTED_STEPS = 8;
 
 interface CanvasPalette {
   card: string;
@@ -96,117 +115,136 @@ function paintCard(
   context: CanvasRenderingContext2D,
   room: WorkRoom,
   palette: CanvasPalette,
+  width: number,
+  height: number,
 ): void {
-  const width = TEXTURE_WIDTH;
-  const height = TEXTURE_HEIGHT;
-  const padding = 26;
+  // The screen's own surface: no card, no border, no rounded corners — the boss
+  // wanted the card to *be* the screen. Everything is laid out from the top-left.
+  const unit = width / 430;
+  const padding = Math.round(18 * unit);
+  const left = padding;
+  const contentWidth = width - padding * 2;
 
   context.clearRect(0, 0, width, height);
   context.fillStyle = palette.card;
   context.fillRect(0, 0, width, height);
-
-  // The card's own surface, inset from the screen's edge (the same inset the DOM
-  // card has inside its frame).
-  const inset = 14;
-  context.fillStyle = palette.card;
-  context.strokeStyle = palette.line;
-  context.lineWidth = 2;
-  context.beginPath();
-  context.roundRect(inset, inset, width - inset * 2, height - inset * 2, 14);
-  context.stroke();
-
-  const left = inset + padding * 0.5;
-  const contentWidth = width - left * 2;
+  context.textBaseline = "top";
+  context.textAlign = "left";
 
   if (room.progress === null) {
     context.fillStyle = palette.ink;
-    context.font = "600 26px system-ui, -apple-system, sans-serif";
-    context.textBaseline = "top";
+    context.font = `600 ${Math.round(20 * unit)}px system-ui, -apple-system, sans-serif`;
     context.fillText(
       ellipsize(context, room.title, contentWidth),
       left,
-      height / 2 - 34,
+      Math.round(height / 2 - 24 * unit),
     );
     context.fillStyle = palette.inkMuted;
-    context.font = "400 20px system-ui, -apple-system, sans-serif";
-    context.fillText(t("No progress yet"), left, height / 2 + 2);
+    context.font = `400 ${Math.round(16 * unit)}px system-ui, -apple-system, sans-serif`;
+    context.fillText(
+      t("No progress yet"),
+      left,
+      Math.round(height / 2 + 4 * unit),
+    );
     return;
   }
 
-  // Title row.
+  // Title.
+  const titleTop = Math.round(14 * unit);
   context.fillStyle = palette.inkMuted;
-  context.font = "500 20px system-ui, -apple-system, sans-serif";
-  context.textBaseline = "top";
+  context.font = `500 ${Math.round(15 * unit)}px system-ui, -apple-system, sans-serif`;
   context.fillText(
     ellipsize(context, room.progress.title, contentWidth),
     left,
-    inset + 26,
+    titleTop,
   );
 
-  // Accent rule under the title (the card's identity, same role as the wall bar).
-  context.fillStyle = palette.accent;
-  context.fillRect(left, inset + 58, 64, 4);
+  // Hairline under the title: the card's only rule (no frame, no radius).
+  const ruleY = titleTop + Math.round(24 * unit);
+  context.fillStyle = palette.line;
+  context.fillRect(left, ruleY, contentWidth, Math.max(1, Math.round(unit)));
 
-  // Step rows.
-  const steps = room.progress.steps.slice(0, MAX_PAINTED_STEPS);
-  const rowTop = inset + 84;
-  const rowHeight = 30;
+  // Steps: **the newest ones**, and the row budget is measured, not assumed. A card
+  // grows downwards, so "the bottom of the card" is the newest work — the boss asked
+  // for exactly that, and showing the *oldest* rows would be the wrong end.
+  const rowTop = ruleY + Math.round(8 * unit);
+  const rowHeight = Math.round(14 * unit);
+  const nameSize = Math.round(11.5 * unit);
+  const taskSize = Math.round(11 * unit);
+  const tagSize = Math.round(10 * unit);
+  const bottom = height - Math.round(6 * unit);
+  const allSteps = room.progress.steps;
+  const rowsThatFit = Math.max(0, Math.floor((bottom - rowTop) / rowHeight));
+  // When rows are left over, one of the slots has to be the "+N" line itself.
+  const needsSummary = allSteps.length > rowsThatFit;
+  const maxRows = needsSummary ? Math.max(0, rowsThatFit - 1) : rowsThatFit;
+  const visible = Math.min(allSteps.length, MAX_PAINTED_STEPS, maxRows);
+  const steps = allSteps.slice(-visible);
+
   for (const [index, step] of steps.entries()) {
     const y = rowTop + index * rowHeight;
-    if (y + rowHeight > height - inset - 12) break;
 
-    // Status dot, then the employee's name in ink, the task in muted ink.
     context.fillStyle = statusColor(step.status, palette);
     context.beginPath();
-    context.arc(left + 6, y + 9, 5, 0, Math.PI * 2);
+    context.arc(
+      left + Math.round(4 * unit),
+      y + Math.round(4.5 * unit),
+      Math.round(3 * unit),
+      0,
+      Math.PI * 2,
+    );
     context.fill();
 
-    context.font = "600 17px system-ui, -apple-system, sans-serif";
+    const nameLeft = left + Math.round(13 * unit);
+    context.font = `600 ${nameSize}px system-ui, -apple-system, sans-serif`;
     context.fillStyle = palette.ink;
-    const name = step.name;
-    context.fillText(
-      ellipsize(context, name, contentWidth * 0.34),
-      left + 20,
-      y,
-    );
-    const nameWidth = Math.min(
-      contentWidth * 0.34,
-      context.measureText(name).width + 10,
-    );
-
-    context.font = "400 17px system-ui, -apple-system, sans-serif";
-    context.fillStyle = palette.inkMuted;
-    const taskWidth = contentWidth - nameWidth - 120;
-    context.fillText(
-      `· ${ellipsize(context, step.task, taskWidth)}`,
-      left + 20 + nameWidth,
-      y,
-    );
+    const name = ellipsize(context, step.name, contentWidth * 0.26);
+    context.fillText(name, nameLeft, y);
+    const nameWidth = context.measureText(name).width + Math.round(6 * unit);
 
     const label = t(STATUS_LABEL[step.status] ?? step.status);
-    context.font = "500 15px system-ui, -apple-system, sans-serif";
+    context.font = `500 ${tagSize}px system-ui, -apple-system, sans-serif`;
+    const tagWidth = context.measureText(label).width;
+
+    // One continuous string per row: name · task • status. A right-aligned status
+    // column lands several rows lower once the wall is seen at an angle.
+    context.font = `400 ${taskSize}px system-ui, -apple-system, sans-serif`;
     context.fillStyle = palette.inkMuted;
-    context.textAlign = "right";
-    context.fillText(label, left + contentWidth - 14, y + 1);
-    context.textAlign = "left";
+    const task = ellipsize(
+      context,
+      `· ${step.task}`,
+      Math.max(0, contentWidth - nameWidth - tagWidth - Math.round(24 * unit)),
+    );
+    context.fillText(task, nameLeft + nameWidth, y);
+    const taskWidth = context.measureText(task).width + Math.round(8 * unit);
+
+    context.font = `500 ${tagSize}px system-ui, -apple-system, sans-serif`;
+    context.fillStyle = statusColor(step.status, palette);
+    context.fillText(label, nameLeft + nameWidth + taskWidth, y);
   }
 
-  if (room.progress.steps.length > steps.length) {
+  const hidden = allSteps.length - steps.length;
+  if (hidden > 0) {
     context.fillStyle = palette.inkMuted;
-    context.font = "400 15px system-ui, -apple-system, sans-serif";
+    context.font = `400 ${tagSize}px system-ui, -apple-system, sans-serif`;
     context.fillText(
-      `+${room.progress.steps.length - steps.length}`,
-      left + 20,
-      rowTop + steps.length * rowHeight + 2,
+      `+${hidden}`,
+      left + Math.round(13 * unit),
+      rowTop + steps.length * rowHeight,
     );
   }
 }
 
 /** What the paint depends on: any change here means the texture must be redrawn. */
-function signatureOf(room: WorkRoom, dark: boolean): string {
+function signatureOf(
+  room: WorkRoom,
+  dark: boolean,
+  resolution: ScreenResolution,
+): string {
   const steps = room.progress?.steps ?? [];
   return [
     room.chatId,
+    resolution,
     dark ? "dark" : "light",
     room.title,
     room.progress?.messageId ?? "none",
@@ -218,33 +256,42 @@ function signatureOf(room: WorkRoom, dark: boolean): string {
 interface CachedScreen {
   texture: CanvasTexture;
   signature: string;
+  resolution: ScreenResolution;
 }
 
 export class ScreenTextureCache {
-  private readonly cache = new Map<number, CachedScreen>();
+  private readonly cache = new Map<string, CachedScreen>();
 
   /**
-   * The screen texture for `room`, repainted only when its content or the theme
-   * changed. The caller owns the room's material and just swaps `map`.
+   * The screen texture for `room` at `resolution`, repainted only when its content,
+   * the theme or the resolution changed. The caller owns the room's material and
+   * just swaps `map`.
    */
-  get(room: WorkRoom, dark: boolean): Texture {
-    const signature = signatureOf(room, dark);
-    const existing = this.cache.get(room.chatId);
+  get(room: WorkRoom, dark: boolean, resolution: ScreenResolution): Texture {
+    const key = `${room.chatId}:${resolution}`;
+    const width = RESOLUTIONS[resolution];
+    const height = Math.round(
+      (width * LAYOUT.screen.height) / LAYOUT.screen.width,
+    );
+    const signature = signatureOf(room, dark, resolution);
+    const existing = this.cache.get(key);
     if (existing !== undefined && existing.signature === signature) {
       return existing.texture;
     }
 
-    const canvas = existing?.texture.image as HTMLCanvasElement | undefined;
-    const target =
-      canvas instanceof HTMLCanvasElement
-        ? canvas
-        : Object.assign(document.createElement("canvas"), {
-            width: TEXTURE_WIDTH,
-            height: TEXTURE_HEIGHT,
-          });
-    const context = target.getContext("2d");
+    const canvas =
+      existing?.texture.image instanceof HTMLCanvasElement
+        ? (existing.texture.image as HTMLCanvasElement)
+        : Object.assign(document.createElement("canvas"), { width, height });
+    const context = canvas.getContext("2d");
     if (context !== null) {
-      paintCard(context, room, PALETTES[dark ? "dark" : "light"]);
+      paintCard(
+        context,
+        room,
+        PALETTES[dark ? "dark" : "light"],
+        width,
+        height,
+      );
     }
 
     if (existing !== undefined) {
@@ -253,19 +300,22 @@ export class ScreenTextureCache {
       return existing.texture;
     }
 
-    const texture = new CanvasTexture(target);
+    const texture = new CanvasTexture(canvas);
     texture.colorSpace = SRGBColorSpace;
-    texture.anisotropy = 4;
-    this.cache.set(room.chatId, { texture, signature });
+    texture.anisotropy = 8;
+    this.cache.set(key, { texture, signature, resolution });
     return texture;
   }
 
-  /** Drop a room's texture (its room left the board). */
+  /** Drop a room's textures (its room left the board). */
   release(chatId: number): void {
-    const cached = this.cache.get(chatId);
-    if (cached === undefined) return;
-    cached.texture.dispose();
-    this.cache.delete(chatId);
+    for (const resolution of ["grid", "focus"] as const) {
+      const key = `${chatId}:${resolution}`;
+      const cached = this.cache.get(key);
+      if (cached === undefined) continue;
+      cached.texture.dispose();
+      this.cache.delete(key);
+    }
   }
 
   dispose(): void {

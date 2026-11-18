@@ -95,6 +95,39 @@ export function appendNotifyMessage(
   }
 }
 
+/**
+ * Repoint a task group's newest progress card at a new set of steps and wake the
+ * board (the "the card changed while the screen is on the wall" case).
+ */
+export function updateProgressCard(
+  dataRoot: string,
+  input: {
+    progressMessageId: number;
+    progressTitle: string;
+    steps: SeedStep[];
+  },
+): void {
+  const db = new Database(join(dataRoot, "db", "imboss.db"));
+  try {
+    // The card's payload is `{ chatId, steps }` — `chatId` is what links the card to
+    // its task group, so it has to be carried over rather than overwritten.
+    const row = db
+      .prepare("SELECT steps FROM messages WHERE id = ?")
+      .get(input.progressMessageId) as { steps: string | null } | undefined;
+    const previous =
+      row?.steps == null
+        ? {}
+        : (JSON.parse(row.steps) as Record<string, unknown>);
+    db.prepare("UPDATE messages SET content = ?, steps = ? WHERE id = ?").run(
+      input.progressTitle,
+      JSON.stringify({ ...previous, steps: input.steps }),
+      input.progressMessageId,
+    );
+  } finally {
+    db.close();
+  }
+}
+
 /** Insert one task group + its progress card + its notifying messages. */
 export function seedTaskGroup(input: SeedRoomInput): SeededRoom {
   const db = new Database(join(input.dataRoot, "db", "imboss.db"));
