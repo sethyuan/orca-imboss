@@ -1459,11 +1459,12 @@ export async function initAppStore(): Promise<void> {
   // by the modules after each mutation.
 
   // Chats: every message append refreshes that chat's summary (preview,
-  // lastAt, unread) and re-sorts the cached list. The unread-only event
-  // (`chats:unreadChanged`, pushed when a chat is marked read) updates
-  // items[].unread directly.
+  // lastAt, unread) and re-sorts the cached list — and so does a **withdrawal**,
+  // which deletes a stored message (`deleted`): the preview must lose that text
+  // just as it gained it. The unread-only event (`chats:unreadChanged`, pushed
+  // when a chat is marked read) updates items[].unread directly.
   imb.messages.onChanged(
-    ({ chatId, senderEmployeeId, silent, root, muted, kind }) => {
+    ({ chatId, senderEmployeeId, silent, root, muted, kind, deleted }) => {
       void appStore.refreshChatSummary(chatId);
       // Beep for any non-silent employee/assistant message in a root chat,
       // regardless of the active module or the selected chat (group chats, muted
@@ -1474,6 +1475,7 @@ export async function initAppStore(): Promise<void> {
       // exceptions: they keep bumping the unread badge (done in main) but never
       // ring.
       if (
+        deleted !== true &&
         root &&
         senderEmployeeId !== null &&
         !silent &&

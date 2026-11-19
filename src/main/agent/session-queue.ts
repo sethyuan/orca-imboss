@@ -7,6 +7,7 @@ import type {
   AgentSessionSendResult,
   AgentSessionSteerPhase,
   AgentSessionSteerRevokeResult,
+  MessageAttachment,
 } from "@shared/types";
 import type { Subscriber } from "../rpc/types";
 import * as dbChats from "../db/chats";
@@ -185,6 +186,29 @@ interface QueueState {
 
 const states = new Map<string, QueueState>();
 
+/** Longest correlation id the queue accepts from a caller. */
+const MAX_SEND_ID_LENGTH = 64;
+
+/**
+ * Sanitize a caller-chosen correlation id (`DeliverOptions.sendId`).
+ *
+ * It only ever travels back to the renderer inside a `steer_state`, so a value
+ * that is not a short identifier is dropped instead of being echoed — a broken
+ * or hostile id must not be able to bloat the event stream.
+ */
+function safeSendId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (value.length === 0 || value.length > MAX_SEND_ID_LENGTH) return undefined;
+  return /^[A-Za-z0-9_-]+$/.test(value) ? value : undefined;
+}
+
+/** Validate a `messages` row reference (`DeliverOptions.messageId`). */
+function safeMessageId(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : undefined;
+}
+
 /** Routing options for `deliver`. */
 export interface DeliverOptions {
   /**
@@ -209,6 +233,26 @@ export interface DeliverOptions {
    * the real prompt, so an attachment send behaves exactly like a plain one.
    */
   displayText?: string;
+  /**
+   * Correlation id chosen by the sender, echoed back in every `steer_state` of
+   * this hand-over.
+   *
+   * Needed because the view draws its own row for a send it knows about
+   * (`chat:send` is stored first, steered after) *before* the main process can
+   * answer: the id is what makes that row the same row as this interjection
+   * instead of a duplicate next to it. Only the sending window knows its own
+   * rows, so it is the sender's to invent; never used to address a queue entry.
+   */
+  sendId?: string;
+  /**
+   * The stored `messages` row this send created, when it created one.
+   *
+   * A withdrawal deletes that row: the text never reached the model, so keeping
+   * it would leave the chat list / search / backup holding a message the
+   * conversation does not contain (see `SteerRecord.messageId`). Absent for the
+   * agent-session composer, which stores nothing.
+   */
+  messageId?: number;
 }
 
 /**
@@ -257,6 +301,12 @@ export async function deliver(
             text: opts?.displayText ?? text,
             effectiveText,
             phase: "pending",
+            ...(safeSendId(opts?.sendId) !== undefined
+              ? { sendId: opts?.sendId as string }
+              : {}),
+            ...(safeMessageId(opts?.messageId) !== undefined
+              ? { messageId: opts?.messageId as number }
+              : {}),
           };
           // Recorded *before* returning so an interrupt or a withdrawal that
           // starts next always sees it, and so an interrupt can re-queue
@@ -313,7 +363,11 @@ export async function deliver(
  * - a text that cannot be located is **not** touched: the same Pi queue also
  *   carries employee @-mention wakes and IM bridge texts, which must survive;
  * - whatever happens, the record leaves the interrupt ledger, so an interrupt
- *   can never re-deliver a message the boss already took back.
+ *   can never re-deliver a message the boss already took back;
+ * - a successful withdrawal also deletes the stored message the interjection
+ *   carried, if it carried one (`SteerRecord.messageId`) — a text the model
+ *   never received must not stay in the chat either — and hands that message's
+ *   attachments back so the composer can rebuild the chips with the text.
  */
 export async function revokeSteer(
   employeeId: number,
@@ -352,7 +406,11 @@ export async function revokeSteer(
           return { withdrawn: false, reason: "delivered" };
         }
         settleSteer(state, record, "revoked");
-        return { withdrawn: true };
+        const attachments = takeWithdrawnMessage(record);
+        return {
+          withdrawn: true,
+          ...(attachments.length > 0 ? { attachments } : {}),
+        };
       } catch (err) {
         console.error(
           `[session-queue] failed to withdraw the interjection ${steerId} of ${employeeId} in chat ${chatId}:`,
@@ -394,6 +452,46 @@ function settleSteer(
 ): void {
   record.phase = phase;
   emitSteerState(state, record);
+}
+
+/**
+ * Delete the stored message a withdrawn interjection came from and hand back the
+ * attachments it carried (see `SteerRecord.messageId`).
+ *
+ * Called exactly when Pi really dropped the text, so the chat must lose the row
+ * too — otherwise the list preview, the full-text search and any open thread
+ * would keep a message the model never received while the transcript never
+ * shows it.
+ *
+ * The attachments are read **before** the delete: the row is the only record of
+ * what the send carried, and the boss is meant to get it all back in the composer
+ * (text + chips) so it can be edited and sent again.
+ *
+ * Neither step throws: the queue entry is already gone, so a bookkeeping failure
+ * must not turn a successful withdrawal into the `unknown` outcome (which would
+ * tell the boss the queue state is undetermined and leave the row).
+ */
+function takeWithdrawnMessage(record: SteerRecord): MessageAttachment[] {
+  if (record.messageId === undefined) return [];
+  const messageId = record.messageId;
+  let attachments: MessageAttachment[] = [];
+  try {
+    attachments = dbMessages.getMessageById(messageId)?.attachments ?? [];
+  } catch (err) {
+    console.error(
+      `[session-queue] failed to read the withdrawn message ${messageId}:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+  try {
+    dbMessages.deleteMessage(messageId);
+  } catch (err) {
+    console.error(
+      `[session-queue] failed to delete the withdrawn message ${messageId}:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+  return attachments;
 }
 
 /** Push one record's new phase to this key's bound windows (same channel as the stream). */

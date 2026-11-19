@@ -56,6 +56,31 @@ function pendingFeedbackLabel(feedback: PendingFeedback): string {
 const FEEDBACK_MS = 4000;
 
 /**
+ * How long a placeholder stays silent about its state before saying it.
+ *
+ * A send into an idle session is usually in the transcript within a couple of
+ * hundred milliseconds, so the line would only ever be seen as a flash (the
+ * placeholder appears and is replaced in the same breath). Waiting past that
+ * keeps the feedback for the sends that genuinely wait — a busy employee, a cold
+ * session — and removes the flicker.
+ */
+const STATUS_LINE_DELAY_MS = 400;
+
+/** `true` once `active` has been continuously true for `delayMs`. */
+function useSettled(active: boolean, delayMs: number): boolean {
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (!active) {
+      setSettled(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSettled(true), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [active, delayMs]);
+  return settled;
+}
+
+/**
  * Content roots a comment may be anchored in, inside one session row.
  *
  * An assistant `text` entry (`.imb-session-text`) and the boss's own prompt
@@ -373,8 +398,14 @@ function SessionUserRow({
  *   itself is the state — no explanatory line (boss's call).
  * - **interjection, settled** (`lost` / `unknown`): a one-shot reason line and no
  *   button. The row removes itself after `FEEDBACK_MS`.
- * - **queued** send (v1 cannot withdraw those) or a legacy steer with no handle:
- *   the old status line plus a `×` that only dismisses the placeholder.
+ * - **waiting** send (`mode` `queued`, or a steer main never reported): a status
+ *   line plus a `×` that only dismisses the placeholder. The line appears after
+ *   `STATUS_LINE_DELAY_MS`, because in the common case the send reaches the
+ *   transcript long before that and the line would only be seen as a flicker.
+ *
+ * A chat send lives through both shapes: it is stored and steered, so its row
+ * starts as "waiting" and becomes the interjection as soon as main reports it
+ * (matched on `sendId` — see `pending-sends.ts`).
  */
 function PendingSendRow({
   item,
@@ -408,7 +439,15 @@ function PendingSendRow({
         ? t("Not confirmed — the agent may not have received this")
         : item.mode === "steer"
           ? t("Interjected — handled after the current turn")
-          : t("Queued — handled as soon as the agent is free");
+          : t("Sent — waiting for the agent");
+  // Only the plain "still waiting" line is delayed: a settled report is all the
+  // row has left to say, so it says it at once.
+  const statusSettled = useSettled(
+    label !== null && feedback === undefined,
+    STATUS_LINE_DELAY_MS,
+  );
+  const statusVisible =
+    label !== null && (feedback !== undefined || statusSettled);
   const withdrawLabel = t("Withdraw");
   const dismissLabel = t("Dismiss");
   return (
@@ -441,7 +480,7 @@ function PendingSendRow({
             {withdrawLabel}
           </button>
         </div>
-      ) : (
+      ) : statusVisible ? (
         <div
           className={cls(
             "imb-session-pending-hint",
@@ -466,7 +505,7 @@ function PendingSendRow({
             </button>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

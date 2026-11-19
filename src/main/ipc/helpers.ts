@@ -20,6 +20,26 @@ export function assertInteger(value: unknown, field: string): number {
   return value;
 }
 
+/** Longest correlation id an IPC caller may choose (`chat:send`'s `sendId`). */
+const MAX_SEND_ID_LENGTH = 64;
+
+/**
+ * Validate an optional caller-chosen correlation id.
+ *
+ * It is only echoed back to the renderer that chose it (inside a `steer_state`),
+ * never compared or used as a key main-side, so the rule is "a short opaque
+ * token": anything else is a client bug and is refused rather than echoed.
+ * `undefined`/`null` mean "no id" and stay `undefined`.
+ */
+export function assertSendId(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const id = assertString(value, "send id");
+  if (id.length > MAX_SEND_ID_LENGTH || !/^[A-Za-z0-9_-]+$/.test(id)) {
+    throw new Error("send id must be a short opaque token.");
+  }
+  return id;
+}
+
 export function assertObject(
   value: unknown,
   field: string,

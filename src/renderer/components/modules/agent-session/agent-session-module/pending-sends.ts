@@ -14,26 +14,33 @@ import type {
  * next turn boundary. The row is therefore the only feedback that the text
  * exists, and its lifecycle is what the boss acts on (「撤回」).
  *
- * Two kinds of rows live here:
+ * Rows start as one of two kinds and a chat send can move from the first to the
+ * second:
+ * - **waiting** send: no handle yet, so it is matched against the projection by
+ *   text and marked `unconfirmed` when a run ends after it was sent (a text that
+ *   really waited in the app queue is guaranteed to run, so only a steer gets
+ *   that report);
  * - **interjection** (`mode: "steer"`, `steerId` set): the main process tracks
  *   the text as a `SteerRecord` and streams its phase (`steer_state`), so the row
- *   never guesses — it mirrors `phase`;
- * - **queued** send: no handle (v1 does not withdraw those), so it is matched
- *   against the projection by text and marked `unconfirmed` when a run ends
- *   after it was sent.
+ *   never guesses — it mirrors `phase`, and it is the one the boss can withdraw.
  *
- * ## One interjection, one row
+ * ## One send, one row
  *
- * `steerId` is the identity of an interjection row, and **every** entry point
- * upserts on it: the composer's own send result, the `steer_state` event and the
- * mount-time snapshot all address the same record. This is not cosmetic — the
- * main process pushes `steer_state` *before* `agentSession:send` returns, so
- * "event first, reply second" is the normal ordering, and appending blindly on
- * the reply used to render one interjection twice (two identical bubbles, two
+ * A row is identified by whatever the main process can repeat back: `steerId`
+ * for an interjection, and the sender's own `sendId` for a **chat send** (stored
+ * *and* steered, so the view had already drawn its pending row before main could
+ * answer). **Every** entry point upserts on that identity — the composer's own
+ * send result, the `steer_state` event and the mount-time snapshot all address
+ * the same record. This is not cosmetic: main pushes `steer_state` *before* a
+ * send returns, so "event first, reply second" is a normal ordering, and
+ * appending blindly used to render one send twice (two identical bubbles, two
  * withdrawal buttons).
  *
- * Kept free of React and localization so it can be unit tested directly
- * (`scripts/tests/pending-sends.test.ts`).
+ * The same upsert is what makes a **chat** send withdrawable: its row starts as
+ * a plain queued placeholder (no handle), and the first `steer_state` carrying
+ * its `sendId` upgrades it in place into the interjection it always was.
+ *
+ * Kept free of React and localization so it can be unit tested directly.
  */
 export interface PendingSend {
   /** Stable React key (local to the view, never the main-process identity). */
@@ -64,6 +71,16 @@ export interface PendingSend {
    * `pending`, `lost` or `unknown`.
    */
   phase?: AgentSessionSteerPhase;
+  /**
+   * Correlation id the sender chose for this send, echoed by main in
+   * `steer_state` (see `AgentSessionSteerState.sendId`).
+   *
+   * It is the row's identity *before* main has answered: a chat send is stored
+   * first and steered second, so its placeholder exists while no `steerId` does
+   * yet. When the `steer_state` for that `sendId` arrives, the placeholder is
+   * upgraded to the interjection instead of being joined by a second row.
+   */
+  sendId?: string;
   /** Withdrawal in flight (disables the affordance). */
   busy?: boolean;
   /**
@@ -96,16 +113,39 @@ export interface SentRowInput {
   mode: AgentSessionDeliveryMode;
   /** Present for an interjection: the row identity from here on. */
   steerId?: string;
+  /** The sending window's own correlation id (see `PendingSend.sendId`). */
+  sendId?: string;
   /** `runEndSeq` at send time (queued rows use it to detect a lost send). */
   runEndSeq: number;
 }
 
 /**
+ * Index of the row a send or a `steer_state` addresses, or `-1`.
+ *
+ * `steerId` wins when known; otherwise the sender's `sendId` is the only
+ * identity both sides share (a chat send is already on screen when main reports
+ * the steer it turned into).
+ */
+function rowIndexOf(
+  rows: readonly PendingSend[],
+  identity: { steerId?: string; sendId?: string },
+): number {
+  if (identity.steerId !== undefined) {
+    const index = rows.findIndex((row) => row.steerId === identity.steerId);
+    if (index !== -1) return index;
+  }
+  if (identity.sendId !== undefined) {
+    return rows.findIndex((row) => row.sendId === identity.sendId);
+  }
+  return -1;
+}
+
+/**
  * Record (or refresh) the row of a send.
  *
- * An interjection **upserts on `steerId`**: the main process normally emitted
- * `steer_state` (pending) before this runs, and that row is the same
- * interjection — keeping it avoids a second bubble and a second 「撤回」.
+ * The row **upserts on its identity** (`steerId`, else `sendId`): the main
+ * process normally reported the interjection before this runs, and that row is
+ * the same send — keeping it avoids a second bubble and a second 「撤回」.
  */
 export function addSentRow(
   rows: readonly PendingSend[],
@@ -115,39 +155,33 @@ export function addSentRow(
     input.attachments !== undefined && input.attachments.length > 0
       ? { attachments: input.attachments }
       : {};
-  if (input.steerId === undefined) {
+  const index = rowIndexOf(rows, input);
+  if (index === -1) {
     return [
       ...rows,
       {
         ...input,
         runEndSeqAtSend: input.runEndSeq,
         id: input.id,
+        ...(input.steerId !== undefined ? { phase: "pending" } : {}),
         ...attachmentField,
       },
     ];
   }
-  const index = rows.findIndex((row) => row.steerId === input.steerId);
-  if (index === -1) {
-    return [
-      ...rows,
-      {
-        id: input.id,
-        text: input.text,
-        mode: input.mode,
-        runEndSeqAtSend: input.runEndSeq,
-        steerId: input.steerId,
-        phase: "pending",
-        ...attachmentField,
-      },
-    ];
-  }
+  const existing = rows[index];
   const next = [...rows];
   next[index] = {
     // Keep the row's own React identity and whatever phase it already has.
-    ...rows[index],
+    ...existing,
     text: input.text,
-    mode: input.mode,
+    // A row that main already made an interjection stays one: the send result
+    // only knows how it *asked*, and it arrived second.
+    mode: existing.steerId !== undefined ? "steer" : input.mode,
     runEndSeqAtSend: input.runEndSeq,
+    ...(input.steerId !== undefined ? { steerId: input.steerId } : {}),
+    ...(existing.phase === undefined && input.steerId !== undefined
+      ? { phase: "pending" as const }
+      : {}),
     ...attachmentField,
   };
   return next;
@@ -157,7 +191,9 @@ export function addSentRow(
  * Apply one `steer_state` update.
  *
  * - `pending`: create the row if this view does not have it yet (another window
- *   sent it, or the view mounted late), otherwise keep it as is;
+ *   sent it, or the view mounted late), otherwise keep it as is — and, when the
+ *   row was this view's own **chat** placeholder (matched by `sendId`), upgrade
+ *   it here: it is the same send, and main has just made it an interjection;
  * - `injected` / `revoked`: the row is done — the transcript holds the text, or
  *   it will never run;
  * - `lost` / `unknown`: not withdrawable and possibly never delivered, so the row
@@ -170,7 +206,10 @@ export function applySteerStateRow(
   steer: AgentSessionSteerState,
   newRowId: number,
 ): PendingSend[] {
-  const index = rows.findIndex((row) => row.steerId === steer.id);
+  const index = rowIndexOf(rows, {
+    steerId: steer.id,
+    sendId: steer.sendId,
+  });
   if (index === -1) {
     if (steer.phase !== "pending") return rows as PendingSend[];
     return [
@@ -184,6 +223,7 @@ export function applySteerStateRow(
         runEndSeqAtSend: 0,
         steerId: steer.id,
         phase: steer.phase,
+        ...(steer.sendId !== undefined ? { sendId: steer.sendId } : {}),
       },
     ];
   }
@@ -193,7 +233,12 @@ export function applySteerStateRow(
     return next;
   }
   next[index] = {
+    // The row becomes the interjection: main is the authority on its text (what
+    // the boss typed, never the composed prompt) and on its handle.
     ...rows[index],
+    steerId: steer.id,
+    text: steer.text,
+    mode: "steer",
     phase: steer.phase,
     busy: false,
     ...(steer.phase === "pending"
@@ -266,6 +311,26 @@ export const PENDING_MATCH_LENGTH = 32_000;
 /** Comparison key for matching a sent text against a projected user entry. */
 function pendingKey(text: string): string {
   return text.trim().slice(0, PENDING_MATCH_LENGTH);
+}
+
+/**
+ * Per-renderer-lifetime salt, so ids minted after a reload cannot collide with
+ * the rows main still holds from before it (those are restored with their own
+ * `sendId`).
+ */
+const SEND_ID_SALT = Math.random().toString(36).slice(2, 8);
+let sendIdSeq = 0;
+
+/**
+ * Mint a correlation id for one send (`chat:send`'s `sendId`).
+ *
+ * Only this window ever sees these values (main echoes one back untouched), so
+ * they carry no meaning beyond "this row and that `steer_state` are the same
+ * send".
+ */
+export function nextSendId(): string {
+  sendIdSeq += 1;
+  return `s${SEND_ID_SALT}-${sendIdSeq}`;
 }
 
 /**

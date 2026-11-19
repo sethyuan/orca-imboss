@@ -60,6 +60,7 @@ import {
   type SessionView,
 } from "../../agent-session/agent-session-view/use-session-view";
 import { toSessionAttachment } from "../../agent-session/session-composer";
+import { nextSendId } from "../../agent-session/agent-session-module/pending-sends";
 import { EmployeeChatPicker } from "./employee-chat-picker";
 import { pairAskAnswers } from "../ask-answer";
 import { ChatInputBar, type ComposerResetRequest } from "../chat-input-bar";
@@ -820,7 +821,7 @@ export function ChatModule(): React.JSX.Element {
 
   useEffect(() => {
     const offMessages = imb.messages.onChanged((payload) => {
-      const { chatId } = payload;
+      const { chatId, deleted } = payload;
       if (chatId !== selectedIdRef.current) {
         // A background chat: keep the visible (server-paged) list's badge in
         // sync, since `refreshChatSummary` only updates the browse cache. The
@@ -828,6 +829,7 @@ export function ChatModule(): React.JSX.Element {
         // employee/assistant sender) — the same rule app-store uses for the
         // global beep.
         if (
+          deleted !== true &&
           serverModeRef.current &&
           payload.root &&
           payload.senderEmployeeId !== null &&
@@ -2154,7 +2156,7 @@ function DirectChatDetail({
   // `directEmployeeId` is guaranteed by the caller's branch; the fallback keeps
   // the hook call unconditionally valid (the assistant id can never reach here).
   const employeeId = chat.directEmployeeId ?? ASSISTANT_ID;
-  const view = useSessionView(employeeId, chat.id);
+  const view = useSessionView(employeeId, chat.id, { draftSurface: "chat" });
   /** Failure of this conversation's own send (nothing typed is lost). */
   const [sendError, setSendError] = useState<string | null>(null);
 
@@ -2214,16 +2216,21 @@ function DirectChatDetail({
       comments?: MessageComment[],
     ): Promise<void> => {
       setSendError(null);
+      // Main echoes this id back in the `steer_state` of the interjection this
+      // send produces, which is what keeps the row below from becoming a second
+      // bubble next to it (see `pending-sends.ts`).
+      const sendId = nextSendId();
       try {
         // Main routes it to the conversation's employee (see `chat:send`) and
         // stores the message, so the list preview/unread/search keep working.
-        await imb.chat.send(chat.id, text, attachments, comments);
+        await imb.chat.send(chat.id, text, attachments, comments, sendId);
         // The transcript only carries the message once the employee's turn
         // starts, which can be minutes away while it is busy: the placeholder
         // row is the boss's feedback until then.
         view.addPendingChatSend(
           text,
           attachments.map((attachment) => toSessionAttachment(attachment)),
+          sendId,
         );
       } catch (err) {
         setSendError(err instanceof Error ? err.message : String(err));
@@ -2262,6 +2269,9 @@ function DirectChatDetail({
         onTagsApplied={onTagsApplied}
         // Only this one employee is reachable in a direct chat.
         mentions={false}
+        // A withdrawn interjection hands its text back to this composer (the
+        // draft it was sent from), not to the agent-session view's.
+        refill={view.refill}
       />
     </>
   );

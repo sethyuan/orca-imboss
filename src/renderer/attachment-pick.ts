@@ -14,6 +14,8 @@
  * builds those attachments itself.
  */
 import { MAX_ATTACHMENT_BYTES } from "@shared/constants/attachments";
+import { toImbFileUrl } from "@shared/imb-file";
+import { isPreviewableImage } from "@shared/image-attachments";
 import { t } from "@shared/l10n";
 import type { MessageAttachment } from "@shared/types";
 import { nextAttachmentId, type PendingAttachment } from "./chat-draft";
@@ -264,6 +266,33 @@ export function toPendingAttachment(
   attachment: MessageAttachment,
 ): PendingAttachment {
   const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined;
+  return {
+    id: nextAttachmentId(),
+    attachment,
+    ...(previewUrl ? { previewUrl } : {}),
+  };
+}
+
+/**
+ * Rebuild a draft chip from attachment metadata that came back from a **stored
+ * message** — a withdrawn chat send hands its attachments back with its text, so
+ * the boss can adjust the message and send it again.
+ *
+ * The preview goes through the same `imb-file:` URL a stored message uses: there
+ * is no `File`/blob to make an object URL from (the bytes may exist only on disk),
+ * and reusing one mechanism keeps "what a chip shows" identical to the message it
+ * came from. `URL.revokeObjectURL` on such a URL is a no-op when the chip goes.
+ */
+export function pendingFromStoredAttachment(
+  attachment: MessageAttachment,
+): PendingAttachment {
+  const path = attachment.path;
+  const previewUrl =
+    path !== undefined &&
+    path.length > 0 &&
+    isPreviewableImage(attachment.type ?? "", attachment.name)
+      ? toImbFileUrl(path)
+      : undefined;
   return {
     id: nextAttachmentId(),
     attachment,

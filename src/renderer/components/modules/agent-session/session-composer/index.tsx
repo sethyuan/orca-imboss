@@ -202,13 +202,16 @@ export function SessionComposer({
   // DOM value is the source of truth), so the value is written imperatively and
   // mirrored into the store — exactly like a paste would. Done in an effect so
   // the write happens after React commits, and guarded by `token` so a re-render
-  // never repeats it. Attachments are not restored (a withdrawal only hands the
-  // text back; the interjection record carries no attachment list).
+  // never repeats it. Only the text: a send from this composer stores no message,
+  // so there are no attachments to hand back (`RefillRequest.attachments` is
+  // always empty for this host).
   const refillTokenRef = useRef(0);
   useEffect(() => {
     if (!refill || refill.token === refillTokenRef.current) return;
     refillTokenRef.current = refill.token;
-    cardRef.current?.setText(refill.text, refill.text.length);
+    if (refill.text.length > 0) {
+      cardRef.current?.setText(refill.text, refill.text.length);
+    }
   }, [refill]);
 
   const binding: ComposerDraftBinding = {

@@ -1,4 +1,4 @@
-import type { MessageComment } from "./messages";
+import type { MessageComment, MessageAttachment } from "./messages";
 
 /**
  * Renderer-facing projection of a persisted `(employee, chat)` agent session.
@@ -175,6 +175,16 @@ export interface AgentSessionSteerState {
   /** What the boss typed — never the skill/template expanded text. */
   text: string;
   phase: AgentSessionSteerPhase;
+  /**
+   * Correlation id the sender chose for this hand-over, echoed back verbatim
+   * (`chat:send`'s `sendId`).
+   *
+   * A chat send is stored *and* steered, and the view already drew its own
+   * "sent, not yet in the transcript" row before the main process could answer
+   * — this is what lets that row become **this** interjection instead of a
+   * second one (see `pending-sends.ts`). Absent for a send that named none.
+   */
+  sendId?: string;
 }
 
 /**
@@ -195,6 +205,16 @@ export interface AgentSessionSteerRevokeResult {
    * - `unknown`: the attempt failed and the queue state is undetermined.
    */
   reason?: "delivered" | "gone" | "unknown";
+  /**
+   * Attachments the withdrawn message carried, handed back together with its
+   * text so the composer can restore them as chips (a chat send is stored with
+   * its attachments, and the withdrawal deletes that row).
+   *
+   * Read from the stored message **before** it was deleted; absent when the send
+   * carried none, and for an interjection that never stored a message (the
+   * agent-session composer).
+   */
+  attachments?: MessageAttachment[];
 }
 
 /**

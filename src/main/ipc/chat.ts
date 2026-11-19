@@ -20,7 +20,12 @@ import {
   validateAttachmentsPayload,
 } from "../attachment-prompt";
 import { validateCommentsPayload, withComments } from "../comment-prompt";
-import { assertInteger, assertString, parsePageQuery } from "./helpers";
+import {
+  assertInteger,
+  assertSendId,
+  assertString,
+  parsePageQuery,
+} from "./helpers";
 import type { Binder } from "../rpc/types";
 
 export function registerChatHandlers(bind: Binder): void {
@@ -247,6 +252,13 @@ export function registerChatHandlers(bind: Binder): void {
    * thread renders) and written into the same prompt as a `[Comments]` block, so
    * the agent sees them in the turn they were sent in. A comment-only send (no
    * text, no files) is legitimate.
+   *
+   * `sendId` is the sending window's own correlation id for this send. The
+   * message is stored **and** steered, so a window that draws a "sent, not yet
+   * in the transcript" row (an employee direct chat renders the session
+   * projection) has already shown one before this call returns; echoing the id
+   * back in `steer_state` is what turns that row into the interjection's row
+   * instead of adding a second one next to it.
    */
   bind(
     "chat:send",
@@ -256,6 +268,7 @@ export function registerChatHandlers(bind: Binder): void {
       content: unknown,
       attachments: unknown,
       comments: unknown,
+      sendId: unknown,
     ) => {
       const safeChatId = assertInteger(chatId, "chat id");
       const safeContent = assertString(content, "content");
@@ -263,6 +276,7 @@ export function registerChatHandlers(bind: Binder): void {
       // Shape-only validation; `appendMessage` re-checks with the target-is-in-
       // this-chat rule (the only place that knows the chat to check against).
       const safeComments = validateCommentsPayload(comments);
+      const safeSendId = assertSendId(sendId);
 
       const chat = dbChats.getChat(safeChatId);
       if (chat === null) throw new Error("Conversation not found.");
@@ -328,7 +342,16 @@ export function registerChatHandlers(bind: Binder): void {
         // The comment block goes before the attachment block: `[Attachments]`
         // must stay the prompt's trailing suffix (see `comment-prompt.ts`).
         agentPrompt(withComments(safeContent, safeComments), safeAttachments),
-        { mode: "steer" },
+        {
+          mode: "steer",
+          // The interjection is displayed (and handed back on withdrawal) as what
+          // the boss typed, never as the composed prompt.
+          displayText: safeContent,
+          // Withdrawing this send must also drop the message it stored: the text
+          // would never reach the model.
+          messageId: userMessage.id,
+          ...(safeSendId !== undefined ? { sendId: safeSendId } : {}),
+        },
       );
 
       // First message of an untitled chat → generate a title from it

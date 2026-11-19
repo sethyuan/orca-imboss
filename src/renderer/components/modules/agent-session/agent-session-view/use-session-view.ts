@@ -6,6 +6,7 @@ import type {
   AgentSessionViewEntry,
   AgentStreamEvent,
   AgentStreamPayload,
+  MessageAttachment,
 } from "@shared/types";
 import {
   useCallback,
@@ -117,6 +118,31 @@ export interface JumpAvailability {
   prev: boolean;
   next: boolean;
 }
+/** One-shot "put a withdrawn message back in the composer" request. */
+export interface RefillRequest {
+  /** Text to write, empty when the withdrawn send had none (file-only send). */
+  text: string;
+  /** Attachment chips to restore (empty for a host that restores text only). */
+  attachments: readonly MessageAttachment[];
+  /** Bumped per request so an equal text is still a fresh refill. */
+  token: number;
+}
+
+/** Host-specific behaviour of one session view. */
+export interface SessionViewOptions {
+  /**
+   * Which draft a **withdrawn interjection** hands its text back to — the
+   * composer this host actually renders.
+   *
+   * The same view backs the Nav's session module (`sessionDrafts`, keyed by
+   * `<employee>/<chat>`) and an employee direct chat (`chatDrafts`, keyed by the
+   * chat), and refilling the other one silently loses the text (see
+   * `refillWithdrawnText`). Required on purpose — a default would be wrong in one
+   * of the two hosts.
+   */
+  draftSurface: "session" | "chat";
+}
+
 const NO_JUMPS: JumpAvailability = { prev: false, next: false };
 
 /**
@@ -140,7 +166,12 @@ const NO_JUMPS: JumpAvailability = { prev: false, next: false };
  * source of truth and the live tail is dropped. There is intentionally no
  * system prompt, tool arguments or tool results.
  */
-export function useSessionView(employeeId: number, chatId: number) {
+export function useSessionView(
+  employeeId: number,
+  chatId: number,
+  options: SessionViewOptions,
+) {
+  const { draftSurface } = options;
   // `resyncEpoch` re-reads/re-binds the session after an unresumable remote
   // event-stream gap; the hosts read the employee/chat title themselves.
   const { resyncEpoch } = useApp();
@@ -160,15 +191,14 @@ export function useSessionView(employeeId: number, chatId: number) {
   const [pending, setPending] = useState<PendingSend[]>([]);
   const pendingSeqRef = useRef(0);
   /**
-   * Text a successful withdrawal hands back to the composer (one-shot).
+   * Text and attachments a successful withdrawal hands back to the composer
+   * (one-shot).
    *
    * It carries a `token` so that withdrawing the same text twice still triggers
    * exactly one refill, and it is only ever filled when the draft is empty (a
    * withdrawal must never swallow what the boss is typing).
    */
-  const [refill, setRefill] = useState<{ text: string; token: number } | null>(
-    null,
-  );
+  const [refill, setRefill] = useState<RefillRequest | null>(null);
   const refillSeqRef = useRef(0);
   /**
    * Bumped on every run end. A pending send that is older than this and still
@@ -505,6 +535,16 @@ export function useSessionView(employeeId: number, chatId: number) {
           runEndSeqRef.current += 1;
           break;
         case "turn_start":
+          scheduleRefresh();
+          break;
+        case "message_start":
+          // A user message is persisted *before* its turn starts streaming, so
+          // this is the earliest moment the projection can already carry it. It
+          // is what replaces a just-sent placeholder with the real row without
+          // waiting for `agent_start` — the difference between a status line that
+          // flashes and one that never appears (see `PendingSendRow`).
+          scheduleRefresh();
+          break;
         case "compaction_end":
           scheduleRefresh();
           break;
@@ -575,6 +615,7 @@ export function useSessionView(employeeId: number, chatId: number) {
               text: steer.text,
               mode: "steer",
               steerId: steer.id,
+              ...(steer.sendId !== undefined ? { sendId: steer.sendId } : {}),
               runEndSeq: runEndSeqRef.current,
             });
           }, prev),
@@ -634,19 +675,29 @@ export function useSessionView(employeeId: number, chatId: number) {
    * while the employee is busy. Without this row the boss would see nothing at
    * all after pressing send.
    *
-   * `mode: "queued"` on purpose: the text sits in the app queue, so it is
-   * guaranteed to run eventually — it must never be reported as unconfirmed
-   * (`reconcilePending` only does that for steer rows) and it offers no
-   * withdrawal. The row removes itself once the transcript carries the text.
+   * The row carries the `sendId` it was sent with, so it is the *same* row as the
+   * interjection this send produces when the employee is streaming: main echoes
+   * that id in `steer_state` and `applySteerStateRow` upgrades this placeholder
+   * instead of adding a second bubble (see `pending-sends.ts`).
+   *
+   * It starts out `mode: "queued"` — the plain "waiting for the agent" copy —
+   * which is also its final state for a send that really did just queue. Only a
+   * steered send is guaranteed to run eventually, so `reconcilePending` never
+   * reports an interjection as unconfirmed (a plain queued row is reported).
    */
   const addPendingChatSend = useCallback(
-    (text: string, attachments: AgentSessionAttachment[]): void => {
+    (
+      text: string,
+      attachments: AgentSessionAttachment[],
+      sendId: string,
+    ): void => {
       pendingSeqRef.current += 1;
       setPending((prev) =>
         addSentRow(prev, {
           id: pendingSeqRef.current,
           text,
           mode: "queued",
+          sendId,
           runEndSeq: runEndSeqRef.current,
           ...(attachments.length > 0 ? { attachments } : {}),
         }),
@@ -668,6 +719,45 @@ export function useSessionView(employeeId: number, chatId: number) {
       setPending((prev) => settleWithdrawFailure(prev, steerId, reason));
     },
     [],
+  );
+
+  /**
+   * Hand a withdrawn message back to the composer the boss is actually typing
+   * into — its text **and** its attachment chips.
+   *
+   * Both hosts render an **uncontrolled** textarea, so this travels as a one-shot
+   * `refill` value the composer applies imperatively (`card.setText` +
+   * `card.addAttachments`); writing the draft store alone would leave the visible
+   * textarea and the chip row empty. Which draft is "empty" is the host's: the
+   * same `useSessionView` backs the Nav's session module (`sessionDrafts`, keyed
+   * by `<employee>/<chat>`) and an employee direct chat (`chatDrafts`, keyed by
+   * the chat).
+   *
+   * Nothing is overwritten piecemeal: a draft that already has text keeps its
+   * text, one that already has chips keeps its chips. A chat send stores its
+   * attachments, so the chips come back with the text; the session module host
+   * restores the text only (it never stored a message to take them from).
+   */
+  const refillWithdrawnSend = useCallback(
+    (text: string, attachments: readonly MessageAttachment[]): void => {
+      const draft =
+        draftSurface === "chat"
+          ? appStore.chatDrafts[chatId]
+          : appStore.sessionDrafts[sessionKey(employeeId, chatId)];
+      const nextText = (draft?.text ?? "").length === 0 ? text : "";
+      const nextAttachments =
+        draftSurface === "chat" && (draft?.attachments.length ?? 0) === 0
+          ? attachments
+          : [];
+      if (nextText.length === 0 && nextAttachments.length === 0) return;
+      refillSeqRef.current += 1;
+      setRefill({
+        text: nextText,
+        attachments: nextAttachments,
+        token: refillSeqRef.current,
+      });
+    },
+    [chatId, draftSurface, employeeId],
   );
 
   /**
@@ -694,14 +784,7 @@ export function useSessionView(employeeId: number, chatId: number) {
           return;
         }
         setPending((prev) => removeRow(prev, item.id));
-        // Hand the text back to the composer, so it can be edited and sent again
-        // — but never overwrite a draft the boss is typing into.
-        const draftKey = sessionKey(employeeId, chatId);
-        const draft = appStore.sessionDrafts[draftKey];
-        if ((draft?.text ?? "").length === 0) {
-          refillSeqRef.current += 1;
-          setRefill({ text: item.text, token: refillSeqRef.current });
-        }
+        refillWithdrawnSend(item.text, result.attachments ?? []);
       } catch (err) {
         if (disposedRef.current) return;
         console.error(
@@ -711,7 +794,7 @@ export function useSessionView(employeeId: number, chatId: number) {
         showWithdrawFeedback(steerId, "unknown");
       }
     },
-    [chatId, employeeId, showWithdrawFeedback],
+    [chatId, employeeId, showWithdrawFeedback, refillWithdrawnSend],
   );
 
   /**

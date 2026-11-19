@@ -39,6 +39,23 @@ export interface SteerRecord {
    */
   effectiveText: string;
   phase: AgentSessionSteerPhase;
+  /**
+   * Correlation id of the send this interjection came from, when the sender
+   * named one (`DeliverOptions.sendId`). Echoed to the renderer so the row it
+   * already drew for that send becomes this interjection instead of a second
+   * one. Display bookkeeping only — never a withdrawal key.
+   */
+  sendId?: string;
+  /**
+   * The stored `messages` row this interjection carries, for a send that was
+   * **persisted as well as steered** (a chat send).
+   *
+   * A withdrawal then has to delete it: the model never received the text, so a
+   * row left behind would keep a message in the chat list, search and backups
+   * that the conversation never contained. Absent for a send that stores
+   * nothing (the agent-session view's composer).
+   */
+  messageId?: number;
 }
 
 /**
@@ -97,7 +114,12 @@ export function planQueueRevoke(
 
 /** Renderer-facing projection of one record. */
 export function steerStateOf(record: SteerRecord): AgentSessionSteerState {
-  return { id: record.id, text: record.text, phase: record.phase };
+  return {
+    id: record.id,
+    text: record.text,
+    phase: record.phase,
+    ...(record.sendId !== undefined ? { sendId: record.sendId } : {}),
+  };
 }
 
 /**

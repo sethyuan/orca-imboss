@@ -50,7 +50,7 @@ export function AgentSessionModule({
   /** Synchronous mirror of `linkBusy` (guards double clicks in one frame). */
   const linkBusyRef = useRef(false);
 
-  const view = useSessionView(employeeId, chatId);
+  const view = useSessionView(employeeId, chatId, { draftSurface: "session" });
   const {
     streaming,
     threadRef,

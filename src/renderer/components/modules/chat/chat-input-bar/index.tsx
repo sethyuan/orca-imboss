@@ -14,6 +14,8 @@ import {
   toPlainAttachment,
 } from "../../../../chat-draft";
 import { EMPTY_COMMENTS, toPlainComments } from "../../../../comment-draft";
+import { pendingFromStoredAttachment } from "../../../../attachment-pick";
+import type { RefillRequest } from "../../agent-session/agent-session-view/use-session-view";
 import { newImageAnnotation } from "../../../../image-annotation-draft";
 import { prepareAnnotatedSend } from "../../../../image-annotation-send";
 import type { DraftAnnotationProps } from "../attachment-draft";
@@ -105,6 +107,12 @@ export interface ChatInputBarProps {
    * pick). Lets the chat module refresh its tag candidates and paged list.
    */
   onTagsApplied?: (chatId: number) => void;
+  /**
+   * A withdrawn message handed back to the composer: its text, and the chips it
+   * carried (same one-shot `token` contract as the agent-session composer's
+   * `refill`). `token` makes withdrawing equal text twice a fresh request.
+   */
+  refill?: RefillRequest | null;
 }
 
 /**
@@ -131,6 +139,7 @@ export function ChatInputBar({
   onSend,
   onTagsApplied,
   mentions = true,
+  refill = null,
 }: ChatInputBarProps): React.JSX.Element {
   // The draft is per chat and lives on appStore so it survives the chat module
   // being unmounted on a module switch.
@@ -172,6 +181,32 @@ export function ChatInputBar({
   );
 
   const cardRef = useRef<ComposerHandle>(null);
+
+  /**
+   * A withdrawn message comes back here — its text and its attachment chips. The
+   * textarea is uncontrolled (its DOM value is the source of truth), so the text
+   * is written imperatively and mirrored into the draft, exactly like a paste
+   * would; the chips are rebuilt from the metadata main handed back (the stored
+   * message is already deleted, so this is their only remaining source). Done in
+   * an effect so the writes happen after React commits, and guarded by `token` so
+   * a re-render never repeats them.
+   */
+  const refillTokenRef = useRef(0);
+  useEffect(() => {
+    if (!refill || refill.token === refillTokenRef.current) return;
+    refillTokenRef.current = refill.token;
+    if (refill.text.length > 0) {
+      cardRef.current?.setText(refill.text, refill.text.length);
+    }
+    if (refill.attachments.length > 0) {
+      cardRef.current?.addAttachments(
+        refill.attachments.map((attachment) =>
+          pendingFromStoredAttachment(attachment),
+        ),
+      );
+    }
+  }, [refill]);
+
   // Common projects: loaded when the attach menu opens and rendered as flat
   // menu items alongside File / Folder / Conversation.
   const [projectsMenuOpen, setProjectsMenuOpen] = useState(false);

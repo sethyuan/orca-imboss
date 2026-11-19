@@ -142,6 +142,57 @@ export function listMessagesAfter(
   ).map(toMessage);
 }
 
+/**
+ * Delete one stored message, as if it had never been sent.
+ *
+ * Used by a **withdrawal of a chat send**: the boss's text was stored, then
+ * handed to a live run as a steering message, then taken back out of Pi's queue
+ * before the model could see it. Leaving the row would leave the chat list, the
+ * full-text search and every backup holding a message the conversation never
+ * contained, so the withdrawal is only honest if the row goes too (see
+ * `SteerRecord.messageId`).
+ *
+ * `last_message_at` is recomputed because the list order and "unanswered"
+ * bookkeeping read it; a chat left without messages falls back to its creation
+ * time, which is exactly what a fresh chat carries (`NOT NULL DEFAULT 0` would
+ * sort it behind every other chat).
+ */
+export function deleteMessage(id: number): boolean {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT chat_id FROM messages WHERE id = ?")
+    .get(id) as { chat_id: number } | undefined;
+  if (!row) return false;
+  const chatId = row.chat_id;
+  db.transaction(() => {
+    db.prepare("DELETE FROM messages WHERE id = ?").run(id);
+    db.prepare(
+      "UPDATE chats SET last_message_at = COALESCE(" +
+        "(SELECT MAX(created_at) FROM messages WHERE chat_id = ?), created_at" +
+        ") WHERE id = ?",
+    ).run(chatId, chatId);
+  })();
+
+  const chat = getChat(chatId);
+  const changed: MessageChangedPayload = {
+    chatId,
+    deleted: true,
+    // Mirror `appendMessage`'s payload so an existing listener needs no branch:
+    // a non-silent, non-root payload would beep / bump, and nothing arrived.
+    senderEmployeeId: null,
+    silent: true,
+    root: chat?.fromChatId == null,
+    muted: chat?.muted ?? false,
+  };
+  sendToRenderer("messages:changed", changed);
+  // A task group's room is built from its messages, so a deleted row can remove
+  // a bubble from it (same rule as the append path).
+  if (chat !== null && chat.fromChatId !== null) {
+    notifyWorkStatusChanged("message");
+  }
+  return true;
+}
+
 /** Fetch a single message by its global row id, or null when absent. */
 export function getMessageById(id: number): Message | null {
   const row = getDB().prepare("SELECT * FROM messages WHERE id = ?").get(id) as

@@ -524,12 +524,20 @@ const api = {
      * by the conversation's own agent. `comments` annotate earlier messages and
      * travel inside the same prompt (`[Comments]` block); a comment-only send
      * (no text, no files) is legitimate.
+     *
+     * `sendId` is this window's own correlation id for the send (see
+     * `AgentSessionSteerState.sendId`): it comes back in the `steer_state` of the
+     * interjection this send produced, so a thread that renders the session
+     * projection can show **one** row for it. `chat:send` may steer a live run
+     * and also stores the message, so without it the row the view drew itself and
+     * the interjection's row are two rows.
      */
     send: (
       chatId: number,
       content: string,
       attachments?: MessageAttachment[],
       comments?: MessageComment[],
+      sendId?: string,
     ) =>
       ipcRenderer.invoke(
         "chat:send",
@@ -537,6 +545,7 @@ const api = {
         content,
         attachments,
         comments,
+        sendId,
       ) as Promise<Message>,
   },
 

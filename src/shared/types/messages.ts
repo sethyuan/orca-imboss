@@ -264,13 +264,22 @@ export interface Message {
 
 /**
  * Payload of the `messages:changed` broadcast (`src/main/db/messages.ts`): one
- * message was appended, or an image message was updated. It carries just enough
- * for the renderer to refresh that chat's summary and gate the notification
- * beep without another IPC read.
+ * message was appended, an image message was updated, or a stored message was
+ * **withdrawn**. It carries just enough for the renderer to refresh that chat's
+ * summary and gate the notification beep without another IPC read.
  */
 export interface MessageChangedPayload {
   chatId: number;
   senderEmployeeId: number | null;
+  /**
+   * The message was deleted, not written.
+   *
+   * A withdrawal takes back a message the model never received (see
+   * `SteerRecord.messageId`), so every reader must re-read — list preview, search
+   * and an open thread all have to lose the row — while the *append* side
+   * effects (beep, unread bump) must not run: nothing arrived.
+   */
+  deleted?: true;
   /**
    * Kind of the message. Optional so a payload written before it was added
    * still type-checks; the beep rule treats two kinds specially (`progress`
