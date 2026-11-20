@@ -120,10 +120,7 @@ export const LAYOUT = {
      * off the floor (a taller one cannot be both), and it still holds eight rows.
      */
     height: 4.9,
-    // A hair *above* the wall's mid-height: the screen face sits ~0.2 in front of the
-    // paint, and in an isometric projection a nearer point draws lower on screen — so a
-    // geometrically centred screen reads a couple of pixels low, and this compensates.
-    y: ROOM.wallHeight / 2 + 0.25,
+    y: ROOM.wallHeight / 2 + 0.15,
     z: -ROOM.depth / 2 + ROOM.shellThickness + 0.02,
   },
   /**
