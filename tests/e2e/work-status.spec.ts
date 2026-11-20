@@ -348,6 +348,102 @@ test("several groups working at once are separate rooms", async () => {
   );
 });
 
+/**
+ * The board's room order, read off the screen-reader list.
+ *
+ * Every room is one `<li>` there in both modes (the 3D scene is pixels, and the card
+ * board is the fallback), so this is the one mode-agnostic way to read the order —
+ * which is what the board promises to keep stable.
+ */
+async function shownOrder(window: Page): Promise<string[]> {
+  const items = await module(window).locator(".imb-ws-sr li").allTextContents();
+  return items.map((text) => (text.split(" \u2014 ")[0] ?? "").trim());
+}
+
+/** Wait until the board shows exactly `titles`, in that order. */
+async function expectShownOrder(window: Page, titles: string[]): Promise<void> {
+  await expect
+    .poll(() => shownOrder(window), { timeout: 15_000 })
+    .toEqual(titles);
+}
+
+test("the board keeps the order the rooms appeared in", async () => {
+  const session = app!;
+  const anna = await createEmployee(session.window, "Anna", "Architect");
+  const rootChatId = await createChat(session.window, "Boss chat");
+  // Three groups, created oldest first — `chats.id` is the creation order.
+  const seed = (title: string) =>
+    seedTaskGroup({
+      dataRoot: session.dataRoot,
+      rootChatId,
+      title,
+      participants: [0, anna],
+      progressTitle: `${title} progress`,
+      steps: [
+        { name: "Anna", task: "start", status: "busy", employeeId: anna },
+      ],
+    }).chatId;
+  const oldest = seed("Oldest group");
+  const middle = seed("Middle group");
+  const newest = seed("Newest group");
+  expect(oldest).toBeLessThan(middle);
+  expect(middle).toBeLessThan(newest);
+
+  await openBoard(session.window);
+  await expect(emptyState(session.window)).toBeVisible();
+
+  // The two *newer* groups start working first, so they appear first…
+  await startEmployeeRun(session.window, middle, anna);
+  await expectShownOrder(session.window, ["Middle group"]);
+  await startEmployeeRun(session.window, newest, anna);
+  await expectShownOrder(session.window, ["Middle group", "Newest group"]);
+
+  // …and the oldest group, which only starts working now, is appended at the end
+  // instead of jumping in front of them (its chat id is the smallest).
+  await startEmployeeRun(session.window, oldest, anna);
+  await expectShownOrder(session.window, [
+    "Middle group",
+    "Newest group",
+    "Oldest group",
+  ]);
+
+  // New activity inside an existing room must not move anything: a notifying message
+  // in the *first* room used to bump it to the front (it sorts as "most active").
+  await freshMessage(session, {
+    chatId: middle,
+    employeeId: anna,
+    content: "the migration is in, keep going",
+    notify: [0],
+  });
+  await expect(
+    module(session.window)
+      .locator(".imb-ws-bubble-message, .imb-ws-card")
+      .filter({ hasText: "the migration is in, keep going" }),
+  ).toHaveCount(1, { timeout: 10_000 });
+  expect(await shownOrder(session.window)).toEqual([
+    "Middle group",
+    "Newest group",
+    "Oldest group",
+  ]);
+
+  // A room that just finished also keeps its place (removal is deferred, and it comes
+  // back as a *new* room, at the end, if it starts working again).
+  await settleRun(session.window, anna, oldest);
+  await expectRoomCount(session.window, 2);
+  await expectShownOrder(session.window, [
+    "Middle group",
+    "Newest group",
+    "Oldest group",
+  ]);
+  await startEmployeeRun(session.window, oldest, anna);
+  await expectRoomCount(session.window, 3);
+  await expectShownOrder(session.window, [
+    "Middle group",
+    "Newest group",
+    "Oldest group",
+  ]);
+});
+
 test("without a usable WebGL context the board degrades to cards", async () => {
   const session = app!;
   const rooms = await seedRooms(session.window, session.dataRoot);

@@ -3,6 +3,7 @@ import type { WorkRoom, WorkRoomsPayload } from "@shared/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { type LingeringRoom, mergeRoomsWithLinger } from "./linger";
+import { orderByFirstSeen, type RoomOrderState } from "./room-order";
 
 /**
  * The module's data: one snapshot of every in-progress task group.
@@ -18,7 +19,8 @@ import { type LingeringRoom, mergeRoomsWithLinger } from "./linger";
  *
  * The snapshot itself only lists groups where someone works *now*. What the board
  * shows is that list plus the rooms still inside their `ROOM_LINGER_MS` window
- * (see `linger.ts`), so a group that just finished keeps its room for a while.
+ * (see `linger.ts`), so a group that just finished keeps its room for a while — in
+ * the order the rooms first appeared (see `room-order.ts`).
  */
 
 export interface WorkRoomsState {
@@ -50,6 +52,7 @@ export function useWorkRooms(active: boolean): WorkRoomsResult {
   const snapshotRef = useRef<WorkRoom[]>([]);
   const truncatedRef = useRef(false);
   const lingeringRef = useRef<Map<number, LingeringRoom>>(new Map());
+  const orderRef = useRef<RoomOrderState | undefined>(undefined);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const liveAtRef = useRef(0);
 
@@ -69,10 +72,12 @@ export function useWorkRooms(active: boolean): WorkRoomsResult {
       ROOM_LINGER_MS,
       liveAtRef.current === 0 ? now : liveAtRef.current,
     );
+    const ordered = orderByFirstSeen(orderRef.current, merged.rooms);
     lingeringRef.current = merged.lingering;
+    orderRef.current = ordered.order;
     setState((previous) => ({
       ...previous,
-      rooms: merged.rooms,
+      rooms: ordered.rooms,
       truncated: truncatedRef.current,
     }));
     if (merged.nextExpiryInMs !== null) {

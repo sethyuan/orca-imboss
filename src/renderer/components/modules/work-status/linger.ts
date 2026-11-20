@@ -1,3 +1,4 @@
+import { MAX_LINGERING_ROOMS } from "../../../../shared/constants/work-status";
 import type { WorkRoom } from "../../../../shared/types/work_status";
 
 /**
@@ -16,7 +17,12 @@ import type { WorkRoom } from "../../../../shared/types/work_status";
  * - a lingering room is shown with every member **not** running (nobody works in
  *   it any more — the bubbles and rest animations must not claim otherwise);
  * - once the window is over the room is dropped, which is also what resets the
- *   bubble baseline: a group that comes back later is a fresh first presentation.
+ *   bubble baseline: a group that comes back later is a fresh first presentation;
+ * - at most `MAX_LINGERING_ROOMS` rooms linger at once (the window is half an hour),
+ *   and the ones that ended longest ago are the ones dropped.
+ *
+ * This function decides *which* rooms are on the board, never their order: that is
+ * `room-order.ts`, so a merge cannot move a room.
  */
 
 export interface LingeringRoom {
@@ -28,7 +34,10 @@ export interface LingeringRoom {
 }
 
 export interface LingerMerge {
-  /** What the board shows: running rooms first, then lingering ones. */
+  /**
+   * What the board holds: running rooms first, then lingering ones. Order is not
+   * the board's order — `room-order.ts` decides that.
+   */
   rooms: WorkRoom[];
   /** State to carry into the next merge. */
   lingering: Map<number, LingeringRoom>;
@@ -58,7 +67,7 @@ export function mergeRoomsWithLinger(
    * When the snapshot used here was actually read. Normally `now`; after the module
    * was hidden it stays at the last read *before* hiding, so the time spent hidden
    * counts against the window — a room whose window already elapsed while the user
-   * was elsewhere is dropped instead of getting a fresh 30 s.
+   * was elsewhere is dropped instead of getting a fresh one.
    */
   snapshotAt: number = now,
 ): LingerMerge {
@@ -70,9 +79,7 @@ export function mergeRoomsWithLinger(
     next.set(room.chatId, { room, lastRunningAt: snapshotAt, running: true });
   }
 
-  const rooms: WorkRoom[] = [...incoming];
-  let nextExpiryInMs: number | null = null;
-
+  const stale: LingeringRoom[] = [];
   for (const [chatId, entry] of previous) {
     if (running.has(chatId)) continue;
     // Not in the snapshot any more: nobody works here. The window is measured from
@@ -82,15 +89,26 @@ export function mergeRoomsWithLinger(
     const ended = entry.running
       ? { room: entry.room, lastRunningAt: snapshotAt, running: false }
       : entry;
-    const age = now - ended.lastRunningAt;
-    if (age >= lingerMs) continue;
-    rooms.push(staleCopy(ended.room));
-    next.set(chatId, ended);
-    const remaining = lingerMs - age;
+    if (now - ended.lastRunningAt >= lingerMs) continue;
+    stale.push(ended);
+  }
+  // The window is long enough for finished groups to pile up, so the lingering set is
+  // capped: the ones idle longest go first (`chatId` only to make ties stable).
+  stale.sort(
+    (a, b) =>
+      b.lastRunningAt - a.lastRunningAt || a.room.chatId - b.room.chatId,
+  );
+  const kept = stale.slice(0, MAX_LINGERING_ROOMS);
+
+  const rooms: WorkRoom[] = [...incoming];
+  let nextExpiryInMs: number | null = null;
+  for (const entry of kept) {
+    rooms.push(staleCopy(entry.room));
+    next.set(entry.room.chatId, entry);
+    const remaining = lingerMs - (now - entry.lastRunningAt);
     nextExpiryInMs =
       nextExpiryInMs === null ? remaining : Math.min(nextExpiryInMs, remaining);
   }
 
-  rooms.sort((a, b) => b.lastActiveAt - a.lastActiveAt || b.chatId - a.chatId);
   return { rooms, lingering: next, nextExpiryInMs };
 }

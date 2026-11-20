@@ -8,13 +8,28 @@
  */
 
 /**
- * Rooms returned in one snapshot (most recently active first).
+ * Rooms returned in one snapshot.
  *
  * Twelve, not twenty-four: the board is read at a glance, and half the rooms is
  * half the geometry the GPU has to hold (the bird's-eye view is static on top of
  * that, see `stage.ts`).
+ *
+ * The snapshot is creation-ordered (a room's place on the board is fixed once it
+ * appeared, see `room-order.ts`), and the cap keeps the **newest** groups: a group
+ * that just started working must never be the one that does not fit.
  */
 export const MAX_WORK_ROOMS = 12;
+
+/**
+ * Rooms the renderer keeps on the board after their work ended (`linger.ts`).
+ *
+ * The linger window is long (30 min, see `ROOM_LINGER_MS`), so without a cap a busy
+ * half hour would pile up every task group that ever finished — each one is real
+ * geometry, a screen texture and a name plate. Twelve keeps the worst case at
+ * `MAX_WORK_ROOMS + 12` = the 24 rooms the board used to be sized for; beyond it the
+ * rooms that ended longest ago are dropped (they are the least likely to be missed).
+ */
+export const MAX_LINGERING_ROOMS = 12;
 
 /** Employees drawn in one room (the meeting table seats this many). */
 export const MAX_ROOM_MEMBERS = 20;
@@ -45,5 +60,11 @@ export const MAX_ROOM_BUBBLES = 20;
  * *removal* of the room, so a group that just finished does not vanish the instant
  * its run settles. A run that starts inside the window keeps the room (and starts
  * a fresh window when it ends again).
+ *
+ * Half an hour, not half a minute: the rooms are laid out in the order they first
+ * appeared (`room-order.ts`), so a room vanishing moves every room behind it. A
+ * group the boss only glances at ten minutes later must still be where it was, and
+ * a returned room re-appends at the end — which is only bearable when the board is
+ * not reshuffled every few minutes.
  */
-export const ROOM_LINGER_MS = 30_000;
+export const ROOM_LINGER_MS = 30 * 60_000;

@@ -3,18 +3,25 @@ import {
   type LingeringRoom,
   mergeRoomsWithLinger,
 } from "../../src/renderer/components/modules/work-status/linger";
+import {
+  MAX_LINGERING_ROOMS,
+  ROOM_LINGER_MS,
+} from "../../src/shared/constants/work-status";
 import type { WorkRoom } from "../../src/shared/types/work_status";
 
 /**
  * The linger rule, asserted on the pure merge function: a room stays for
  * `ROOM_LINGER_MS` after its last run ended, then disappears.
  *
- * Pure and clock-injected so the 30 s window costs no wall-clock time here; the
+ * Pure and clock-injected so the half-hour window costs no wall-clock time here; the
  * E2E only proves the visible consequence (the room does *not* vanish the moment
  * the run settles).
+ *
+ * The merge decides *which* rooms are on the board, never their order — the board's
+ * order is `room-order.spec.ts`.
  */
 
-const LINGER = 30_000;
+const LINGER = ROOM_LINGER_MS;
 
 function room(chatId: number, lastActiveAt = 100): WorkRoom {
   return {
@@ -91,14 +98,15 @@ test("a run inside the window keeps the room, and its own end restarts the windo
   expect(merge(ended.lingering, [], 25_000 + LINGER).rooms).toHaveLength(0);
 });
 
-test("several lingering rooms expire on their own windows, running rooms first", () => {
+test("several lingering rooms expire on their own windows", () => {
+  // Rooms keep the order they were handed in; the merge does not re-sort them.
   const seed = merge(new Map(), [room(7, 500), room(9, 900)], 0);
-  expect(seed.rooms.map((entry) => entry.chatId)).toEqual([9, 7]);
+  expect(seed.rooms.map((entry) => entry.chatId)).toEqual([7, 9]);
   expect(seed.nextExpiryInMs).toBeNull();
 
-  // Both stop at t=1s: two windows, both 30 s long.
+  // Both stop at t=1s: two windows, both a full one.
   const ended = merge(seed.lingering, [], 1_000);
-  expect(ended.rooms.map((entry) => entry.chatId)).toEqual([9, 7]);
+  expect(ended.rooms.map((entry) => entry.chatId)).toEqual([7, 9]);
   expect(ended.nextExpiryInMs).toBe(LINGER);
 
   // Room 9 works again at t=10s; room 7 (stopped at t=1s) keeps its own countdown.
@@ -109,25 +117,51 @@ test("several lingering rooms expire on their own windows, running rooms first",
   expect(mixed.rooms[1]!.members[0]!.running).toBe(false);
   expect(mixed.nextExpiryInMs).toBe(LINGER - 9_000);
 
-  // At t=31s room 7 is dropped; room 9 stopped at that moment, so *its* window
+  // A window later room 7 is dropped; room 9 stopped at that moment, so *its* window
   // starts over instead of inheriting the old one.
-  const partial = merge(mixed.lingering, [], 31_000);
+  const partial = merge(mixed.lingering, [], 10_000 + LINGER - 1);
   expect(partial.rooms.map((entry) => entry.chatId)).toEqual([9]);
   expect(partial.rooms[0]!.members[0]!.running).toBe(false);
   expect(partial.nextExpiryInMs).toBe(LINGER);
 });
 
+test("only a bounded number of rooms lingers, the ones idle longest go first", () => {
+  const total = MAX_LINGERING_ROOMS + 3;
+  // Each group works for a moment and then stops, one after the other, so every
+  // room's window starts at a different time.
+  let state = new Map<number, LingeringRoom>();
+  for (let index = 0; index < total; index += 1) {
+    const started = merge(state, [room(index + 1)], 1_000 + index * 100);
+    state = merge(started.lingering, [], 2_000 + index * 100).lingering;
+  }
+
+  // The cap is what the board holds, not a post-filter: the three rooms that stopped
+  // first were already dropped when the later ones finished.
+  expect(state.size).toBe(MAX_LINGERING_ROOMS);
+  const kept = merge(state, [], 2_000 + (total - 1) * 100 + 10);
+  expect(kept.rooms).toHaveLength(MAX_LINGERING_ROOMS);
+  expect(
+    [...kept.rooms.map((entry) => entry.chatId)].sort((a, b) => a - b),
+  ).toEqual(
+    Array.from({ length: MAX_LINGERING_ROOMS }, (_, index) => index + 4),
+  );
+  // A dropped room is gone for good: a later merge cannot bring it back.
+  expect(
+    merge(kept.lingering, [], 2_000 + (total - 1) * 100 + 20).rooms,
+  ).toHaveLength(MAX_LINGERING_ROOMS);
+});
+
 test("time spent with the module hidden counts against the window", () => {
   const live = merge(new Map(), [room(7)], 0);
 
-  // The user leaves the board; the run settles; they come back at t=60s. The
+  // The user leaves the board; the run settles; they come back a window later. The
   // snapshot read on return no longer lists the room, and the merge is told that
   // snapshot is from t=0, so the window elapsed while they were away: the room is
-  // dropped instead of being granted a fresh 30 s.
-  const back = mergeRoomsWithLinger(live.lingering, [], 60_000, LINGER, 0);
+  // dropped instead of being granted a fresh one.
+  const back = mergeRoomsWithLinger(live.lingering, [], LINGER, LINGER, 0);
   expect(back.rooms).toEqual([]);
 
-  // Away for only 5s: the window keeps running, 25s left.
+  // Away for only 5s: the window keeps running, 5s of it gone.
   const soon = mergeRoomsWithLinger(live.lingering, [], 5_000, LINGER, 0);
   expect(soon.rooms).toHaveLength(1);
   expect(soon.nextExpiryInMs).toBe(LINGER - 5_000);

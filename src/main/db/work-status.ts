@@ -82,12 +82,17 @@ function toRoomChatRow(row: RoomChatRaw): RoomChatRow {
 }
 
 /**
- * Task groups that may be in progress, most recently active first.
+ * Task groups that may be in progress, newest-created first.
  *
  * - `candidateIds`: groups with an unfinished progress card, plus every chat
  *   with a live employee run in it;
  * - `parentIds`: root chats with a live run — their groups are candidates too,
  *   because the assistant's own run happens in the root chat, not in the group.
+ *
+ * Newest first because the row limit must drop the *oldest* groups (the board keeps
+ * its rooms in first-appearance order and the snapshot is that order's baseline, see
+ * `main/work-status.ts`); `id` is the creation order — `chats.id` is AUTOINCREMENT, so
+ * it is monotonic, while `created_at` only has second precision.
  */
 export function listRoomChatCandidates(
   candidateIds: readonly number[],
@@ -126,18 +131,14 @@ export function listRoomChatCandidates(
         "SELECT id, title, participants, last_message_at, created_at, from_chat_id " +
           "FROM chats WHERE from_chat_id IS NOT NULL " +
           `AND (${conditions.join(" OR ")}) ` +
-          "ORDER BY last_message_at DESC, id DESC LIMIT ?",
+          "ORDER BY id DESC LIMIT ?",
       )
       .all(...params, ROW_LIMIT) as RoomChatRaw[];
     for (const row of fetched) rows.set(row.id, row);
   }
 
   return [...rows.values()]
-    .sort(
-      (a, b) =>
-        (b.last_message_at || b.created_at) -
-          (a.last_message_at || a.created_at) || b.id - a.id,
-    )
+    .sort((a, b) => b.id - a.id)
     .slice(0, ROW_LIMIT)
     .map(toRoomChatRow);
 }

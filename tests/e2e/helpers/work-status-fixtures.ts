@@ -84,7 +84,8 @@ export function appendNotifyMessage(
         JSON.stringify(input.notify),
         nowSeconds(),
       );
-    // The chat's own activity timestamp drives the room order.
+    // Keep the chat's own activity timestamp honest (the room reports it as
+    // `lastActiveAt`); the board's order no longer depends on it.
     db.prepare("UPDATE chats SET last_message_at = ? WHERE id = ?").run(
       nowSeconds(),
       input.chatId,

@@ -54,8 +54,12 @@ export interface WorkRoom {
   chatId: number;
   title: string;
   /**
-   * Ordering key: the group's latest observed activity — its last message or
-   * the moment its most recent run started, whichever is later.
+   * The group's latest observed activity — its last message or the moment its most
+   * recent run started, whichever is later.
+   *
+   * Reported, not ordered by: the board keeps a room where it first appeared
+   * (`room-order.ts`), because an activity-driven order makes rooms jump while the
+   * boss is looking at them.
    */
   lastActiveAt: number;
   members: WorkRoomMember[];
@@ -66,7 +70,10 @@ export interface WorkRoom {
 
 /** Payload of `workStatus:rooms`. */
 export interface WorkRoomsPayload {
-  /** Rooms in the boss's reading order: most recently active first. */
+  /**
+   * Rooms by creation order, oldest first: the baseline the renderer's
+   * first-appearance order starts from (a fresh window has no history to remember).
+   */
   rooms: WorkRoom[];
   /** More in-progress task groups exist than were returned. */
   truncated: boolean;

@@ -206,8 +206,9 @@ export function readWorkRooms(
       assistantRunning,
       employees,
     );
-    // "Recently active" is the later of the last message and the latest bubble
-    // on the wall — a room that just woke everyone must not sort as stale.
+    // "Recently active" is still reported, but it no longer decides the order: the
+    // board keeps each room where it first appeared (`room-order.ts`), and the snapshot
+    // is creation-ordered so a fresh window starts out old-to-new.
     const lastBubbleAt = bubbles.reduce(
       (latest, bubble) => Math.max(latest, bubble.at),
       0,
@@ -230,9 +231,14 @@ export function readWorkRooms(
     });
   }
 
-  rooms.sort((a, b) => b.lastActiveAt - a.lastActiveAt || b.chatId - a.chatId);
+  // Oldest-created first, so this order is the baseline the renderer's
+  // first-appearance order starts from. Sorting newest-first before the slice makes the
+  // cap drop the oldest groups (a group that just started working always fits), and the
+  // `reverse()` puts the kept ones back into that baseline order.
+  rooms.sort((a, b) => b.chatId - a.chatId);
+  const truncated = rooms.length > MAX_WORK_ROOMS;
   return {
-    rooms: rooms.slice(0, MAX_WORK_ROOMS),
-    truncated: rooms.length > MAX_WORK_ROOMS,
+    rooms: rooms.slice(0, MAX_WORK_ROOMS).reverse(),
+    truncated,
   };
 }
