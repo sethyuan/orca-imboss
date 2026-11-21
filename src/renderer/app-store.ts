@@ -631,11 +631,29 @@ export const appStore = proxy({
   },
   /** Persist a new sidebar order (drag-and-drop) and apply the result. */
   async reorderMiniApps(ids: string[]): Promise<void> {
+    const previous = appStore.data.miniapps.items;
+    // Apply the new order before the round trip: dnd-kit clears the dragged
+    // tile's transform the moment the pointer is released, so waiting for main
+    // would first snap it back to its old slot and only then move it — the tile
+    // visibly slides in a second time from where it was dragged from.
+    const byId = new Map(previous.map((app) => [app.id, app]));
+    const next: MiniApp[] = [];
+    for (const id of ids) {
+      const app = byId.get(id);
+      if (app === undefined) continue;
+      next.push(app);
+      byId.delete(id);
+    }
+    // Anything the caller left out keeps its relative place at the end, so the
+    // view can never lose an app between two store updates.
+    next.push(...byId.values());
+    appStore.data.miniapps.items = next;
     try {
       appStore.data.miniapps.items = await imb.miniapps.setOrder(ids);
       appStore.data.miniapps.loaded = true;
       appStore.data.miniapps.error = null;
     } catch (err) {
+      appStore.data.miniapps.items = previous;
       console.error(
         "[data:miniapps:reorder]",
         err instanceof Error ? err.message : err,

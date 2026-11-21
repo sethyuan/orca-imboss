@@ -166,8 +166,6 @@
    auto-scroll would chase it (the list appears to grow and scrolls away). The
    4px clip margin keeps focus rings from being cut off. */
 .imb-nav-items.imb-nav-sortable-list {
-  overflow: clip;
-  overflow-clip-margin: 4px;
 }
 
 /* Sortable rail row. The wrapper owns the dnd-kit transform so `Tooltip`'s ref
@@ -195,7 +193,8 @@
 
 /* Mini-app and opened-session groups are siblings inside `.imb-scroll`; when both
    exist they get the same space-only separation. */
-.imb-nav-sortable-list + .imb-nav-sortable-list {
+.imb-nav-sortable-list + .imb-nav-sortable-list,
+.imb-nav-appgroup + .imb-nav-sortable-list {
   margin-top: var(--imb-space-3);
 }
 
@@ -203,4 +202,104 @@
   /* The spacer above already pins this group to the bottom; no rule, no inset. */
   margin-top: 0;
   padding-top: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Collapsed mini-app group (one tile + a floating grid)
+ *
+ * The tile is an ordinary rail row. The grid is a portaled menu surface (the
+ * rail clips its own overflow) whose columns come from the app count, and it is
+ * the only rail surface that can be interactive: dragging a cell is how the
+ * order is changed once the rows are gone.
+ * ------------------------------------------------------------------------- */
+
+/* The tile keeps the "open" look while the grid is up, even with the pointer
+   already inside the grid. */
+.imb-nav-item.imb-is-open {
+  background: var(--imb-fg-soft);
+  color: var(--imb-fg);
+}
+
+.imb-nav-appgrid {
+  position: fixed;
+  z-index: 60;
+  /* The panel's own box is sized by the column count and never scrolls: a cell
+     being dragged cannot resize it or put a scrollbar on it. Whatever can
+     overflow lives one level in (`.imb-nav-appgrid-scroll`). */
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--imb-motion-fast) var(--imb-ease-standard);
+}
+
+.imb-nav-appgrid.imb-nav-appgrid-open {
+  opacity: 1;
+}
+
+/* A long list of apps scrolls here, never sideways. */
+.imb-nav-appgrid-scroll {
+  padding: var(--imb-space-2);
+  max-height: calc(100vh - 2 * var(--imb-space-4));
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.imb-nav-appgrid-cells {
+  /* The cell size lives here and nowhere else; only the column count is inline. */
+  --imb-nav-appcell: 36px;
+  display: grid;
+  gap: var(--imb-space-1);
+  /* `clip` keeps a dragged cell's translate out of the panel's scrollable area —
+     the same reason the rail's sortable lists clip: with a visible overflow the
+     drag would grow the panel and spawn scrollbars. Dragged content is therefore
+     cut at the grid's edge; the 4px margin keeps focus rings whole. */
+  overflow: clip;
+  overflow-clip-margin: 4px;
+}
+
+.imb-nav-appcell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--imb-nav-appcell);
+  height: var(--imb-nav-appcell);
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--imb-radius-control);
+  color: var(--imb-fg);
+  cursor: pointer;
+  overflow: hidden;
+  transition: background var(--imb-motion-fast) var(--imb-ease-standard);
+}
+
+.imb-nav-appcell:hover {
+  background: var(--imb-fg-soft);
+}
+
+.imb-nav-appcell.imb-is-active {
+  background: var(--imb-sel-bg);
+}
+
+.imb-nav-appcell:focus-visible {
+  outline: none;
+  box-shadow: var(--imb-focus-ring);
+}
+
+/* Dragging is only wired while the grid is pinned (`imb-is-sortable`). */
+.imb-nav-appgrid.imb-is-sortable .imb-nav-appcell {
+  cursor: grab;
+}
+
+.imb-nav-appcell.imb-is-dragging {
+  z-index: 1;
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.imb-nav-appcell-icon {
+  width: var(--imb-icon);
+  height: var(--imb-icon);
+  flex: none;
+  border-radius: 5px;
+  object-fit: cover;
 }

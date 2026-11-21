@@ -44,6 +44,11 @@ import {
   IconStats,
 } from "../icons";
 import { Tooltip } from "../tooltip";
+import {
+  MINI_APP_INLINE_MAX,
+  MiniAppGrid,
+  type NavMiniApp,
+} from "./mini-app-grid";
 import "./index.css";
 
 interface NavItem {
@@ -139,13 +144,6 @@ interface NavChat {
   readonly directEmployeeId: number | null;
 }
 
-/** Read-only shape of a registered mini app (valtio snapshots are readonly). */
-interface NavMiniApp {
-  readonly id: string;
-  readonly name: string;
-  readonly iconUrl: string | null;
-}
-
 /**
  * Shared sortable-row wiring. Returns props for a row wrapper (which owns the
  * measured/transformed node) and the pointer listeners for the inner button
@@ -191,6 +189,9 @@ export function Nav(): React.JSX.Element {
   // `.pi/facts/grpc-remote-backend-research.md` §6.4 for the alternatives we
   // deliberately did not build).
   const miniApps = appStore.remote.enabled ? [] : data.miniapps.items;
+  // Past the inline budget the whole group becomes one tile with a grid: rows
+  // would otherwise push the opened chats/sessions out of the rail.
+  const miniAppsCollapsed = miniApps.length > MINI_APP_INLINE_MAX;
   const miniAppKeys = miniApps.map((app) => `miniapp:${app.id}`);
   const openedKeys = openedItems.map(openedItemKey);
 
@@ -230,30 +231,42 @@ export function Nav(): React.JSX.Element {
           ))}
         </div>
         <div className="imb-scroll">
-          {miniApps.length > 0 && (
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleMiniAppDragEnd}
-            >
-              <SortableContext
-                items={miniAppKeys}
-                strategy={verticalListSortingStrategy}
+          {miniAppsCollapsed ? (
+            <div className="imb-nav-items imb-nav-appgroup">
+              <MiniAppGrid
+                apps={miniApps}
+                moduleActive={module === "miniapp"}
+                activeId={activeMiniAppId}
+                onOpen={(id) => appStore.openMiniApp(id)}
+                onReorder={(ids) => void appStore.reorderMiniApps(ids)}
+              />
+            </div>
+          ) : (
+            miniApps.length > 0 && (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleMiniAppDragEnd}
               >
-                <div className="imb-nav-items imb-nav-sortable-list">
-                  {miniApps.map((app) => (
-                    <NavMiniAppButton
-                      key={app.id}
-                      app={app}
-                      active={
-                        module === "miniapp" && activeMiniAppId === app.id
-                      }
-                      onClick={() => appStore.openMiniApp(app.id)}
-                    />
-                  ))}
-                </div>
-              </SortableContext>
-            </DndContext>
+                <SortableContext
+                  items={miniAppKeys}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className="imb-nav-items imb-nav-sortable-list">
+                    {miniApps.map((app) => (
+                      <NavMiniAppButton
+                        key={app.id}
+                        app={app}
+                        active={
+                          module === "miniapp" && activeMiniAppId === app.id
+                        }
+                        onClick={() => appStore.openMiniApp(app.id)}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            )
           )}
           {openedItems.length > 0 && (
             <>
